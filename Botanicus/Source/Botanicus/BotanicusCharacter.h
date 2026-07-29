@@ -12,6 +12,7 @@ class USkeletalMeshComponent;
 class UCameraComponent;
 class UInputAction;
 class UBotanicusInteractionComponent;
+class UBotanicusQuickBarComponent;
 struct FInputActionValue;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogTemplateCharacter, Log, All);
@@ -34,7 +35,11 @@ class ABotanicusCharacter : public ACharacter
 
 	/** Detects and authoritatively executes gameplay interactions. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta = (AllowPrivateAccess = "true"))
-	UBotanicusInteractionComponent* InteractionComponent;
+	UBotanicusInteractionComponent* BotanicusInteractionComponent;
+
+	/** Eight keyboard-accessible references to Item Data Framework items. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta = (AllowPrivateAccess = "true"))
+	UBotanicusQuickBarComponent* QuickBarComponent;
 
 protected:
 
@@ -97,7 +102,10 @@ public:
 
 	/** Returns the multiplayer-safe interaction component. */
 	UFUNCTION(BlueprintPure, Category="Botanicus|Interaction")
-	UBotanicusInteractionComponent* GetInteractionComponent() const { return InteractionComponent; }
+	UBotanicusInteractionComponent* GetInteractionComponent() const { return BotanicusInteractionComponent; }
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Quick Bar")
+	UBotanicusQuickBarComponent* GetQuickBarComponent() const { return QuickBarComponent; }
 
 };
 

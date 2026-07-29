@@ -11,6 +11,7 @@
 #include "Botanicus.h"
 #include "InputCoreTypes.h"
 #include "Interaction/BotanicusInteractionComponent.h"
+#include "QuickBar/BotanicusQuickBarComponent.h"
 
 ABotanicusCharacter::ABotanicusCharacter()
 {
@@ -35,7 +36,9 @@ ABotanicusCharacter::ABotanicusCharacter()
 	FirstPersonCameraComponent->FirstPersonFieldOfView = 70.0f;
 	FirstPersonCameraComponent->FirstPersonScale = 0.6f;
 
-	InteractionComponent = CreateDefaultSubobject<UBotanicusInteractionComponent>(TEXT("Interaction Component"));
+	BotanicusInteractionComponent = CreateDefaultSubobject<UBotanicusInteractionComponent>(
+		TEXT("Botanicus Interaction Component"));
+	QuickBarComponent = CreateDefaultSubobject<UBotanicusQuickBarComponent>(TEXT("Quick Bar Component"));
 
 	// configure the character comps
 	GetMesh()->SetOwnerNoSee(true);
@@ -72,8 +75,19 @@ void ABotanicusCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInput
 		PlayerInputComponent->BindKey(
 			EKeys::E,
 			IE_Pressed,
-			InteractionComponent,
+			BotanicusInteractionComponent,
 			&UBotanicusInteractionComponent::TryInteract);
+
+		PlayerInputComponent->BindKey(EKeys::One, IE_Pressed, QuickBarComponent, &UBotanicusQuickBarComponent::SelectSlot1);
+		PlayerInputComponent->BindKey(EKeys::Two, IE_Pressed, QuickBarComponent, &UBotanicusQuickBarComponent::SelectSlot2);
+		PlayerInputComponent->BindKey(EKeys::Three, IE_Pressed, QuickBarComponent, &UBotanicusQuickBarComponent::SelectSlot3);
+		PlayerInputComponent->BindKey(EKeys::Four, IE_Pressed, QuickBarComponent, &UBotanicusQuickBarComponent::SelectSlot4);
+		PlayerInputComponent->BindKey(EKeys::Five, IE_Pressed, QuickBarComponent, &UBotanicusQuickBarComponent::SelectSlot5);
+		PlayerInputComponent->BindKey(EKeys::Six, IE_Pressed, QuickBarComponent, &UBotanicusQuickBarComponent::SelectSlot6);
+		PlayerInputComponent->BindKey(EKeys::Seven, IE_Pressed, QuickBarComponent, &UBotanicusQuickBarComponent::SelectSlot7);
+		PlayerInputComponent->BindKey(EKeys::Eight, IE_Pressed, QuickBarComponent, &UBotanicusQuickBarComponent::SelectSlot8);
+		PlayerInputComponent->BindKey(EKeys::MouseScrollUp, IE_Pressed, QuickBarComponent, &UBotanicusQuickBarComponent::SelectPreviousSlot);
+		PlayerInputComponent->BindKey(EKeys::MouseScrollDown, IE_Pressed, QuickBarComponent, &UBotanicusQuickBarComponent::SelectNextSlot);
 	}
 	else
 	{
