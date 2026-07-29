@@ -29,26 +29,6 @@ ASSETS = (
         "BP_BotanicusBuildingGameMode",
         "/Script/Botanicus.BotanicusGameMode",
     ),
-    (
-        "/Game/EasyBuildingSystem/Blueprints/UserInterface/UI_EBS_BuildingMenu",
-        "UI_BotanicusBuildingMenu",
-        "/Script/Botanicus.BotanicusBuildingMenuWidget",
-    ),
-    (
-        "/Game/EasyBuildingSystem/Blueprints/UserInterface/UI_EBS_BuildingMenu_Legacy",
-        "UI_BotanicusBuildingMenuLegacy",
-        "/Script/Botanicus.BotanicusBuildingMenuWidget",
-    ),
-    (
-        "/Game/EasyBuildingSystem/Blueprints/UserInterface/UI_EBS_HUD",
-        "UI_BotanicusHUD",
-        "/Script/Botanicus.BotanicusBuildingMenuWidget",
-    ),
-    (
-        "/Game/EasyBuildingSystem/Blueprints/UserInterface/UI_EBS_HUD_Legacy",
-        "UI_BotanicusHUDLegacy",
-        "/Script/Botanicus.BotanicusBuildingMenuWidget",
-    ),
 )
 
 
@@ -137,13 +117,13 @@ def configure_native_character_defaults(character_class, character_blueprint):
         template_mesh.get_editor_property("anim_class"),
     )
 
-    # EBS owns the gameplay camera and needs to move it for its top-down mode.
-    # Leaving the inherited native camera active prevents V from changing the
-    # visible camera even though EBS correctly enables cursor tracing.
+    # Botanicus exposes only its native first-person camera during character
+    # gameplay. The controller temporarily switches to a dedicated camera only
+    # while the top-down construction state is active.
     character_camera = character_cdo.get_editor_property(
         "first_person_camera_component"
     )
-    character_camera.set_editor_property("auto_activate", False)
+    character_camera.set_editor_property("auto_activate", True)
 
     unreal.BlueprintEditorLibrary.compile_blueprint(character_blueprint)
     if not unreal.EditorAssetLibrary.save_loaded_asset(

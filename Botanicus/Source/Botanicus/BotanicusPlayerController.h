@@ -10,6 +10,7 @@ class UInputMappingContext;
 class UUserWidget;
 class UBotanicusMultiplayerSubsystem;
 class ACameraActor;
+class AActor;
 struct FInputKeyEventArgs;
 
 /**
@@ -51,7 +52,11 @@ public:
 	UFUNCTION(Exec)
 	void BotanicusOnlineStatus();
 
-	/** Toggles the two-state Botanicus building camera. Called by the building-menu button. */
+	/** Development command: validates whole-building grouping on the current map. */
+	UFUNCTION(Exec)
+	void BotanicusTestBuildingGrouping();
+
+	/** Toggles the two-state Botanicus building camera. Bound to the T key. */
 	UFUNCTION(BlueprintCallable, Exec, Category="Botanicus|Building")
 	void ToggleBuildingTopDownView();
 
@@ -84,8 +89,9 @@ protected:
 	/** Gameplay initialization */
 	virtual void BeginPlay() override;
 
-	virtual void PostInitializeComponents() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+	virtual void PlayerTick(float DeltaTime) override;
 
 	/** Input mapping context setup */
 	virtual void SetupInputComponent() override;
@@ -100,10 +106,47 @@ protected:
 
 	void EnterBuildingTopDownView();
 	void ExitBuildingTopDownView();
+	void ForceFirstPersonView();
 	void AdvanceEbsViewMode();
-	void ConfigureEbsBuildingMenuClass();
 	void MoveBuildingCameraForward(float AxisValue);
 	void MoveBuildingCameraRight(float AxisValue);
+	void TrySelectBuildingGroup();
+	void ConfirmBuildingGroupMove();
+	void CancelBuildingGroupMove();
+	void RotateBuildingGroup(float Direction);
+	void UpdateBuildingGroupPreview(float DeltaTime);
+	void SetBuildingGroupHighlighted(bool bHighlighted);
+	bool TraceTopDownCursor(FHitResult& OutHit) const;
+	bool FindLandscapeHeight(const FVector2D& WorldXY, float& OutHeight) const;
+
+	UFUNCTION(Server, Reliable)
+	void ServerBeginBuildingGroupMove(AActor* HitActor);
+
+	UFUNCTION(Server, Unreliable)
+	void ServerUpdateBuildingGroupMove(FVector_NetQuantize10 NewPivotLocation, float NewYaw);
+
+	UFUNCTION(Server, Reliable)
+	void ServerConfirmBuildingGroupMove();
+
+	UFUNCTION(Server, Reliable)
+	void ServerCancelBuildingGroupMove();
+
+	UFUNCTION(Client, Reliable)
+	void ClientBeginBuildingGroupMove(
+		const TArray<AActor*>& GroupActors,
+		FVector_NetQuantize10 GroupPivot,
+		float InitialYaw);
+
+	UFUNCTION(Client, Reliable)
+	void ClientEndBuildingGroupMove(bool bConfirmed);
+
+	TArray<AActor*> BuildCompleteBuildingGroup(AActor* HitActor) const;
+	bool IsEbsBuildingActor(const AActor* Actor) const;
+	bool IsStructuralBuildingActor(const AActor* Actor) const;
+	bool IsBuildingOwnedByThisPlayer(AActor* Actor) const;
+	FVector CalculateBuildingGroupPivot(const TArray<AActor*>& GroupActors) const;
+	void ApplyServerBuildingGroupTransform(const FVector& NewPivot, float NewYaw);
+	void ClearServerBuildingGroupMove();
 
 	UPROPERTY(Transient)
 	TObjectPtr<ACameraActor> BuildingCameraActor;
@@ -117,5 +160,30 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="0.0"))
 	float BuildingCameraBlendTime = 0.25f;
 
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Editing", meta=(ClampMin="1.0"))
+	float BuildingRotationStep = 15.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Editing", meta=(ClampMin="1.0"))
+	float BuildingPreviewUpdatesPerSecond = 20.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Editing", meta=(ClampMin="1000.0"))
+	float MaximumBuildingEditDistance = 30000.0f;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<AActor>> LocalBuildingGroup;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<AActor>> ServerBuildingGroup;
+
+	TArray<FTransform> LocalBuildingOriginalTransforms;
+	TArray<FTransform> ServerBuildingOriginalTransforms;
+	FVector LocalBuildingPivot = FVector::ZeroVector;
+	FVector LocalBuildingOriginalPivot = FVector::ZeroVector;
+	FVector ServerBuildingOriginalPivot = FVector::ZeroVector;
+	float LocalBuildingYaw = 0.0f;
+	float ServerBuildingInitialYaw = 0.0f;
+	float LocalBuildingGroundOffset = 0.0f;
+	float ServerBuildingGroundOffset = 0.0f;
+	float BuildingPreviewUpdateAccumulator = 0.0f;
 	bool bBuildingTopDownViewActive = false;
 };

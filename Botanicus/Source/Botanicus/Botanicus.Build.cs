@@ -20,9 +20,9 @@ public class Botanicus : ModuleRules
 			"AIModule",
 			"StateTreeModule",
 			"GameplayStateTreeModule",
+			"Landscape",
 			"UMG",
-			"Slate",
-			"SlateCore"
+			"Slate"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });

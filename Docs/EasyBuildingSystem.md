@@ -56,29 +56,46 @@ compilable:
 Controls confirmed during the first in-editor test:
 
 - `Q`: open/close the building menu;
-- `T`: switch between radial and square building menus;
+- `T`: toggle between first-person gameplay and the top-down building view;
 - `1`, `2`, `3`: change tool/building mode;
 - mouse wheel: rotate the preview;
-- the yellow building-menu button: toggle the Botanicus top-down building view;
 - `E`: confirm/place a valid green preview;
 - left mouse button: damage trace;
 - right mouse button: mallet interaction.
 
 The original EBS `V` binding is disabled. It cycled through first person,
 top-down and third person, while Botanicus intentionally supports only first
-person and top-down construction.
+person and top-down construction. The original `T` radial/square-menu shortcut
+is also replaced by the Botanicus camera toggle.
+
+During normal gameplay, the native Botanicus first-person camera is forced and
+all inherited third-person cameras are disabled.
 
 In Botanicus top-down mode:
 
 - the character cannot move or rotate;
 - `W`, `A`, `S`, `D` pan the camera freely on the world X/Y axes;
 - the mouse remains available for cursor-based construction;
-- pressing the same yellow button returns directly to first person;
+- left-clicking a structural piece selects its complete connected building;
+- clicking furniture selects the containing building and never the furniture
+  alone;
+- the selected group includes connected foundations, walls, ceilings, roofs
+  and all EBS contents located inside the resulting building volume;
+- moving the mouse changes only the building's world X/Y position;
+- its Z position is sampled directly from the Landscape so the complete group
+  follows the terrain relief instead of colliding with roofs, trees or foliage;
+- the original foundation-to-ground offset is preserved while moving;
+- the mouse wheel rotates the complete group in 15-degree steps;
+- left click or `E` confirms the new transform;
+- right click or `Escape` cancels and restores every actor to its original
+  transform;
+- pressing `T` returns directly to first person;
 - third person is not exposed as a playable camera state.
 
-The yellow button is a functional placeholder injected into both EBS HUD
-variants. Its final size, icon, typography and placement can be redesigned in
-the Botanicus UI without changing the camera code.
+Whole-building transformations are requested by the owning client, applied by
+the server and replicated actor by actor. EBS ownership is checked when the
+source building enables its ownership interface. Demonstration buildings that
+do not use ownership remain editable for prototype testing.
 
 The EBS player controller also contains direct key events for `Tab`, `C`, `G`,
 `Z`, `Left Shift`, right mouse button, `Page Up`, `Page Down`, numpad `1` and
