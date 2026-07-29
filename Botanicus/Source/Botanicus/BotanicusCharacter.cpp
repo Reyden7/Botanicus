@@ -9,6 +9,8 @@
 #include "InputActionValue.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Botanicus.h"
+#include "InputCoreTypes.h"
+#include "Interaction/BotanicusInteractionComponent.h"
 
 ABotanicusCharacter::ABotanicusCharacter()
 {
@@ -32,6 +34,8 @@ ABotanicusCharacter::ABotanicusCharacter()
 	FirstPersonCameraComponent->bEnableFirstPersonScale = true;
 	FirstPersonCameraComponent->FirstPersonFieldOfView = 70.0f;
 	FirstPersonCameraComponent->FirstPersonScale = 0.6f;
+
+	InteractionComponent = CreateDefaultSubobject<UBotanicusInteractionComponent>(TEXT("Interaction Component"));
 
 	// configure the character comps
 	GetMesh()->SetOwnerNoSee(true);
@@ -59,6 +63,17 @@ void ABotanicusCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInput
 		// Looking/Aiming
 		EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &ABotanicusCharacter::LookInput);
 		EnhancedInputComponent->BindAction(MouseLookAction, ETriggerEvent::Triggered, this, &ABotanicusCharacter::LookInput);
+
+		// Botanicus is keyboard/mouse only. Binding E directly keeps the C++ foundation
+		// usable before a dedicated Enhanced Input asset is authored in the editor.
+		// UE 5.8 intentionally hides legacy key binding on UEnhancedInputComponent.
+		// Binding through its UInputComponent base keeps this bootstrap key available
+		// without requiring a binary Input Action asset.
+		PlayerInputComponent->BindKey(
+			EKeys::E,
+			IE_Pressed,
+			InteractionComponent,
+			&UBotanicusInteractionComponent::TryInteract);
 	}
 	else
 	{
