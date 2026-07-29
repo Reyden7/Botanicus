@@ -24,13 +24,7 @@ public class Botanicus : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[] { });
 
 		PublicIncludePaths.AddRange(new string[] {
-			"Botanicus",
-			"Botanicus/Variant_Horror",
-			"Botanicus/Variant_Horror/UI",
-			"Botanicus/Variant_Shooter",
-			"Botanicus/Variant_Shooter/AI",
-			"Botanicus/Variant_Shooter/UI",
-			"Botanicus/Variant_Shooter/Weapons"
+			"Botanicus"
 		});
 
 		// Uncomment if you are using Slate UI
