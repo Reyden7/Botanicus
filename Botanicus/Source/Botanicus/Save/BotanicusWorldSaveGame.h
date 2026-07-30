@@ -52,6 +52,24 @@ struct BOTANICUS_API FBotanicusSavedPath
 	TArray<FVector_NetQuantize10> JunctionPoints;
 };
 
+USTRUCT()
+struct BOTANICUS_API FBotanicusSavedWorldItem
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	FSoftClassPath ActorClass;
+
+	UPROPERTY()
+	FTransform Transform = FTransform::Identity;
+
+	UPROPERTY()
+	FName ItemKey = NAME_None;
+
+	UPROPERTY()
+	int32 Quantity = 1;
+};
+
 /** Server-owned persistent state for one Botanicus map. */
 UCLASS()
 class BOTANICUS_API UBotanicusWorldSaveGame : public USaveGame
@@ -60,7 +78,7 @@ class BOTANICUS_API UBotanicusWorldSaveGame : public USaveGame
 
 public:
 	UPROPERTY()
-	int32 SaveVersion = 2;
+	int32 SaveVersion = 3;
 
 	UPROPERTY()
 	FString MapName;
@@ -79,4 +97,7 @@ public:
 
 	UPROPERTY()
 	TArray<FBotanicusSavedPath> Paths;
+
+	UPROPERTY()
+	TArray<FBotanicusSavedWorldItem> WorldItems;
 };

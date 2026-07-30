@@ -26,6 +26,9 @@
 #include "Botanicus.h"
 #include "BotanicusGameMode.h"
 #include "Building/BotanicusCommunicationDoorActor.h"
+#include "Delivery/BotanicusDeliveryParcelActor.h"
+#include "Delivery/BotanicusDeliveryZoneActor.h"
+#include "Delivery/BotanicusLargeEquipmentActor.h"
 #include "Online/BotanicusMultiplayerSubsystem.h"
 #include "Path/BotanicusPathActor.h"
 #include "Ping/BotanicusPingMarker.h"
@@ -367,6 +370,27 @@ void ABotanicusPlayerController::PlayerTick(float DeltaTime)
 				RefreshTopDownRoofVisibility();
 			}
 		}
+
+		const float AzertyForward =
+			(bAzertyForwardPressed ? 1.0f : 0.0f) -
+			(bAzertyBackwardPressed ? 1.0f : 0.0f);
+		const float AzertyRight =
+			(bAzertyRightPressed ? 1.0f : 0.0f) -
+			(bAzertyLeftPressed ? 1.0f : 0.0f);
+		if (bBuildingTopDownViewActive)
+		{
+			MoveBuildingCameraForward(AzertyForward);
+			MoveBuildingCameraRight(AzertyRight);
+		}
+		else if (APawn* ControlledPawn = GetPawn())
+		{
+			ControlledPawn->AddMovementInput(
+				ControlledPawn->GetActorForwardVector(),
+				AzertyForward);
+			ControlledPawn->AddMovementInput(
+				ControlledPawn->GetActorRightVector(),
+				AzertyRight);
+		}
 	}
 
 	UpdateBuildingGroupPreview(DeltaTime);
@@ -413,6 +437,41 @@ void ABotanicusPlayerController::SetupInputComponent()
 
 bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 {
+	if (Params.Key == EKeys::Z ||
+		Params.Key == EKeys::S ||
+		Params.Key == EKeys::Q ||
+		Params.Key == EKeys::D)
+	{
+		const bool bPressed =
+			Params.Event == IE_Pressed ||
+			Params.Event == IE_Repeat;
+		const bool bReleased = Params.Event == IE_Released;
+		if (bPressed || bReleased)
+		{
+			const bool bNewState = bPressed;
+			if (Params.Key == EKeys::Z)
+			{
+				bAzertyForwardPressed = bNewState;
+			}
+			else if (Params.Key == EKeys::S)
+			{
+				bAzertyBackwardPressed = bNewState;
+			}
+			else if (Params.Key == EKeys::Q)
+			{
+				bAzertyLeftPressed = bNewState;
+			}
+			else
+			{
+				bAzertyRightPressed = bNewState;
+			}
+		}
+
+		// Consume these physical keys before EBS or the QWERTY Enhanced Input
+		// context can reinterpret Q/Z as gameplay shortcuts.
+		return true;
+	}
+
 	// EBS binds V directly and cycles first person -> top down -> third person.
 	// Botanicus never exposes that three-state cycle.
 	if (Params.Key == EKeys::V)
@@ -423,10 +482,8 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 	// Botanicus uses complete purchased buildings. EBS' modular survival
 	// construction, snapping, grid, debug and demo save/load shortcuts are
 	// deliberately unavailable to players.
-	if (Params.Key == EKeys::Q ||
-		Params.Key == EKeys::C ||
+	if (Params.Key == EKeys::C ||
 		Params.Key == EKeys::G ||
-		Params.Key == EKeys::Z ||
 		Params.Key == EKeys::Tab ||
 		Params.Key == EKeys::PageUp ||
 		Params.Key == EKeys::PageDown ||
@@ -450,6 +507,15 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 			ToggleBuildingTopDownView();
 		}
 
+		return true;
+	}
+
+	if (Params.Key == EKeys::E &&
+		Params.Event == IE_Pressed &&
+		!bBuildingTopDownViewActive &&
+		(TryHandleNearbyLargeEquipment() ||
+		 TryCollectNearbyDeliveryParcel()))
+	{
 		return true;
 	}
 
@@ -1165,6 +1231,145 @@ void ABotanicusPlayerController::PurchaseTestBuilding()
 		CancelBuildingGroupMove();
 	}
 	ServerPurchaseTestBuilding();
+}
+
+void ABotanicusPlayerController::OrderTestDelivery()
+{
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+
+	ServerOrderTestDelivery();
+}
+
+void ABotanicusPlayerController::OrderTestLargeEquipment()
+{
+	if (IsLocalPlayerController())
+	{
+		ServerOrderTestLargeEquipment();
+	}
+}
+
+bool ABotanicusPlayerController::TryHandleNearbyLargeEquipment()
+{
+	if (!IsLocalPlayerController() || !GetPawn() || !GetWorld())
+	{
+		return false;
+	}
+
+	ABotanicusLargeEquipmentActor* NearestEquipment = nullptr;
+	float BestDistanceSquared = FMath::Square(450.0f);
+	for (TActorIterator<ABotanicusLargeEquipmentActor> EquipmentIt(
+			 GetWorld());
+		 EquipmentIt;
+		 ++EquipmentIt)
+	{
+		if (EquipmentIt->GetCarrier() == GetPawn())
+		{
+			ServerToggleCarryLargeEquipment(*EquipmentIt);
+			return true;
+		}
+
+		if (IsValid(EquipmentIt->GetCarrier()))
+		{
+			continue;
+		}
+
+		const float DistanceSquared = FVector::DistSquared(
+			GetPawn()->GetActorLocation(),
+			EquipmentIt->GetActorLocation());
+		if (DistanceSquared <= BestDistanceSquared &&
+			IsLookingAtWorldItem(*EquipmentIt, 450.0f))
+		{
+			BestDistanceSquared = DistanceSquared;
+			NearestEquipment = *EquipmentIt;
+		}
+	}
+
+	if (!NearestEquipment)
+	{
+		return false;
+	}
+
+	ServerToggleCarryLargeEquipment(NearestEquipment);
+	return true;
+}
+
+bool ABotanicusPlayerController::TryCollectNearbyDeliveryParcel()
+{
+	if (!IsLocalPlayerController() || !GetPawn() || !GetWorld())
+	{
+		return false;
+	}
+
+	ABotanicusDeliveryParcelActor* NearestParcel = nullptr;
+	float BestDistanceSquared = FMath::Square(400.0f);
+	for (TActorIterator<ABotanicusDeliveryParcelActor> ParcelIt(
+			 GetWorld());
+		 ParcelIt;
+		 ++ParcelIt)
+	{
+		const float DistanceSquared = FVector::DistSquared(
+			GetPawn()->GetActorLocation(),
+			ParcelIt->GetActorLocation());
+		if (DistanceSquared <= BestDistanceSquared &&
+			IsLookingAtWorldItem(*ParcelIt, 400.0f))
+		{
+			BestDistanceSquared = DistanceSquared;
+			NearestParcel = *ParcelIt;
+		}
+	}
+
+	if (!NearestParcel)
+	{
+		return false;
+	}
+
+	ServerCollectDeliveryParcel(NearestParcel);
+	return true;
+}
+
+bool ABotanicusPlayerController::IsLookingAtWorldItem(
+	const AActor* Item,
+	float MaximumDistance) const
+{
+	if (!IsValid(Item) || !GetWorld())
+	{
+		return false;
+	}
+
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	GetPlayerViewPoint(ViewLocation, ViewRotation);
+
+	FVector TargetOrigin;
+	FVector TargetExtent;
+	Item->GetActorBounds(true, TargetOrigin, TargetExtent);
+	const FVector ToTarget = TargetOrigin - ViewLocation;
+	const float Distance = ToTarget.Size();
+	if (Distance <= KINDA_SMALL_NUMBER ||
+		Distance > MaximumDistance ||
+		FVector::DotProduct(
+			ViewRotation.Vector(),
+			ToTarget / Distance) <
+			FMath::Cos(FMath::DegreesToRadians(WorldItemLookAngle)))
+	{
+		return false;
+	}
+
+	FCollisionQueryParams QueryParams(
+		SCENE_QUERY_STAT(BotanicusWorldItemLook),
+		false);
+	QueryParams.AddIgnoredActor(GetPawn());
+	FHitResult VisibilityHit;
+	return GetWorld()->LineTraceSingleByChannel(
+			VisibilityHit,
+			ViewLocation,
+			TargetOrigin,
+			ECC_Visibility,
+			QueryParams) &&
+		VisibilityHit.GetActor() == Item;
 }
 
 void ABotanicusPlayerController::TryDeletePathSegmentAtCursor()
@@ -2133,6 +2338,230 @@ void ABotanicusPlayerController::ServerPurchaseTestBuilding_Implementation()
 			"Server spawned purchased building group with %d replicated actors for %s."),
 		PurchasedGroup.Num(),
 		PlayerState ? *PlayerState->GetPlayerName() : TEXT("UnknownPlayer"));
+}
+
+void ABotanicusPlayerController::ServerOrderTestDelivery_Implementation()
+{
+	UWorld* World = GetWorld();
+	APawn* ControlledPawn = GetPawn();
+	if (!World || !ControlledPawn)
+	{
+		return;
+	}
+
+	ABotanicusDeliveryZoneActor* DeliveryZone = nullptr;
+	float BestDistanceSquared = TNumericLimits<float>::Max();
+	for (TActorIterator<ABotanicusDeliveryZoneActor> ZoneIt(World);
+		 ZoneIt;
+		 ++ZoneIt)
+	{
+		const float DistanceSquared = FVector::DistSquared2D(
+			ControlledPawn->GetActorLocation(),
+			ZoneIt->GetActorLocation());
+		if (DistanceSquared < BestDistanceSquared)
+		{
+			BestDistanceSquared = DistanceSquared;
+			DeliveryZone = *ZoneIt;
+		}
+	}
+
+	if (!DeliveryZone)
+	{
+		FVector ZoneLocation =
+			ControlledPawn->GetActorLocation() +
+			ControlledPawn->GetActorForwardVector() * 600.0f;
+		float GroundHeight = ZoneLocation.Z;
+		if (FindLandscapeHeight(
+				FVector2D(ZoneLocation.X, ZoneLocation.Y),
+				GroundHeight))
+		{
+			ZoneLocation.Z = GroundHeight;
+		}
+
+		FActorSpawnParameters ZoneSpawnParameters;
+		ZoneSpawnParameters.SpawnCollisionHandlingOverride =
+			ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+		DeliveryZone =
+			World->SpawnActor<ABotanicusDeliveryZoneActor>(
+				ZoneLocation,
+				FRotator::ZeroRotator,
+				ZoneSpawnParameters);
+	}
+
+	if (!DeliveryZone)
+	{
+		ClientMessage(TEXT("Impossible de créer la zone de livraison."));
+		return;
+	}
+
+	int32 ParcelIndex = 0;
+	for (TActorIterator<ABotanicusDeliveryParcelActor> ParcelIt(World);
+		 ParcelIt;
+		 ++ParcelIt)
+	{
+		if (FVector::DistSquared2D(
+				ParcelIt->GetActorLocation(),
+				DeliveryZone->GetActorLocation()) <
+			FMath::Square(600.0f))
+		{
+			++ParcelIndex;
+		}
+	}
+
+	FActorSpawnParameters ParcelSpawnParameters;
+	ParcelSpawnParameters.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+	ABotanicusDeliveryParcelActor* Parcel =
+		World->SpawnActor<ABotanicusDeliveryParcelActor>(
+			DeliveryZone->GetParcelSpawnLocation(ParcelIndex),
+			FRotator::ZeroRotator,
+			ParcelSpawnParameters);
+	if (!Parcel)
+	{
+		ClientMessage(TEXT("La commande n'a pas pu être livrée."));
+		return;
+	}
+
+	Parcel->InitializeParcel(TEXT("SeedPacket_Test"), 1);
+	ClientMessage(
+		TEXT(
+			"Commande livrée : quittez la vue top-down et récupérez le colis avec E."));
+}
+
+void ABotanicusPlayerController::
+	ServerOrderTestLargeEquipment_Implementation()
+{
+	UWorld* World = GetWorld();
+	APawn* ControlledPawn = GetPawn();
+	if (!World || !ControlledPawn)
+	{
+		return;
+	}
+
+	ABotanicusDeliveryZoneActor* DeliveryZone = nullptr;
+	float BestDistanceSquared = TNumericLimits<float>::Max();
+	for (TActorIterator<ABotanicusDeliveryZoneActor> ZoneIt(World);
+		 ZoneIt;
+		 ++ZoneIt)
+	{
+		const float DistanceSquared = FVector::DistSquared2D(
+			ControlledPawn->GetActorLocation(),
+			ZoneIt->GetActorLocation());
+		if (DistanceSquared < BestDistanceSquared)
+		{
+			BestDistanceSquared = DistanceSquared;
+			DeliveryZone = *ZoneIt;
+		}
+	}
+
+	if (!DeliveryZone)
+	{
+		FVector ZoneLocation =
+			ControlledPawn->GetActorLocation() +
+			ControlledPawn->GetActorForwardVector() * 600.0f;
+		float GroundHeight = ZoneLocation.Z;
+		if (FindLandscapeHeight(
+				FVector2D(ZoneLocation.X, ZoneLocation.Y),
+				GroundHeight))
+		{
+			ZoneLocation.Z = GroundHeight;
+		}
+
+		FActorSpawnParameters ZoneSpawnParameters;
+		ZoneSpawnParameters.SpawnCollisionHandlingOverride =
+			ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+		DeliveryZone =
+			World->SpawnActor<ABotanicusDeliveryZoneActor>(
+				ZoneLocation,
+				FRotator::ZeroRotator,
+				ZoneSpawnParameters);
+	}
+
+	if (!DeliveryZone)
+	{
+		ClientMessage(TEXT("Impossible de creer la zone de livraison."));
+		return;
+	}
+
+	int32 EquipmentIndex = 0;
+	for (TActorIterator<ABotanicusLargeEquipmentActor> EquipmentIt(
+			 World);
+		 EquipmentIt;
+		 ++EquipmentIt)
+	{
+		if (!IsValid(EquipmentIt->GetCarrier()) &&
+			FVector::DistSquared2D(
+				EquipmentIt->GetActorLocation(),
+				DeliveryZone->GetActorLocation()) <
+				FMath::Square(700.0f))
+		{
+			++EquipmentIndex;
+		}
+	}
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+	ABotanicusLargeEquipmentActor* Equipment =
+		World->SpawnActor<ABotanicusLargeEquipmentActor>(
+			DeliveryZone->GetParcelSpawnLocation(EquipmentIndex) +
+				FVector(0.0f, 0.0f, 35.0f),
+			FRotator::ZeroRotator,
+			SpawnParameters);
+	if (!Equipment)
+	{
+		ClientMessage(TEXT("Le gros equipement n'a pas pu etre livre."));
+		return;
+	}
+
+	ClientMessage(
+		TEXT(
+			"Gros equipement livre : E pour porter, puis E pour deposer."));
+}
+
+void ABotanicusPlayerController::
+	ServerToggleCarryLargeEquipment_Implementation(
+		ABotanicusLargeEquipmentActor* Equipment)
+{
+	APawn* ControlledPawn = GetPawn();
+	if (!IsValid(Equipment) || !ControlledPawn)
+	{
+		return;
+	}
+
+	const bool bAlreadyCarried =
+		Equipment->GetCarrier() == ControlledPawn;
+	if (!bAlreadyCarried &&
+		!IsLookingAtWorldItem(Equipment, 500.0f))
+	{
+		ClientMessage(
+			TEXT(
+				"Regardez l'equipement et rapprochez-vous pour le porter."));
+		return;
+	}
+
+	IBotanicusInteractable::Execute_Interact(
+		Equipment,
+		ControlledPawn);
+}
+
+void ABotanicusPlayerController::
+	ServerCollectDeliveryParcel_Implementation(
+		ABotanicusDeliveryParcelActor* Parcel)
+{
+	APawn* ControlledPawn = GetPawn();
+	if (!IsValid(Parcel) || !ControlledPawn ||
+		!IsLookingAtWorldItem(Parcel, 450.0f))
+	{
+		ClientMessage(
+			TEXT(
+				"Regardez le colis et rapprochez-vous pour le prendre."));
+		return;
+	}
+
+	IBotanicusInteractable::Execute_Interact(
+		Parcel,
+		ControlledPawn);
 }
 
 void ABotanicusPlayerController::

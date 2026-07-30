@@ -17,6 +17,12 @@ ABotanicusCharacter::ABotanicusCharacter()
 {
 	// Set size for collision capsule
 	GetCapsuleComponent()->InitCapsuleSize(55.f, 96.0f);
+
+	// True-FPS rotation model: mouse yaw rotates the complete character while
+	// mouse pitch remains a view/head movement instead of tilting the capsule.
+	bUseControllerRotationYaw = true;
+	bUseControllerRotationPitch = false;
+	bUseControllerRotationRoll = false;
 	
 	// Create the first person mesh that will be viewed only by this character's owner
 	FirstPersonMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("First Person Mesh"));
@@ -28,7 +34,7 @@ ABotanicusCharacter::ABotanicusCharacter()
 
 	// Create the Camera Component	
 	FirstPersonCameraComponent = CreateDefaultSubobject<UCameraComponent>(TEXT("First Person Camera"));
-	FirstPersonCameraComponent->SetupAttachment(FirstPersonMesh, FName("head"));
+	FirstPersonCameraComponent->SetupAttachment(GetMesh(), FName("head"));
 	FirstPersonCameraComponent->SetRelativeLocationAndRotation(FVector(-2.8f, 5.89f, 0.0f), FRotator(0.0f, 90.0f, -90.0f));
 	FirstPersonCameraComponent->bUsePawnControlRotation = true;
 	FirstPersonCameraComponent->bEnableFirstPersonFieldOfView = true;
@@ -41,7 +47,9 @@ ABotanicusCharacter::ABotanicusCharacter()
 	QuickBarComponent = CreateDefaultSubobject<UBotanicusQuickBarComponent>(TEXT("Quick Bar Component"));
 
 	// configure the character comps
-	GetMesh()->SetOwnerNoSee(true);
+	// The owner sees the world-space body in true first person. The local head
+	// is hidden in BeginPlay to keep the camera out of the skull.
+	GetMesh()->SetOwnerNoSee(false);
 	GetMesh()->FirstPersonPrimitiveType = EFirstPersonPrimitiveType::WorldSpaceRepresentation;
 
 	GetCapsuleComponent()->SetCapsuleSize(34.0f, 96.0f);
@@ -49,11 +57,15 @@ ABotanicusCharacter::ABotanicusCharacter()
 	// Configure character movement
 	GetCharacterMovement()->BrakingDecelerationFalling = 1500.0f;
 	GetCharacterMovement()->AirControl = 0.5f;
+	GetCharacterMovement()->bOrientRotationToMovement = false;
+	GetCharacterMovement()->bUseControllerDesiredRotation = false;
 }
 
 void ABotanicusCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+
+	ConfigureTrueFirstPersonLocalView();
 
 #if WITH_EDITOR
 	// Prototype-only bootstrap: PIE players receive one distinct test packet.
@@ -76,6 +88,85 @@ void ABotanicusCharacter::BeginPlay()
 		}
 	}
 #endif
+}
+
+void ABotanicusCharacter::PawnClientRestart()
+{
+	Super::PawnClientRestart();
+	ConfigureTrueFirstPersonLocalView();
+}
+
+void ABotanicusCharacter::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+
+	// Blueprint defaults and EBS camera changes can overwrite inherited C++
+	// component settings. Enforce the true-FPS contract at runtime.
+	bUseControllerRotationYaw = true;
+	bUseControllerRotationPitch = false;
+	bUseControllerRotationRoll = false;
+	GetCharacterMovement()->bOrientRotationToMovement = false;
+	GetCharacterMovement()->bUseControllerDesiredRotation = false;
+
+	if (AController* CharacterController = GetController())
+	{
+		const float ControlYaw =
+			CharacterController->GetControlRotation().Yaw;
+		SetActorRotation(FRotator(0.0f, ControlYaw, 0.0f));
+	}
+
+	if (GetMesh()->bOwnerNoSee ||
+		FirstPersonMesh->IsVisible() ||
+		!FirstPersonCameraComponent->bUsePawnControlRotation)
+	{
+		ConfigureTrueFirstPersonLocalView();
+	}
+}
+
+void ABotanicusCharacter::ConfigureTrueFirstPersonLocalView()
+{
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+
+	// Use the full third-person body for the owner and retain the existing
+	// animated head socket as the camera anchor. Only the local rendering
+	// hides the head; other players still see the complete character.
+	bUseControllerRotationYaw = true;
+	bUseControllerRotationPitch = false;
+	bUseControllerRotationRoll = false;
+	GetCharacterMovement()->bOrientRotationToMovement = false;
+	GetCharacterMovement()->bUseControllerDesiredRotation = false;
+	GetMesh()->SetOwnerNoSee(false);
+	GetMesh()->HideBoneByName(TEXT("head"), PBO_None);
+	FirstPersonMesh->SetVisibility(false, false);
+	FirstPersonCameraComponent->AttachToComponent(
+		GetMesh(),
+		FAttachmentTransformRules::KeepRelativeTransform,
+		TEXT("head"));
+	FirstPersonCameraComponent->SetRelativeLocationAndRotation(
+		FVector(-2.8f, 5.89f, 0.0f),
+		FRotator(0.0f, 90.0f, -90.0f));
+	FirstPersonCameraComponent->bUsePawnControlRotation = true;
+	FirstPersonCameraComponent->Activate(true);
+
+	if (!bTrueFirstPersonConfigured)
+	{
+		bTrueFirstPersonConfigured = true;
+		UE_LOG(
+			LogBotanicus,
+			Display,
+			TEXT(
+				"True FPS enforced on runtime pawn %s (class %s)."),
+			*GetName(),
+			*GetClass()->GetPathName());
+	}
 }
 
 void ABotanicusCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)

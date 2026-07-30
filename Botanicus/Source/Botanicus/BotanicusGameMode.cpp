@@ -6,6 +6,8 @@
 #include "BotanicusCharacter.h"
 #include "BotanicusPlayerController.h"
 #include "Building/BotanicusCommunicationDoorActor.h"
+#include "Delivery/BotanicusDeliveryParcelActor.h"
+#include "Delivery/BotanicusLargeEquipmentActor.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
@@ -120,9 +122,10 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 
 	CurrentSaveGame->MapName =
 		UGameplayStatics::GetCurrentLevelName(this, true);
-	CurrentSaveGame->SaveVersion = 2;
+	CurrentSaveGame->SaveVersion = 3;
 	CurrentSaveGame->BuildingActors.Reset();
 	CurrentSaveGame->Paths.Reset();
+	CurrentSaveGame->WorldItems.Reset();
 	CurrentSaveGame->RemovedBuildingActorNames =
 		RemovedBuildingActorNames.Array();
 	CurrentSaveGame->CommunicationDoors.Reset();
@@ -184,6 +187,40 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 			DoorIt->GetActorTransform());
 	}
 
+	for (TActorIterator<ABotanicusDeliveryParcelActor> ParcelIt(World);
+		 ParcelIt;
+		 ++ParcelIt)
+	{
+		if (!IsValid(*ParcelIt) || ParcelIt->IsActorBeingDestroyed())
+		{
+			continue;
+		}
+
+		FBotanicusSavedWorldItem& SavedItem =
+			CurrentSaveGame->WorldItems.AddDefaulted_GetRef();
+		SavedItem.ActorClass = FSoftClassPath(ParcelIt->GetClass());
+		SavedItem.Transform = ParcelIt->GetActorTransform();
+		SavedItem.ItemKey = ParcelIt->GetItemKey();
+		SavedItem.Quantity = ParcelIt->GetQuantity();
+	}
+
+	for (TActorIterator<ABotanicusLargeEquipmentActor> EquipmentIt(World);
+		 EquipmentIt;
+		 ++EquipmentIt)
+	{
+		if (!IsValid(*EquipmentIt) ||
+			EquipmentIt->IsActorBeingDestroyed())
+		{
+			continue;
+		}
+
+		FBotanicusSavedWorldItem& SavedItem =
+			CurrentSaveGame->WorldItems.AddDefaulted_GetRef();
+		SavedItem.ActorClass = FSoftClassPath(EquipmentIt->GetClass());
+		SavedItem.Transform = EquipmentIt->GetActorTransform();
+		SavedItem.Quantity = 1;
+	}
+
 	for (FConstPlayerControllerIterator ControllerIt =
 			 World->GetPlayerControllerIterator();
 		 ControllerIt;
@@ -200,11 +237,12 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		UE_LOG(
 			LogBotanicus,
 			Display,
-			TEXT("Botanicus autosave completed: slot '%s', %d building actors, %d player inventories, %d paths."),
+			TEXT("Botanicus autosave completed: slot '%s', %d building actors, %d player inventories, %d paths, %d world items."),
 			*SlotName,
 			CurrentSaveGame->BuildingActors.Num(),
 			CurrentSaveGame->PlayerInventories.Num(),
-			CurrentSaveGame->Paths.Num());
+			CurrentSaveGame->Paths.Num(),
+			CurrentSaveGame->WorldItems.Num());
 	}
 	else
 	{
@@ -273,11 +311,12 @@ void ABotanicusGameMode::LoadAutosave()
 	UE_LOG(
 		LogBotanicus,
 		Display,
-		TEXT("Loaded Botanicus autosave '%s': %d building actors, %d player inventories, %d paths."),
+		TEXT("Loaded Botanicus autosave '%s': %d building actors, %d player inventories, %d paths, %d world items."),
 		*SlotName,
 		CurrentSaveGame->BuildingActors.Num(),
 		CurrentSaveGame->PlayerInventories.Num(),
-		CurrentSaveGame->Paths.Num());
+		CurrentSaveGame->Paths.Num(),
+		CurrentSaveGame->WorldItems.Num());
 }
 
 void ABotanicusGameMode::RestoreWorldState()
@@ -441,6 +480,80 @@ void ABotanicusGameMode::RestoreWorldState()
 		TEXT("Restored %d/%d saved paths."),
 		RestoredPathCount,
 		CurrentSaveGame->Paths.Num());
+
+	TArray<AActor*> ExistingWorldItems;
+	for (TActorIterator<ABotanicusDeliveryParcelActor> ParcelIt(World);
+		 ParcelIt;
+		 ++ParcelIt)
+	{
+		ExistingWorldItems.Add(*ParcelIt);
+	}
+	for (TActorIterator<ABotanicusLargeEquipmentActor> EquipmentIt(World);
+		 EquipmentIt;
+		 ++EquipmentIt)
+	{
+		ExistingWorldItems.Add(*EquipmentIt);
+	}
+	for (AActor* ExistingWorldItem : ExistingWorldItems)
+	{
+		if (IsValid(ExistingWorldItem))
+		{
+			ExistingWorldItem->Destroy();
+		}
+	}
+
+	int32 RestoredWorldItemCount = 0;
+	for (const FBotanicusSavedWorldItem& SavedItem :
+		 CurrentSaveGame->WorldItems)
+	{
+		if (SavedItem.ActorClass.IsNull())
+		{
+			continue;
+		}
+
+		UClass* ItemClass = SavedItem.ActorClass.TryLoadClass<AActor>();
+		if (!ItemClass ||
+			(!ItemClass->IsChildOf(
+				 ABotanicusDeliveryParcelActor::StaticClass()) &&
+			 !ItemClass->IsChildOf(
+				 ABotanicusLargeEquipmentActor::StaticClass())))
+		{
+			continue;
+		}
+
+		FActorSpawnParameters SpawnParameters;
+		SpawnParameters.SpawnCollisionHandlingOverride =
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		AActor* RestoredItem = World->SpawnActor<AActor>(
+			ItemClass,
+			SavedItem.Transform,
+			SpawnParameters);
+		if (!RestoredItem)
+		{
+			continue;
+		}
+
+		if (ABotanicusDeliveryParcelActor* Parcel =
+			Cast<ABotanicusDeliveryParcelActor>(RestoredItem))
+		{
+			Parcel->InitializeParcel(
+				SavedItem.ItemKey,
+				SavedItem.Quantity);
+		}
+
+		RestoredItem->SetOwner(nullptr);
+		RestoredItem->SetNetDormancy(DORM_Awake);
+		RestoredItem->FlushNetDormancy();
+		RestoredItem->ForceNetUpdate();
+		++RestoredWorldItemCount;
+	}
+
+	UE_LOG(
+		LogBotanicus,
+		Display,
+		TEXT("Restored %d/%d saved world items."),
+		RestoredWorldItemCount,
+		CurrentSaveGame->WorldItems.Num());
 }
 
 void ABotanicusGameMode::CapturePlayerInventory(

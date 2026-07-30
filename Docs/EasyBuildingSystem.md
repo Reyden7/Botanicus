@@ -66,6 +66,18 @@ Manual `T` access remains available for prototype testing. In the production
 flow, buying a building will automatically enter this mode for the purchaser and
 provide the newly purchased complete building as the selected group.
 
+Botanicus uses a native AZERTY movement layer: `Z/S` moves forward/backward and
+`Q/D` moves left/right in both first-person and top-down modes. These keys are
+consumed before the marketplace QWERTY mappings, so `Q` and `Z` cannot reopen
+the disabled EBS construction/debug shortcuts.
+
+The gameplay camera uses a true-first-person foundation. It is attached to the
+animated `head` socket of the full-body mesh; mouse yaw rotates the complete
+character and mouse pitch rotates the view without tilting the collision
+capsule. The owner sees the full body, while only that owner's head bone and
+the separate template first-person mesh are hidden to prevent skull clipping.
+Remote players continue to see the complete character.
+
 While a local player is in top-down mode, EBS roof components are hidden only
 for that player's view. Their collision is ignored by the planning cursor so
 floors, furniture, walls, doors and communication-door candidates remain
@@ -84,7 +96,7 @@ server, and immediately gives the copy to the purchaser for placement.
 - Cancelling destroys the provisional copy.
 - The spawned actors replicate to every player.
 - Runtime-purchased buildings store their class and transform in autosave
-  version 2 and are respawned when the map is loaded.
+  version 3 and are respawned when the map is loaded.
 
 The temporary template lookup will be replaced by explicit catalogue entries,
 prices and unlock conditions.
@@ -139,6 +151,43 @@ position; existing paths must never be silently stretched through obstacles.
 
 Path meshes, materials, width variants, construction cost and more advanced
 editing tools still require final game-design decisions.
+
+## Equipment delivery prototype
+
+The temporary top-down toolbar exposes `COMMANDER COLIS TEST`. The authoritative
+server creates or reuses the nearest replicated delivery pad and places a small
+replicated parcel on it. Back in first person, a player must be close, face the
+parcel, look at it within a 22-degree camera cone and have an unobstructed line
+of sight before pressing `E`. The server validates the same conditions before
+the parcel is destroyed and its item is added to that player's owner-only
+hotbar. A full hotbar leaves the parcel in place.
+
+Delivery parcels show a yellow `[ E ]` world indicator only while the local
+player is within range and looking toward them.
+
+The test parcel currently contains one `SeedPacket_Test` item so it can reuse
+the validated Item Data entry. This placeholder flow establishes the boundary
+between shared world deliveries and private player inventories. Catalogue
+prices, delivery delays, final art and two-player carrying remain later
+iterations.
+
+The toolbar also exposes `COMMANDER GROS OBJET`. This creates a replicated
+large-equipment placeholder on the same delivery pad. It never enters the
+hotbar: while close and looking at the object, `[ E ] PORTER` attaches it to one
+player's character on the server. Pressing `E` again deposits the carried
+object in front of that player without requiring them to look at it. Only one
+player can carry a given object, and one player can carry only one large object
+at a time.
+Final hand sockets, carrying animations, movement penalties, placement
+validation and two-player heavy loads remain later refinements.
+
+Autosave version 3 persists every uncollected parcel and large equipment actor
+with its exact class, world position, rotation, scale, item identifier and
+quantity. Loading happens only on the authoritative server, which removes any
+temporary level copies before spawning the saved actors so clients receive one
+replicated copy without duplicates. An object that was being carried when the
+session ended is restored as an uncarried world object at its last world
+transform.
 
 ## Multiplayer authority
 

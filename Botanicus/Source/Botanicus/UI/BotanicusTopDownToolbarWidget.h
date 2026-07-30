@@ -43,6 +43,12 @@ private:
 	void HandlePurchaseBuildingClicked();
 
 	UFUNCTION()
+	void HandleOrderDeliveryClicked();
+
+	UFUNCTION()
+	void HandleOrderLargeEquipmentClicked();
+
+	UFUNCTION()
 	void HandleCancelClicked();
 
 	UPROPERTY(Transient)
@@ -59,6 +65,12 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UButton> PurchaseBuildingButton;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UButton> OrderDeliveryButton;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UButton> OrderLargeEquipmentButton;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UButton> CancelButton;

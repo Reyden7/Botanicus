@@ -15,6 +15,8 @@ class ACameraActor;
 class AActor;
 class ABotanicusPathActor;
 class ABotanicusCommunicationDoorActor;
+class ABotanicusDeliveryParcelActor;
+class ABotanicusLargeEquipmentActor;
 class UActorComponent;
 class UMaterialInterface;
 class UPrimitiveComponent;
@@ -92,6 +94,12 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Building")
 	void PurchaseTestBuilding();
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Delivery")
+	void OrderTestDelivery();
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Delivery")
+	void OrderTestLargeEquipment();
 
 	UFUNCTION(Client, Reliable)
 	void ClientHideRemovedBuildingActors(
@@ -185,6 +193,11 @@ protected:
 	void RotateBuildingGroup(float Direction);
 	void UpdateBuildingGroupPreview(float DeltaTime);
 	void UpdateCommunicationDoorPreview();
+	bool TryCollectNearbyDeliveryParcel();
+	bool TryHandleNearbyLargeEquipment();
+	bool IsLookingAtWorldItem(
+		const AActor* Item,
+		float MaximumDistance) const;
 	bool FindBuildingConnectionSnap(
 		const TArray<TObjectPtr<AActor>>& MovingGroup,
 		FVector& OutCorrection,
@@ -216,6 +229,20 @@ protected:
 
 	UFUNCTION(Server, Reliable)
 	void ServerPurchaseTestBuilding();
+
+	UFUNCTION(Server, Reliable)
+	void ServerOrderTestDelivery();
+
+	UFUNCTION(Server, Reliable)
+	void ServerCollectDeliveryParcel(
+		ABotanicusDeliveryParcelActor* Parcel);
+
+	UFUNCTION(Server, Reliable)
+	void ServerOrderTestLargeEquipment();
+
+	UFUNCTION(Server, Reliable)
+	void ServerToggleCarryLargeEquipment(
+		ABotanicusLargeEquipmentActor* Equipment);
 
 	UFUNCTION(Server, Reliable)
 	void ServerConfirmCommunicationDoor(int32 CandidateIndex);
@@ -343,6 +370,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Ping", meta=(ClampMin="0.1"))
 	float PingCooldown = 1.0f;
 
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Interaction", meta=(ClampMin="1.0", ClampMax="60.0"))
+	float WorldItemLookAngle = 22.0f;
+
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Path", meta=(ClampMin="25.0"))
 	float BuildingEntranceSnapDistance = 350.0f;
 
@@ -388,6 +418,10 @@ protected:
 	bool bPathPlacementActive = false;
 	bool bPathDeletionActive = false;
 	bool bCommunicationDoorPlacementActive = false;
+	bool bAzertyForwardPressed = false;
+	bool bAzertyBackwardPressed = false;
+	bool bAzertyLeftPressed = false;
+	bool bAzertyRightPressed = false;
 	int32 LocalCommunicationDoorCandidateIndex = INDEX_NONE;
 	TArray<FVector> PendingPathPoints;
 	TArray<FName> PendingPurchasedBuildingActorNames;

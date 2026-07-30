@@ -64,6 +64,11 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
+	virtual void PawnClientRestart() override;
+	void ConfigureTrueFirstPersonLocalView();
+
+	bool bTrueFirstPersonConfigured = false;
 
 	/** Called from Input Actions for movement input */
 	void MoveInput(const FInputActionValue& Value);
