@@ -14,8 +14,10 @@ class UBotanicusTopDownToolbarWidget;
 class ACameraActor;
 class AActor;
 class ABotanicusPathActor;
+class ABotanicusCommunicationDoorActor;
 class UActorComponent;
 class UMaterialInterface;
+class UPrimitiveComponent;
 struct FInputKeyEventArgs;
 
 /**
@@ -91,6 +93,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Building")
 	void PurchaseTestBuilding();
 
+	UFUNCTION(Client, Reliable)
+	void ClientHideRemovedBuildingActors(
+		const TArray<FName>& ActorNames);
+
 	UFUNCTION(BlueprintPure, Category="Botanicus|Path")
 	bool IsPathPlacementActive() const { return bPathPlacementActive; }
 
@@ -150,6 +156,8 @@ protected:
 	void InitializeQuickBarWidget();
 	void InitializeTopDownToolbarWidget();
 	void HideEbsDemoHud();
+	void RefreshTopDownRoofVisibility();
+	void RestoreTopDownRoofVisibility();
 	void AdvanceEbsViewMode();
 	void MoveBuildingCameraForward(float AxisValue);
 	void MoveBuildingCameraRight(float AxisValue);
@@ -176,6 +184,15 @@ protected:
 	void CancelBuildingGroupMove();
 	void RotateBuildingGroup(float Direction);
 	void UpdateBuildingGroupPreview(float DeltaTime);
+	void UpdateCommunicationDoorPreview();
+	bool FindBuildingConnectionSnap(
+		const TArray<TObjectPtr<AActor>>& MovingGroup,
+		FVector& OutCorrection,
+		AActor*& OutMovingWall,
+		AActor*& OutExistingWall) const;
+	bool BuildCommunicationDoorCandidates(
+		const TArray<AActor*>& PurchasedGroup);
+	bool IsPlainBuildingWall(const AActor* Actor) const;
 	bool TryPlacePing();
 	bool IsEbsConstructionModeActive(UActorComponent*& OutBuildingComponent) const;
 	void SetBuildingGroupHighlighted(bool bHighlighted);
@@ -199,6 +216,20 @@ protected:
 
 	UFUNCTION(Server, Reliable)
 	void ServerPurchaseTestBuilding();
+
+	UFUNCTION(Server, Reliable)
+	void ServerConfirmCommunicationDoor(int32 CandidateIndex);
+
+	UFUNCTION(Server, Reliable)
+	void ServerCancelCommunicationDoor();
+
+	UFUNCTION(Client, Reliable)
+	void ClientBeginCommunicationDoorPlacement(
+		const TArray<FVector_NetQuantize10>& CandidateLocations,
+		const TArray<float>& CandidateYaws);
+
+	UFUNCTION(Client, Reliable)
+	void ClientEndCommunicationDoorPlacement(bool bCreated);
 
 	UFUNCTION(Client, Reliable)
 	void ClientBeginBuildingGroupMove(
@@ -263,6 +294,13 @@ protected:
 	UPROPERTY(Transient)
 	TObjectPtr<ABotanicusPathActor> PathPreviewActor;
 
+	UPROPERTY(Transient)
+	TObjectPtr<ABotanicusCommunicationDoorActor>
+		CommunicationDoorPreviewActor;
+
+	TSet<TWeakObjectPtr<UPrimitiveComponent>>
+		TopDownHiddenRoofComponents;
+
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="500.0"))
 	float BuildingCameraHeight = 1800.0f;
 
@@ -286,6 +324,12 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Editing", meta=(ClampMin="1.0"))
 	float BuildingPreviewUpdatesPerSecond = 20.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Editing", meta=(ClampMin="25.0"))
+	float BuildingConnectionSnapDistance = 350.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Editing", meta=(ClampMin="10.0"))
+	float BuildingConnectionOverlapDepth = 150.0f;
 
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Editing", meta=(ClampMin="1000.0"))
 	float MaximumBuildingEditDistance = 30000.0f;
@@ -319,6 +363,14 @@ protected:
 
 	TArray<FTransform> LocalBuildingOriginalTransforms;
 	TArray<FTransform> ServerBuildingOriginalTransforms;
+	TObjectPtr<AActor> ServerSnappedMovingWall;
+	TObjectPtr<AActor> ServerSnappedExistingWall;
+	TArray<TObjectPtr<AActor>> ServerDoorCandidatePurchasedWalls;
+	TArray<TObjectPtr<AActor>> ServerDoorCandidateExistingWalls;
+	TArray<FVector_NetQuantize10> ServerDoorCandidateLocations;
+	TArray<float> ServerDoorCandidateYaws;
+	TArray<FVector_NetQuantize10> LocalDoorCandidateLocations;
+	TArray<float> LocalDoorCandidateYaws;
 	FVector LocalBuildingPivot = FVector::ZeroVector;
 	FVector LocalBuildingOriginalPivot = FVector::ZeroVector;
 	FVector ServerBuildingOriginalPivot = FVector::ZeroVector;
@@ -327,6 +379,7 @@ protected:
 	float LocalBuildingGroundOffset = 0.0f;
 	float ServerBuildingGroundOffset = 0.0f;
 	float BuildingPreviewUpdateAccumulator = 0.0f;
+	float TopDownRoofRefreshAccumulator = 0.0f;
 	double LastServerPingTime = -1000.0;
 	bool bLocalBuildingPlacementValid = true;
 	bool bServerBuildingPlacementValid = true;
@@ -334,6 +387,8 @@ protected:
 	bool bBuildingTopDownViewActive = false;
 	bool bPathPlacementActive = false;
 	bool bPathDeletionActive = false;
+	bool bCommunicationDoorPlacementActive = false;
+	int32 LocalCommunicationDoorCandidateIndex = INDEX_NONE;
 	TArray<FVector> PendingPathPoints;
 	TArray<FName> PendingPurchasedBuildingActorNames;
 	TArray<FTransform> PendingPurchasedBuildingTransforms;

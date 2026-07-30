@@ -30,6 +30,8 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Exec, Category="Botanicus|Save")
 	bool BotanicusSaveNow();
 
+	void RegisterRemovedBuildingActor(FName ActorName);
+
 private:
 	FString GetAutosaveSlotName() const;
 	FString GetPlayerSaveKey(const AController* Controller) const;
@@ -40,6 +42,8 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusWorldSaveGame> CurrentSaveGame;
+
+	TSet<FName> RemovedBuildingActorNames;
 };
 
 

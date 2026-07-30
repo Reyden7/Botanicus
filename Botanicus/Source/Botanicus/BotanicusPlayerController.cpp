@@ -24,6 +24,8 @@
 #include "BotanicusCameraManager.h"
 #include "Blueprint/UserWidget.h"
 #include "Botanicus.h"
+#include "BotanicusGameMode.h"
+#include "Building/BotanicusCommunicationDoorActor.h"
 #include "Online/BotanicusMultiplayerSubsystem.h"
 #include "Path/BotanicusPathActor.h"
 #include "Ping/BotanicusPingMarker.h"
@@ -313,6 +315,11 @@ void ABotanicusPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReaso
 {
 	CancelPathPlacement();
 	CancelPathDeletion();
+	if (IsValid(CommunicationDoorPreviewActor))
+	{
+		CommunicationDoorPreviewActor->Destroy();
+		CommunicationDoorPreviewActor = nullptr;
+	}
 
 	if (TopDownToolbarWidget)
 	{
@@ -327,6 +334,7 @@ void ABotanicusPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReaso
 	}
 
 	SetBuildingGroupHighlighted(false);
+	RestoreTopDownRoofVisibility();
 	ClearServerBuildingGroupMove();
 
 	if (IsValid(BuildingCameraActor))
@@ -350,9 +358,19 @@ void ABotanicusPlayerController::PlayerTick(float DeltaTime)
 	if (IsLocalPlayerController())
 	{
 		HideEbsDemoHud();
+		if (bBuildingTopDownViewActive)
+		{
+			TopDownRoofRefreshAccumulator += DeltaTime;
+			if (TopDownRoofRefreshAccumulator >= 0.25f)
+			{
+				TopDownRoofRefreshAccumulator = 0.0f;
+				RefreshTopDownRoofVisibility();
+			}
+		}
 	}
 
 	UpdateBuildingGroupPreview(DeltaTime);
+	UpdateCommunicationDoorPreview();
 	UpdatePathPreview();
 }
 
@@ -444,6 +462,29 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 
 	if (bBuildingTopDownViewActive)
 	{
+		if (bCommunicationDoorPlacementActive)
+		{
+			if (Params.Key == EKeys::LeftMouseButton &&
+				Params.Event == IE_Pressed)
+			{
+				if (!IsCursorOverTopDownToolbar() &&
+					LocalCommunicationDoorCandidateIndex != INDEX_NONE)
+				{
+					ServerConfirmCommunicationDoor(
+						LocalCommunicationDoorCandidateIndex);
+				}
+				return true;
+			}
+
+			if ((Params.Key == EKeys::RightMouseButton ||
+				 Params.Key == EKeys::Escape) &&
+				Params.Event == IE_Pressed)
+			{
+				ServerCancelCommunicationDoor();
+				return true;
+			}
+		}
+
 		if (bPathPlacementActive)
 		{
 			if (Params.Key == EKeys::LeftMouseButton &&
@@ -648,6 +689,8 @@ void ABotanicusPlayerController::EnterBuildingTopDownView()
 	// Advance EBS from first-person to its top-down/cursor-trace state.
 	AdvanceEbsViewMode();
 	bBuildingTopDownViewActive = true;
+	TopDownRoofRefreshAccumulator = 0.0f;
+	RefreshTopDownRoofVisibility();
 	InitializeTopDownToolbarWidget();
 	if (TopDownToolbarWidget)
 	{
@@ -682,6 +725,10 @@ void ABotanicusPlayerController::ExitBuildingTopDownView()
 
 	CancelPathPlacement();
 	CancelPathDeletion();
+	if (bCommunicationDoorPlacementActive)
+	{
+		ServerCancelCommunicationDoor();
+	}
 	if (TopDownToolbarWidget)
 	{
 		TopDownToolbarWidget->SetVisibility(ESlateVisibility::Collapsed);
@@ -697,6 +744,7 @@ void ABotanicusPlayerController::ExitBuildingTopDownView()
 	AdvanceEbsViewMode();
 	AdvanceEbsViewMode();
 	bBuildingTopDownViewActive = false;
+	RestoreTopDownRoofVisibility();
 
 	SetIgnoreMoveInput(false);
 	SetIgnoreLookInput(false);
@@ -845,6 +893,67 @@ void ABotanicusPlayerController::HideEbsDemoHud()
 			TEXT("EBS demonstration HUD hidden; Botanicus UI is authoritative."));
 		return;
 	}
+}
+
+void ABotanicusPlayerController::RefreshTopDownRoofVisibility()
+{
+	if (!IsLocalPlayerController() || !bBuildingTopDownViewActive)
+	{
+		return;
+	}
+
+	for (auto ComponentIt = TopDownHiddenRoofComponents.CreateIterator();
+		 ComponentIt;
+		 ++ComponentIt)
+	{
+		if (!ComponentIt->IsValid())
+		{
+			ComponentIt.RemoveCurrent();
+		}
+	}
+
+	for (TActorIterator<AActor> ActorIt(GetWorld()); ActorIt; ++ActorIt)
+	{
+		AActor* Actor = *ActorIt;
+		if (!IsEbsBuildingActor(Actor) ||
+			!Actor->GetClass()->GetName().Contains(
+				TEXT("Roof"),
+				ESearchCase::IgnoreCase))
+		{
+			continue;
+		}
+
+		TInlineComponentArray<UPrimitiveComponent*> RoofComponents(Actor);
+		for (UPrimitiveComponent* RoofComponent : RoofComponents)
+		{
+			if (!IsValid(RoofComponent) ||
+				TopDownHiddenRoofComponents.Contains(RoofComponent) ||
+				!RoofComponent->IsVisible())
+			{
+				continue;
+			}
+
+			// Component visibility is local and is not part of the saved or
+			// replicated actor state. First-person players therefore keep
+			// their roofs while this client gets an open-building view.
+			RoofComponent->SetVisibility(false, false);
+			TopDownHiddenRoofComponents.Add(RoofComponent);
+		}
+	}
+}
+
+void ABotanicusPlayerController::RestoreTopDownRoofVisibility()
+{
+	for (const TWeakObjectPtr<UPrimitiveComponent>& Component :
+		 TopDownHiddenRoofComponents)
+	{
+		if (Component.IsValid())
+		{
+			Component->SetVisibility(true, false);
+		}
+	}
+	TopDownHiddenRoofComponents.Reset();
+	TopDownRoofRefreshAccumulator = 0.0f;
 }
 
 void ABotanicusPlayerController::AdvanceEbsViewMode()
@@ -1040,6 +1149,12 @@ void ABotanicusPlayerController::PurchaseTestBuilding()
 {
 	if (!bBuildingTopDownViewActive || !IsLocalPlayerController())
 	{
+		return;
+	}
+	if (bCommunicationDoorPlacementActive)
+	{
+		ClientMessage(
+			TEXT("Terminez d'abord le placement de la porte de communication."));
 		return;
 	}
 
@@ -1504,30 +1619,50 @@ void ABotanicusPlayerController::UpdateBuildingGroupPreview(float DeltaTime)
 
 	const FQuat DeltaRotation =
 		FRotator(0.0f, LocalBuildingYaw, 0.0f).Quaternion();
-	for (int32 Index = 0;
-		 Index < LocalBuildingGroup.Num() &&
-		 Index < LocalBuildingOriginalTransforms.Num();
-		 ++Index)
+	const auto ApplyLocalPreviewTransform = [this, &DeltaRotation]()
 	{
-		AActor* Actor = LocalBuildingGroup[Index];
-		if (!IsValid(Actor))
+		for (int32 Index = 0;
+			 Index < LocalBuildingGroup.Num() &&
+			 Index < LocalBuildingOriginalTransforms.Num();
+			 ++Index)
 		{
-			continue;
-		}
+			AActor* Actor = LocalBuildingGroup[Index];
+			if (!IsValid(Actor))
+			{
+				continue;
+			}
 
-		const FTransform& Original = LocalBuildingOriginalTransforms[Index];
-		const FVector RelativeLocation =
-			Original.GetLocation() - LocalBuildingOriginalPivot;
-		FTransform PreviewTransform = Original;
-		PreviewTransform.SetLocation(
-			LocalBuildingPivot + DeltaRotation.RotateVector(RelativeLocation));
-		PreviewTransform.SetRotation(
-			DeltaRotation * Original.GetRotation());
-		Actor->SetActorTransform(
-			PreviewTransform,
-			false,
-			nullptr,
-			ETeleportType::TeleportPhysics);
+			const FTransform& Original =
+				LocalBuildingOriginalTransforms[Index];
+			const FVector RelativeLocation =
+				Original.GetLocation() - LocalBuildingOriginalPivot;
+			FTransform PreviewTransform = Original;
+			PreviewTransform.SetLocation(
+				LocalBuildingPivot +
+				DeltaRotation.RotateVector(RelativeLocation));
+			PreviewTransform.SetRotation(
+				DeltaRotation * Original.GetRotation());
+			Actor->SetActorTransform(
+				PreviewTransform,
+				false,
+				nullptr,
+				ETeleportType::TeleportPhysics);
+		}
+	};
+
+	ApplyLocalPreviewTransform();
+
+	FVector SnapCorrection = FVector::ZeroVector;
+	AActor* SnappedMovingWall = nullptr;
+	AActor* SnappedExistingWall = nullptr;
+	if (FindBuildingConnectionSnap(
+			LocalBuildingGroup,
+			SnapCorrection,
+			SnappedMovingWall,
+			SnappedExistingWall))
+	{
+		LocalBuildingPivot += SnapCorrection;
+		ApplyLocalPreviewTransform();
 	}
 
 	BuildingPreviewUpdateAccumulator += DeltaTime;
@@ -1538,6 +1673,49 @@ void ABotanicusPlayerController::UpdateBuildingGroupPreview(float DeltaTime)
 		BuildingPreviewUpdateAccumulator = 0.0f;
 		ServerUpdateBuildingGroupMove(LocalBuildingPivot, LocalBuildingYaw);
 	}
+}
+
+void ABotanicusPlayerController::UpdateCommunicationDoorPreview()
+{
+	if (!bCommunicationDoorPlacementActive ||
+		!IsValid(CommunicationDoorPreviewActor) ||
+		LocalDoorCandidateLocations.Num() == 0)
+	{
+		return;
+	}
+
+	FHitResult CursorHit;
+	if (!TraceTopDownCursor(CursorHit))
+	{
+		return;
+	}
+
+	int32 BestIndex = INDEX_NONE;
+	float BestDistanceSquared = TNumericLimits<float>::Max();
+	for (int32 Index = 0;
+		 Index < LocalDoorCandidateLocations.Num();
+		 ++Index)
+	{
+		const float DistanceSquared = FVector::DistSquared2D(
+			CursorHit.ImpactPoint,
+			FVector(LocalDoorCandidateLocations[Index]));
+		if (DistanceSquared < BestDistanceSquared)
+		{
+			BestDistanceSquared = DistanceSquared;
+			BestIndex = Index;
+		}
+	}
+
+	if (BestIndex == INDEX_NONE ||
+		!LocalDoorCandidateYaws.IsValidIndex(BestIndex))
+	{
+		return;
+	}
+
+	LocalCommunicationDoorCandidateIndex = BestIndex;
+	CommunicationDoorPreviewActor->SetActorLocationAndRotation(
+		FVector(LocalDoorCandidateLocations[BestIndex]),
+		FRotator(0.0f, LocalDoorCandidateYaws[BestIndex], 0.0f));
 }
 
 void ABotanicusPlayerController::SetBuildingGroupHighlighted(bool bHighlighted)
@@ -1700,6 +1878,18 @@ bool ABotanicusPlayerController::TraceTopDownCursor(
 	for (AActor* Actor : LocalBuildingGroup)
 	{
 		QueryParams.AddIgnoredActor(Actor);
+	}
+	if (bBuildingTopDownViewActive)
+	{
+		for (const TWeakObjectPtr<UPrimitiveComponent>& RoofComponent :
+			 TopDownHiddenRoofComponents)
+		{
+			if (RoofComponent.IsValid())
+			{
+				QueryParams.AddIgnoredActor(
+					RoofComponent->GetOwner());
+			}
+		}
 	}
 
 	return GetWorld() &&
@@ -1945,6 +2135,90 @@ void ABotanicusPlayerController::ServerPurchaseTestBuilding_Implementation()
 		PlayerState ? *PlayerState->GetPlayerName() : TEXT("UnknownPlayer"));
 }
 
+void ABotanicusPlayerController::
+	ServerConfirmCommunicationDoor_Implementation(int32 CandidateIndex)
+{
+	UWorld* World = GetWorld();
+	if (!World ||
+		!ServerDoorCandidateLocations.IsValidIndex(CandidateIndex) ||
+		!ServerDoorCandidateYaws.IsValidIndex(CandidateIndex) ||
+		!ServerDoorCandidatePurchasedWalls.IsValidIndex(CandidateIndex) ||
+		!ServerDoorCandidateExistingWalls.IsValidIndex(CandidateIndex))
+	{
+		return;
+	}
+
+	AActor* PurchasedWall =
+		ServerDoorCandidatePurchasedWalls[CandidateIndex];
+	AActor* ExistingWall =
+		ServerDoorCandidateExistingWalls[CandidateIndex];
+	if (!IsValid(PurchasedWall) || !IsValid(ExistingWall))
+	{
+		ServerCancelCommunicationDoor();
+		return;
+	}
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	ABotanicusCommunicationDoorActor* Door =
+		World->SpawnActor<ABotanicusCommunicationDoorActor>(
+			FVector(ServerDoorCandidateLocations[CandidateIndex]),
+			FRotator(
+				0.0f,
+				ServerDoorCandidateYaws[CandidateIndex],
+				0.0f),
+			SpawnParameters);
+	if (!Door)
+	{
+		return;
+	}
+	ConfigurePurchasedActorForNetworking(Door);
+
+	const TArray<FName> RemovedWallNames = {
+		PurchasedWall->GetFName(),
+		ExistingWall->GetFName()};
+	if (ABotanicusGameMode* BotanicusGameMode =
+			Cast<ABotanicusGameMode>(World->GetAuthGameMode()))
+	{
+		for (const FName WallName : RemovedWallNames)
+		{
+			BotanicusGameMode->RegisterRemovedBuildingActor(WallName);
+		}
+	}
+
+	for (TActorIterator<ABotanicusPlayerController> ControllerIt(World);
+		 ControllerIt;
+		 ++ControllerIt)
+	{
+		ControllerIt->ClientHideRemovedBuildingActors(RemovedWallNames);
+	}
+	PurchasedWall->Destroy();
+	ExistingWall->Destroy();
+
+	ServerDoorCandidatePurchasedWalls.Reset();
+	ServerDoorCandidateExistingWalls.Reset();
+	ServerDoorCandidateLocations.Reset();
+	ServerDoorCandidateYaws.Reset();
+	ClientEndCommunicationDoorPlacement(true);
+
+	UE_LOG(
+		LogBotanicus,
+		Display,
+		TEXT("Created a replicated communication door at %s."),
+		*Door->GetActorLocation().ToString());
+}
+
+void ABotanicusPlayerController::
+	ServerCancelCommunicationDoor_Implementation()
+{
+	ServerDoorCandidatePurchasedWalls.Reset();
+	ServerDoorCandidateExistingWalls.Reset();
+	ServerDoorCandidateLocations.Reset();
+	ServerDoorCandidateYaws.Reset();
+	ClientEndCommunicationDoorPlacement(false);
+}
+
 void ABotanicusPlayerController::ServerUpdateBuildingGroupMove_Implementation(
 	FVector_NetQuantize10 NewPivotLocation,
 	float NewYaw)
@@ -1977,6 +2251,27 @@ void ABotanicusPlayerController::ServerUpdateBuildingGroupMove_Implementation(
 	}
 
 	ApplyServerBuildingGroupTransform(GroundedPivot, NewYaw);
+
+	FVector SnapCorrection = FVector::ZeroVector;
+	AActor* SnappedMovingWall = nullptr;
+	AActor* SnappedExistingWall = nullptr;
+	if (FindBuildingConnectionSnap(
+			ServerBuildingGroup,
+			SnapCorrection,
+			SnappedMovingWall,
+			SnappedExistingWall))
+	{
+		GroundedPivot += SnapCorrection;
+		ApplyServerBuildingGroupTransform(GroundedPivot, NewYaw);
+		ServerSnappedMovingWall = SnappedMovingWall;
+		ServerSnappedExistingWall = SnappedExistingWall;
+	}
+	else
+	{
+		ServerSnappedMovingWall = nullptr;
+		ServerSnappedExistingWall = nullptr;
+	}
+
 	bServerBuildingPlacementValid =
 		bLandscapeFound && IsServerBuildingGroupPlacementValid();
 	ClientUpdateBuildingPlacementValidity(
@@ -2007,12 +2302,21 @@ void ABotanicusPlayerController::ServerConfirmBuildingGroupMove_Implementation()
 		}
 	}
 
+	const bool bBeginDoorPlacement =
+		bServerBuildingPurchasePlacement &&
+		BuildCommunicationDoorCandidates(ServerBuildingGroup);
 	if (bServerBuildingPurchasePlacement)
 	{
 		BroadcastPurchasedBuildingSnapshot(true);
 	}
 	ClearServerBuildingGroupMove();
 	ClientEndBuildingGroupMove(true);
+	if (bBeginDoorPlacement)
+	{
+		ClientBeginCommunicationDoorPlacement(
+			ServerDoorCandidateLocations,
+			ServerDoorCandidateYaws);
+	}
 }
 
 void ABotanicusPlayerController::ServerCancelBuildingGroupMove_Implementation()
@@ -2145,6 +2449,85 @@ void ABotanicusPlayerController::
 	PendingPurchasedBuildingActorNames.Reset();
 	PendingPurchasedBuildingTransforms.Reset();
 	PurchasedBuildingSnapshotRetryCount = 0;
+}
+
+void ABotanicusPlayerController::
+	ClientBeginCommunicationDoorPlacement_Implementation(
+		const TArray<FVector_NetQuantize10>& CandidateLocations,
+		const TArray<float>& CandidateYaws)
+{
+	if (!bBuildingTopDownViewActive ||
+		CandidateLocations.Num() == 0 ||
+		CandidateLocations.Num() != CandidateYaws.Num())
+	{
+		return;
+	}
+
+	LocalDoorCandidateLocations = CandidateLocations;
+	LocalDoorCandidateYaws = CandidateYaws;
+	LocalCommunicationDoorCandidateIndex = 0;
+	bCommunicationDoorPlacementActive = true;
+
+	if (!IsValid(CommunicationDoorPreviewActor))
+	{
+		FActorSpawnParameters SpawnParameters;
+		SpawnParameters.Owner = this;
+		SpawnParameters.ObjectFlags |= RF_Transient;
+		SpawnParameters.SpawnCollisionHandlingOverride =
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		CommunicationDoorPreviewActor =
+			GetWorld()->SpawnActor<ABotanicusCommunicationDoorActor>(
+				FVector(LocalDoorCandidateLocations[0]),
+				FRotator(0.0f, LocalDoorCandidateYaws[0], 0.0f),
+				SpawnParameters);
+		if (CommunicationDoorPreviewActor)
+		{
+			CommunicationDoorPreviewActor->SetPreviewMode(true);
+		}
+	}
+
+	ClientMessage(
+		TEXT(
+			"Choisissez la porte de communication avec la souris, puis clic gauche pour confirmer. Clic droit/Echap pour annuler."));
+}
+
+void ABotanicusPlayerController::
+	ClientEndCommunicationDoorPlacement_Implementation(bool bCreated)
+{
+	bCommunicationDoorPlacementActive = false;
+	LocalDoorCandidateLocations.Reset();
+	LocalDoorCandidateYaws.Reset();
+	LocalCommunicationDoorCandidateIndex = INDEX_NONE;
+	if (IsValid(CommunicationDoorPreviewActor))
+	{
+		CommunicationDoorPreviewActor->Destroy();
+		CommunicationDoorPreviewActor = nullptr;
+	}
+
+	ClientMessage(
+		bCreated
+			? TEXT("Porte de communication créée.")
+			: TEXT("Création de la porte de communication annulée."));
+}
+
+void ABotanicusPlayerController::
+	ClientHideRemovedBuildingActors_Implementation(
+		const TArray<FName>& ActorNames)
+{
+	TSet<FName> NamesToHide;
+	for (const FName ActorName : ActorNames)
+	{
+		NamesToHide.Add(ActorName);
+	}
+	for (TActorIterator<AActor> ActorIt(GetWorld()); ActorIt; ++ActorIt)
+	{
+		AActor* Actor = *ActorIt;
+		if (IsValid(Actor) && NamesToHide.Contains(Actor->GetFName()))
+		{
+			Actor->SetActorHiddenInGame(true);
+			Actor->SetActorEnableCollision(false);
+		}
+	}
 }
 
 void ABotanicusPlayerController::ServerPlacePing_Implementation(
@@ -2650,6 +3033,318 @@ bool ABotanicusPlayerController::IsStructuralBuildingActor(
 	return false;
 }
 
+bool ABotanicusPlayerController::IsPlainBuildingWall(
+	const AActor* Actor) const
+{
+	if (!IsEbsBuildingActor(Actor))
+	{
+		return false;
+	}
+
+	const FString ClassName = Actor->GetClass()->GetName();
+	return ClassName.Contains(TEXT("Wall"), ESearchCase::IgnoreCase) &&
+		!ClassName.Contains(TEXT("Roof"), ESearchCase::IgnoreCase) &&
+		!ClassName.Contains(TEXT("Tri"), ESearchCase::IgnoreCase) &&
+		!ClassName.Contains(TEXT("Slope"), ESearchCase::IgnoreCase) &&
+		!ClassName.Contains(TEXT("Door"), ESearchCase::IgnoreCase) &&
+		!ClassName.Contains(TEXT("Window"), ESearchCase::IgnoreCase);
+}
+
+bool ABotanicusPlayerController::FindBuildingConnectionSnap(
+	const TArray<TObjectPtr<AActor>>& MovingGroup,
+	FVector& OutCorrection,
+	AActor*& OutMovingWall,
+	AActor*& OutExistingWall) const
+{
+	OutCorrection = FVector::ZeroVector;
+	OutMovingWall = nullptr;
+	OutExistingWall = nullptr;
+
+	UWorld* World = GetWorld();
+	if (!World || MovingGroup.Num() == 0)
+	{
+		return false;
+	}
+
+	TSet<const AActor*> MovingActors;
+	for (AActor* Actor : MovingGroup)
+	{
+		if (IsValid(Actor))
+		{
+			MovingActors.Add(Actor);
+		}
+	}
+
+	float BestCorrectionSize = TNumericLimits<float>::Max();
+	for (AActor* MovingWall : MovingGroup)
+	{
+		if (!IsPlainBuildingWall(MovingWall))
+		{
+			continue;
+		}
+
+		FVector MovingOrigin;
+		FVector MovingExtent;
+		MovingWall->GetActorBounds(
+			true,
+			MovingOrigin,
+			MovingExtent);
+		const bool bMovingNormalIsX =
+			MovingExtent.X <= MovingExtent.Y;
+
+		for (TActorIterator<AActor> ExistingIt(World);
+			 ExistingIt;
+			 ++ExistingIt)
+		{
+			AActor* ExistingWall = *ExistingIt;
+			if (!IsValid(ExistingWall) ||
+				MovingActors.Contains(ExistingWall) ||
+				!IsPlainBuildingWall(ExistingWall))
+			{
+				continue;
+			}
+
+			FVector ExistingOrigin;
+			FVector ExistingExtent;
+			ExistingWall->GetActorBounds(
+				true,
+				ExistingOrigin,
+				ExistingExtent);
+			const bool bExistingNormalIsX =
+				ExistingExtent.X <= ExistingExtent.Y;
+			if (bMovingNormalIsX != bExistingNormalIsX)
+			{
+				continue;
+			}
+
+			const float NormalCorrection =
+				bMovingNormalIsX
+					? ExistingOrigin.X - MovingOrigin.X
+					: ExistingOrigin.Y - MovingOrigin.Y;
+			const float CorrectionSize =
+				FMath::Abs(NormalCorrection);
+			if (CorrectionSize > BuildingConnectionSnapDistance ||
+				CorrectionSize >= BestCorrectionSize)
+			{
+				continue;
+			}
+
+			const float MovingTangentMin =
+				bMovingNormalIsX
+					? MovingOrigin.Y - MovingExtent.Y
+					: MovingOrigin.X - MovingExtent.X;
+			const float MovingTangentMax =
+				bMovingNormalIsX
+					? MovingOrigin.Y + MovingExtent.Y
+					: MovingOrigin.X + MovingExtent.X;
+			const float ExistingTangentMin =
+				bMovingNormalIsX
+					? ExistingOrigin.Y - ExistingExtent.Y
+					: ExistingOrigin.X - ExistingExtent.X;
+			const float ExistingTangentMax =
+				bMovingNormalIsX
+					? ExistingOrigin.Y + ExistingExtent.Y
+					: ExistingOrigin.X + ExistingExtent.X;
+			const float TangentOverlap =
+				FMath::Min(MovingTangentMax, ExistingTangentMax) -
+				FMath::Max(MovingTangentMin, ExistingTangentMin);
+			if (TangentOverlap < 180.0f)
+			{
+				continue;
+			}
+
+			const float VerticalOverlap =
+				FMath::Min(
+					MovingOrigin.Z + MovingExtent.Z,
+					ExistingOrigin.Z + ExistingExtent.Z) -
+				FMath::Max(
+					MovingOrigin.Z - MovingExtent.Z,
+					ExistingOrigin.Z - ExistingExtent.Z);
+			if (VerticalOverlap < 200.0f)
+			{
+				continue;
+			}
+
+			BestCorrectionSize = CorrectionSize;
+			OutCorrection = bMovingNormalIsX
+				? FVector(NormalCorrection, 0.0f, 0.0f)
+				: FVector(0.0f, NormalCorrection, 0.0f);
+			OutMovingWall = MovingWall;
+			OutExistingWall = ExistingWall;
+		}
+	}
+
+	return IsValid(OutMovingWall) && IsValid(OutExistingWall);
+}
+
+bool ABotanicusPlayerController::BuildCommunicationDoorCandidates(
+	const TArray<AActor*>& PurchasedGroup)
+{
+	check(HasAuthority());
+
+	ServerDoorCandidatePurchasedWalls.Reset();
+	ServerDoorCandidateExistingWalls.Reset();
+	ServerDoorCandidateLocations.Reset();
+	ServerDoorCandidateYaws.Reset();
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	TSet<const AActor*> PurchasedActors;
+	for (AActor* Actor : PurchasedGroup)
+	{
+		if (IsValid(Actor))
+		{
+			PurchasedActors.Add(Actor);
+		}
+	}
+
+	TArray<AActor*> ExistingWalls;
+	for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
+	{
+		AActor* Actor = *ActorIt;
+		if (IsValid(Actor) &&
+			!PurchasedActors.Contains(Actor) &&
+			IsPlainBuildingWall(Actor))
+		{
+			ExistingWalls.Add(Actor);
+		}
+	}
+
+	for (AActor* PurchasedWall : PurchasedGroup)
+	{
+		if (!IsPlainBuildingWall(PurchasedWall))
+		{
+			continue;
+		}
+
+		FVector PurchasedOrigin;
+		FVector PurchasedExtent;
+		PurchasedWall->GetActorBounds(
+			true,
+			PurchasedOrigin,
+			PurchasedExtent);
+		const bool bPurchasedNormalIsX =
+			PurchasedExtent.X <= PurchasedExtent.Y;
+
+		for (AActor* ExistingWall : ExistingWalls)
+		{
+			FVector ExistingOrigin;
+			FVector ExistingExtent;
+			ExistingWall->GetActorBounds(
+				true,
+				ExistingOrigin,
+				ExistingExtent);
+			const bool bExistingNormalIsX =
+				ExistingExtent.X <= ExistingExtent.Y;
+			if (bPurchasedNormalIsX != bExistingNormalIsX)
+			{
+				continue;
+			}
+
+			const float NormalDistance =
+				bPurchasedNormalIsX
+					? FMath::Abs(
+						PurchasedOrigin.X - ExistingOrigin.X)
+					: FMath::Abs(
+						PurchasedOrigin.Y - ExistingOrigin.Y);
+			const float MaximumNormalDistance =
+				(bPurchasedNormalIsX
+					 ? PurchasedExtent.X + ExistingExtent.X
+					 : PurchasedExtent.Y + ExistingExtent.Y) +
+				80.0f;
+			if (NormalDistance > MaximumNormalDistance)
+			{
+				continue;
+			}
+
+			const float PurchasedTangentMin =
+				bPurchasedNormalIsX
+					? PurchasedOrigin.Y - PurchasedExtent.Y
+					: PurchasedOrigin.X - PurchasedExtent.X;
+			const float PurchasedTangentMax =
+				bPurchasedNormalIsX
+					? PurchasedOrigin.Y + PurchasedExtent.Y
+					: PurchasedOrigin.X + PurchasedExtent.X;
+			const float ExistingTangentMin =
+				bPurchasedNormalIsX
+					? ExistingOrigin.Y - ExistingExtent.Y
+					: ExistingOrigin.X - ExistingExtent.X;
+			const float ExistingTangentMax =
+				bPurchasedNormalIsX
+					? ExistingOrigin.Y + ExistingExtent.Y
+					: ExistingOrigin.X + ExistingExtent.X;
+			const float OverlapMin =
+				FMath::Max(PurchasedTangentMin, ExistingTangentMin);
+			const float OverlapMax =
+				FMath::Min(PurchasedTangentMax, ExistingTangentMax);
+			if (OverlapMax - OverlapMin < 180.0f)
+			{
+				continue;
+			}
+
+			const float BottomZ = FMath::Max(
+				PurchasedOrigin.Z - PurchasedExtent.Z,
+				ExistingOrigin.Z - ExistingExtent.Z);
+			const float TopZ = FMath::Min(
+				PurchasedOrigin.Z + PurchasedExtent.Z,
+				ExistingOrigin.Z + ExistingExtent.Z);
+			if (TopZ - BottomZ < 200.0f)
+			{
+				continue;
+			}
+
+			FVector CandidateLocation =
+				(PurchasedOrigin + ExistingOrigin) * 0.5f;
+			if (bPurchasedNormalIsX)
+			{
+				CandidateLocation.Y = (OverlapMin + OverlapMax) * 0.5f;
+			}
+			else
+			{
+				CandidateLocation.X = (OverlapMin + OverlapMax) * 0.5f;
+			}
+			CandidateLocation.Z = BottomZ;
+
+			bool bDuplicate = false;
+			for (const FVector_NetQuantize10& ExistingCandidate :
+				 ServerDoorCandidateLocations)
+			{
+				if (FVector::DistSquared(
+						FVector(ExistingCandidate),
+						CandidateLocation) <
+					FMath::Square(100.0f))
+				{
+					bDuplicate = true;
+					break;
+				}
+			}
+			if (bDuplicate)
+			{
+				continue;
+			}
+
+			ServerDoorCandidatePurchasedWalls.Add(PurchasedWall);
+			ServerDoorCandidateExistingWalls.Add(ExistingWall);
+			ServerDoorCandidateLocations.Add(
+				FVector_NetQuantize10(CandidateLocation));
+			ServerDoorCandidateYaws.Add(
+				bPurchasedNormalIsX ? 0.0f : 90.0f);
+		}
+	}
+
+	UE_LOG(
+		LogBotanicus,
+		Display,
+		TEXT(
+			"Detected %d communication-door candidate wall pair(s)."),
+		ServerDoorCandidateLocations.Num());
+	return ServerDoorCandidateLocations.Num() > 0;
+}
+
 bool ABotanicusPlayerController::IsBuildingOwnedByThisPlayer(
 	AActor* Actor) const
 {
@@ -3093,6 +3788,85 @@ bool ABotanicusPlayerController::
 				continue;
 			}
 
+			// The two wall modules deliberately share the same plane when a
+			// purchased building is magnetised to an existing one. They will
+			// be replaced by the communication doorway after confirmation.
+			if (GroupMember == ServerSnappedMovingWall &&
+				OverlappedActor == ServerSnappedExistingWall)
+			{
+				continue;
+			}
+
+			// A complete modular facade normally contains several wall,
+			// foundation and roof actors. Once one wall pair has established
+			// the magnetic connection plane, allow the other EBS pieces to
+			// meet only inside a shallow band around that same plane. A real
+			// building-on-building penetration extends beyond this band and
+			// therefore remains invalid.
+			if (IsValid(ServerSnappedMovingWall) &&
+				IsValid(ServerSnappedExistingWall) &&
+				IsEbsBuildingActor(GroupMember) &&
+				IsEbsBuildingActor(OverlappedActor))
+			{
+				FVector SnapMovingOrigin;
+				FVector SnapMovingExtent;
+				ServerSnappedMovingWall->GetActorBounds(
+					true,
+					SnapMovingOrigin,
+					SnapMovingExtent);
+				const bool bConnectionNormalIsX =
+					SnapMovingExtent.X <= SnapMovingExtent.Y;
+				const float ConnectionPlane =
+					bConnectionNormalIsX
+						? SnapMovingOrigin.X
+						: SnapMovingOrigin.Y;
+
+				FVector MovingOrigin;
+				FVector MovingExtent;
+				GroupMember->GetActorBounds(
+					true,
+					MovingOrigin,
+					MovingExtent);
+				FVector ExistingOrigin;
+				FVector ExistingExtent;
+				OverlappedActor->GetActorBounds(
+					true,
+					ExistingOrigin,
+					ExistingExtent);
+
+				const float MovingMin =
+					bConnectionNormalIsX
+						? MovingOrigin.X - MovingExtent.X
+						: MovingOrigin.Y - MovingExtent.Y;
+				const float MovingMax =
+					bConnectionNormalIsX
+						? MovingOrigin.X + MovingExtent.X
+						: MovingOrigin.Y + MovingExtent.Y;
+				const float ExistingMin =
+					bConnectionNormalIsX
+						? ExistingOrigin.X - ExistingExtent.X
+						: ExistingOrigin.Y - ExistingExtent.Y;
+				const float ExistingMax =
+					bConnectionNormalIsX
+						? ExistingOrigin.X + ExistingExtent.X
+						: ExistingOrigin.Y + ExistingExtent.Y;
+				const float IntersectionMin =
+					FMath::Max(MovingMin, ExistingMin);
+				const float IntersectionMax =
+					FMath::Min(MovingMax, ExistingMax);
+
+				if (IntersectionMax >= IntersectionMin &&
+					IntersectionMin >=
+						ConnectionPlane -
+							BuildingConnectionOverlapDepth &&
+					IntersectionMax <=
+						ConnectionPlane +
+							BuildingConnectionOverlapDepth)
+				{
+					continue;
+				}
+			}
+
 			return false;
 		}
 	}
@@ -3108,6 +3882,8 @@ void ABotanicusPlayerController::ClearServerBuildingGroupMove()
 	ServerBuildingOriginalPivot = FVector::ZeroVector;
 	ServerBuildingInitialYaw = 0.0f;
 	ServerBuildingGroundOffset = 0.0f;
+	ServerSnappedMovingWall = nullptr;
+	ServerSnappedExistingWall = nullptr;
 	bServerBuildingPlacementValid = true;
 	bServerBuildingPurchasePlacement = false;
 }

@@ -69,6 +69,12 @@ public:
 	TArray<FBotanicusSavedBuildingActor> BuildingActors;
 
 	UPROPERTY()
+	TArray<FName> RemovedBuildingActorNames;
+
+	UPROPERTY()
+	TArray<FTransform> CommunicationDoors;
+
+	UPROPERTY()
 	TArray<FBotanicusSavedPlayerInventory> PlayerInventories;
 
 	UPROPERTY()

@@ -66,6 +66,12 @@ Manual `T` access remains available for prototype testing. In the production
 flow, buying a building will automatically enter this mode for the purchaser and
 provide the newly purchased complete building as the selected group.
 
+While a local player is in top-down mode, EBS roof components are hidden only
+for that player's view. Their collision is ignored by the planning cursor so
+floors, furniture, walls, doors and communication-door candidates remain
+selectable. Roofs become visible again on return to first person; no replicated
+or saved actor state is modified.
+
 ## Test building purchase
 
 The native top-down toolbar currently exposes an `ACHETER BATIMENT TEST`
@@ -83,17 +89,26 @@ server, and immediately gives the copy to the purchaser for placement.
 The temporary template lookup will be replaced by explicit catalogue entries,
 prices and unlock conditions.
 
-## Planned connection between buildings
+## Connection between buildings
 
-If a purchased building is placed against an existing building:
+When a purchased building is placed against an existing building, the current
+prototype:
 
-1. detect the common wall and compatible connection zone;
-2. preview an automatic communication door;
-3. let the purchaser slide the door along the valid part of the common wall;
-4. validate the building transform and door position together on the server;
-5. create the opening/door without giving players direct wall-editing tools.
+1. magnetically aligns a compatible wall of the moving building with a wall of
+   the existing building when it enters the 350 cm capture range;
+2. permits only that intended common-wall overlap during placement validation;
+3. detects compatible overlapping modular wall pairs;
+4. presents every valid wall module as a door position;
+5. snaps a native doorway preview to the candidate nearest the mouse;
+6. confirms with left click or cancels with right click / `Escape`;
+7. removes the two superposed EBS wall modules on the server;
+8. creates an open replicated communication doorway;
+9. hides removed level walls on every connected or late-joining client;
+10. saves removed walls and doorway transforms.
 
-This door workflow is not implemented yet.
+Positions are intentionally discrete because EBS walls are modular meshes.
+Freeform cutting inside a single wall mesh is outside this prototype. The
+native white frame is a functional placeholder for the final doorway model.
 
 ## Player-created paths
 

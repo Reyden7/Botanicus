@@ -4,6 +4,8 @@
 
 #include "Botanicus.h"
 #include "BotanicusCharacter.h"
+#include "BotanicusPlayerController.h"
+#include "Building/BotanicusCommunicationDoorActor.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
@@ -69,6 +71,12 @@ void ABotanicusGameMode::RestartPlayer(AController* NewPlayer)
 	if (HasAuthority())
 	{
 		RestorePlayerInventory(NewPlayer);
+		if (ABotanicusPlayerController* BotanicusController =
+			Cast<ABotanicusPlayerController>(NewPlayer))
+		{
+			BotanicusController->ClientHideRemovedBuildingActors(
+				RemovedBuildingActorNames.Array());
+		}
 	}
 }
 
@@ -80,6 +88,14 @@ void ABotanicusGameMode::Logout(AController* Exiting)
 	}
 
 	Super::Logout(Exiting);
+}
+
+void ABotanicusGameMode::RegisterRemovedBuildingActor(FName ActorName)
+{
+	if (HasAuthority() && !ActorName.IsNone())
+	{
+		RemovedBuildingActorNames.Add(ActorName);
+	}
 }
 
 bool ABotanicusGameMode::BotanicusSaveNow()
@@ -107,6 +123,9 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 	CurrentSaveGame->SaveVersion = 2;
 	CurrentSaveGame->BuildingActors.Reset();
 	CurrentSaveGame->Paths.Reset();
+	CurrentSaveGame->RemovedBuildingActorNames =
+		RemovedBuildingActorNames.Array();
+	CurrentSaveGame->CommunicationDoors.Reset();
 
 	for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
 	{
@@ -155,6 +174,14 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 			SavedPath.JunctionPoints.Add(
 				FVector_NetQuantize10(JunctionPoint));
 		}
+	}
+
+	for (TActorIterator<ABotanicusCommunicationDoorActor> DoorIt(World);
+		 DoorIt;
+		 ++DoorIt)
+	{
+		CurrentSaveGame->CommunicationDoors.Add(
+			DoorIt->GetActorTransform());
 	}
 
 	for (FConstPlayerControllerIterator ControllerIt =
@@ -273,6 +300,22 @@ void ABotanicusGameMode::RestoreWorldState()
 		}
 	}
 
+	RemovedBuildingActorNames.Reset();
+	for (const FName RemovedActorName :
+		 CurrentSaveGame->RemovedBuildingActorNames)
+	{
+		RemovedBuildingActorNames.Add(RemovedActorName);
+		if (AActor* const* FoundActor =
+			BuildingActorsByName.Find(RemovedActorName))
+		{
+			if (IsValid(*FoundActor))
+			{
+				(*FoundActor)->Destroy();
+			}
+			BuildingActorsByName.Remove(RemovedActorName);
+		}
+	}
+
 	int32 RestoredCount = 0;
 	for (const FBotanicusSavedBuildingActor& SavedActor :
 		 CurrentSaveGame->BuildingActors)
@@ -326,6 +369,24 @@ void ABotanicusGameMode::RestoreWorldState()
 		TEXT("Restored %d/%d saved building actors."),
 		RestoredCount,
 		CurrentSaveGame->BuildingActors.Num());
+
+	for (TActorIterator<ABotanicusCommunicationDoorActor> DoorIt(World);
+		 DoorIt;
+		 ++DoorIt)
+	{
+		DoorIt->Destroy();
+	}
+	for (const FTransform& DoorTransform :
+		 CurrentSaveGame->CommunicationDoors)
+	{
+		FActorSpawnParameters SpawnParameters;
+		SpawnParameters.SpawnCollisionHandlingOverride =
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		World->SpawnActor<ABotanicusCommunicationDoorActor>(
+			ABotanicusCommunicationDoorActor::StaticClass(),
+			DoorTransform,
+			SpawnParameters);
+	}
 
 	TArray<ABotanicusPathActor*> ExistingPaths;
 	for (TActorIterator<ABotanicusPathActor> PathIt(World);
