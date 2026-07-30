@@ -12,6 +12,30 @@
 #include "QuickBar/BotanicusQuickBarComponent.h"
 #include "Save/BotanicusWorldSaveGame.h"
 
+namespace
+{
+	const FName PurchasedBuildingTag(TEXT("BotanicusPurchasedBuilding"));
+
+	void ConfigureRestoredPurchasedActorForNetworking(AActor* Actor)
+	{
+		if (!IsValid(Actor))
+		{
+			return;
+		}
+
+		Actor->SetOwner(nullptr);
+		Actor->bOnlyRelevantToOwner = false;
+		Actor->bAlwaysRelevant = true;
+		Actor->SetNetUpdateFrequency(30.0f);
+		Actor->SetMinNetUpdateFrequency(10.0f);
+		Actor->SetReplicates(true);
+		Actor->SetReplicateMovement(true);
+		Actor->SetNetDormancy(DORM_Awake);
+		Actor->FlushNetDormancy();
+		Actor->ForceNetUpdate();
+	}
+}
+
 ABotanicusGameMode::ABotanicusGameMode()
 {
 }
@@ -80,6 +104,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 
 	CurrentSaveGame->MapName =
 		UGameplayStatics::GetCurrentLevelName(this, true);
+	CurrentSaveGame->SaveVersion = 2;
 	CurrentSaveGame->BuildingActors.Reset();
 	CurrentSaveGame->Paths.Reset();
 
@@ -96,7 +121,10 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		FBotanicusSavedBuildingActor& SavedActor =
 			CurrentSaveGame->BuildingActors.AddDefaulted_GetRef();
 		SavedActor.ActorName = Actor->GetFName();
+		SavedActor.ActorClass = FSoftClassPath(Actor->GetClass());
 		SavedActor.Transform = Actor->GetActorTransform();
+		SavedActor.bRuntimeSpawned =
+			Actor->ActorHasTag(PurchasedBuildingTag);
 	}
 
 	for (TActorIterator<ABotanicusPathActor> PathIt(World);
@@ -251,12 +279,40 @@ void ABotanicusGameMode::RestoreWorldState()
 	{
 		AActor* const* FoundActor =
 			BuildingActorsByName.Find(SavedActor.ActorName);
-		if (!FoundActor || !IsValid(*FoundActor))
+		AActor* RestoredActor =
+			FoundActor && IsValid(*FoundActor) ? *FoundActor : nullptr;
+		if (!RestoredActor &&
+			SavedActor.bRuntimeSpawned &&
+			!SavedActor.ActorClass.IsNull())
+		{
+			if (UClass* ActorClass =
+				SavedActor.ActorClass.TryLoadClass<AActor>())
+			{
+				FActorSpawnParameters SpawnParameters;
+				SpawnParameters.Name = SavedActor.ActorName;
+				SpawnParameters.SpawnCollisionHandlingOverride =
+					ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+				RestoredActor = World->SpawnActor<AActor>(
+					ActorClass,
+					SavedActor.Transform,
+					SpawnParameters);
+				if (RestoredActor)
+				{
+					RestoredActor->Tags.AddUnique(PurchasedBuildingTag);
+					ConfigureRestoredPurchasedActorForNetworking(
+						RestoredActor);
+					BuildingActorsByName.Add(
+						RestoredActor->GetFName(),
+						RestoredActor);
+				}
+			}
+		}
+		if (!RestoredActor)
 		{
 			continue;
 		}
 
-		(*FoundActor)->SetActorTransform(
+		RestoredActor->SetActorTransform(
 			SavedActor.Transform,
 			false,
 			nullptr,

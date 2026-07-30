@@ -37,6 +37,30 @@
 
 namespace
 {
+	const FName PurchasedBuildingTag(TEXT("BotanicusPurchasedBuilding"));
+
+	void ConfigurePurchasedActorForNetworking(AActor* Actor)
+	{
+		if (!IsValid(Actor))
+		{
+			return;
+		}
+
+		// Marketplace building actors were not authored as runtime network
+		// spawns. Override their default ownership/relevancy so every client
+		// receives both the spawn and subsequent placement transforms.
+		Actor->SetOwner(nullptr);
+		Actor->bOnlyRelevantToOwner = false;
+		Actor->bAlwaysRelevant = true;
+		Actor->SetNetUpdateFrequency(30.0f);
+		Actor->SetMinNetUpdateFrequency(10.0f);
+		Actor->SetReplicates(true);
+		Actor->SetReplicateMovement(true);
+		Actor->SetNetDormancy(DORM_Awake);
+		Actor->FlushNetDormancy();
+		Actor->ForceNetUpdate();
+	}
+
 	TMap<
 		TWeakObjectPtr<AActor>,
 		TWeakObjectPtr<ABotanicusPlayerController>>
@@ -1789,6 +1813,138 @@ void ABotanicusPlayerController::ServerBeginBuildingGroupMove_Implementation(
 		ServerBuildingInitialYaw);
 }
 
+void ABotanicusPlayerController::ServerPurchaseTestBuilding_Implementation()
+{
+	UWorld* World = GetWorld();
+	APawn* ControlledPawn = GetPawn();
+	if (!World || !ControlledPawn || ServerBuildingGroup.Num() > 0)
+	{
+		return;
+	}
+
+	AActor* TemplateSeed = nullptr;
+	float BestDistanceSquared = TNumericLimits<float>::Max();
+	for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
+	{
+		AActor* Candidate = *ActorIt;
+		if (!IsStructuralBuildingActor(Candidate) ||
+			Candidate->ActorHasTag(PurchasedBuildingTag))
+		{
+			continue;
+		}
+
+		const float DistanceSquared = FVector::DistSquared2D(
+			ControlledPawn->GetActorLocation(),
+			Candidate->GetActorLocation());
+		if (DistanceSquared < BestDistanceSquared)
+		{
+			BestDistanceSquared = DistanceSquared;
+			TemplateSeed = Candidate;
+		}
+	}
+
+	const TArray<AActor*> TemplateGroup =
+		BuildCompleteBuildingGroup(TemplateSeed);
+	if (!TemplateSeed || TemplateGroup.Num() == 0)
+	{
+		ClientMessage(
+			TEXT("Aucun bâtiment de référence disponible pour cet achat test."));
+		return;
+	}
+
+	const FVector TemplatePivot =
+		CalculateBuildingGroupPivot(TemplateGroup);
+	const FVector InitialOffset(3500.0f, 0.0f, 0.0f);
+	TArray<AActor*> PurchasedGroup;
+	PurchasedGroup.Reserve(TemplateGroup.Num());
+	for (AActor* TemplateActor : TemplateGroup)
+	{
+		if (!IsValid(TemplateActor))
+		{
+			continue;
+		}
+
+		FTransform SpawnTransform = TemplateActor->GetActorTransform();
+		SpawnTransform.AddToTranslation(InitialOffset);
+		FActorSpawnParameters SpawnParameters;
+		SpawnParameters.SpawnCollisionHandlingOverride =
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		AActor* PurchasedActor = World->SpawnActor<AActor>(
+			TemplateActor->GetClass(),
+			SpawnTransform,
+			SpawnParameters);
+		if (!PurchasedActor)
+		{
+			for (AActor* SpawnedActor : PurchasedGroup)
+			{
+				if (IsValid(SpawnedActor))
+				{
+					SpawnedActor->Destroy();
+				}
+			}
+			ClientMessage(TEXT("Impossible de créer le bâtiment test."));
+			return;
+		}
+
+		PurchasedActor->Tags = TemplateActor->Tags;
+		PurchasedActor->Tags.AddUnique(PurchasedBuildingTag);
+		ConfigurePurchasedActorForNetworking(PurchasedActor);
+		PurchasedGroup.Add(PurchasedActor);
+	}
+
+	if (PurchasedGroup.Num() == 0 ||
+		!TryAcquireBuildingGroupLock(PurchasedGroup))
+	{
+		for (AActor* SpawnedActor : PurchasedGroup)
+		{
+			if (IsValid(SpawnedActor))
+			{
+				SpawnedActor->Destroy();
+			}
+		}
+		return;
+	}
+
+	ServerBuildingGroup.Reset(PurchasedGroup.Num());
+	ServerBuildingOriginalTransforms.Reset(PurchasedGroup.Num());
+	for (AActor* PurchasedActor : PurchasedGroup)
+	{
+		ServerBuildingGroup.Add(PurchasedActor);
+		ServerBuildingOriginalTransforms.Add(
+			PurchasedActor->GetActorTransform());
+	}
+
+	ServerBuildingOriginalPivot = TemplatePivot + InitialOffset;
+	ServerBuildingInitialYaw = 0.0f;
+	float InitialLandscapeHeight = ServerBuildingOriginalPivot.Z;
+	ServerBuildingGroundOffset =
+		FindLandscapeHeight(
+			FVector2D(
+				ServerBuildingOriginalPivot.X,
+				ServerBuildingOriginalPivot.Y),
+			InitialLandscapeHeight)
+			? ServerBuildingOriginalPivot.Z - InitialLandscapeHeight
+			: 0.0f;
+	bServerBuildingPlacementValid = false;
+	bServerBuildingPurchasePlacement = true;
+
+	ClientBeginBuildingGroupMove(
+		PurchasedGroup,
+		ServerBuildingOriginalPivot,
+		ServerBuildingInitialYaw);
+	ClientMessage(
+		TEXT(
+			"Bâtiment test acheté gratuitement : choisissez son emplacement."));
+	BroadcastPurchasedBuildingSnapshot(true);
+	UE_LOG(
+		LogBotanicus,
+		Display,
+		TEXT(
+			"Server spawned purchased building group with %d replicated actors for %s."),
+		PurchasedGroup.Num(),
+		PlayerState ? *PlayerState->GetPlayerName() : TEXT("UnknownPlayer"));
+}
+
 void ABotanicusPlayerController::ServerUpdateBuildingGroupMove_Implementation(
 	FVector_NetQuantize10 NewPivotLocation,
 	float NewYaw)
@@ -1825,6 +1981,10 @@ void ABotanicusPlayerController::ServerUpdateBuildingGroupMove_Implementation(
 		bLandscapeFound && IsServerBuildingGroupPlacementValid();
 	ClientUpdateBuildingPlacementValidity(
 		bServerBuildingPlacementValid);
+	if (bServerBuildingPurchasePlacement)
+	{
+		BroadcastPurchasedBuildingSnapshot(false);
+	}
 }
 
 void ABotanicusPlayerController::ServerConfirmBuildingGroupMove_Implementation()
@@ -1847,26 +2007,50 @@ void ABotanicusPlayerController::ServerConfirmBuildingGroupMove_Implementation()
 		}
 	}
 
+	if (bServerBuildingPurchasePlacement)
+	{
+		BroadcastPurchasedBuildingSnapshot(true);
+	}
 	ClearServerBuildingGroupMove();
 	ClientEndBuildingGroupMove(true);
 }
 
 void ABotanicusPlayerController::ServerCancelBuildingGroupMove_Implementation()
 {
-	for (int32 Index = 0;
-		 Index < ServerBuildingGroup.Num() &&
-		 Index < ServerBuildingOriginalTransforms.Num();
-		 ++Index)
+	if (bServerBuildingPurchasePlacement)
 	{
-		AActor* Actor = ServerBuildingGroup[Index];
-		if (IsValid(Actor))
+		for (TActorIterator<ABotanicusPlayerController> ControllerIt(
+				 GetWorld());
+			 ControllerIt;
+			 ++ControllerIt)
 		{
-			Actor->SetActorTransform(
-				ServerBuildingOriginalTransforms[Index],
-				false,
-				nullptr,
-				ETeleportType::TeleportPhysics);
-			Actor->ForceNetUpdate();
+			ControllerIt->ClientCancelPurchasedBuildingSnapshot();
+		}
+		for (AActor* Actor : ServerBuildingGroup)
+		{
+			if (IsValid(Actor))
+			{
+				Actor->Destroy();
+			}
+		}
+	}
+	else
+	{
+		for (int32 Index = 0;
+			 Index < ServerBuildingGroup.Num() &&
+			 Index < ServerBuildingOriginalTransforms.Num();
+			 ++Index)
+		{
+			AActor* Actor = ServerBuildingGroup[Index];
+			if (IsValid(Actor))
+			{
+				Actor->SetActorTransform(
+					ServerBuildingOriginalTransforms[Index],
+					false,
+					nullptr,
+					ETeleportType::TeleportPhysics);
+				Actor->ForceNetUpdate();
+			}
 		}
 	}
 
@@ -1935,6 +2119,32 @@ void ABotanicusPlayerController::
 {
 	bLocalBuildingPlacementValid = bPlacementValid;
 	UpdateBuildingGroupPlacementVisual(bPlacementValid);
+}
+
+void ABotanicusPlayerController::
+	ClientApplyPurchasedBuildingSnapshot_Implementation(
+		const TArray<FName>& ActorNames,
+		const TArray<FTransform>& ActorTransforms)
+{
+	QueuePurchasedBuildingSnapshot(ActorNames, ActorTransforms);
+}
+
+void ABotanicusPlayerController::
+	ClientApplyPurchasedBuildingPreviewSnapshot_Implementation(
+		const TArray<FName>& ActorNames,
+		const TArray<FTransform>& ActorTransforms)
+{
+	QueuePurchasedBuildingSnapshot(ActorNames, ActorTransforms);
+}
+
+void ABotanicusPlayerController::
+	ClientCancelPurchasedBuildingSnapshot_Implementation()
+{
+	GetWorldTimerManager().ClearTimer(
+		PurchasedBuildingSnapshotRetryTimer);
+	PendingPurchasedBuildingActorNames.Reset();
+	PendingPurchasedBuildingTransforms.Reset();
+	PurchasedBuildingSnapshotRetryCount = 0;
 }
 
 void ABotanicusPlayerController::ServerPlacePing_Implementation(
@@ -2661,6 +2871,156 @@ void ABotanicusPlayerController::ApplyServerBuildingGroupTransform(
 	}
 }
 
+void ABotanicusPlayerController::BroadcastPurchasedBuildingSnapshot(
+	bool bReliable)
+{
+	check(HasAuthority());
+
+	UWorld* World = GetWorld();
+	if (!World || ServerBuildingGroup.Num() == 0)
+	{
+		return;
+	}
+
+	TArray<FName> ActorNames;
+	TArray<FTransform> ActorTransforms;
+	ActorNames.Reserve(ServerBuildingGroup.Num());
+	ActorTransforms.Reserve(ServerBuildingGroup.Num());
+	for (AActor* Actor : ServerBuildingGroup)
+	{
+		if (IsValid(Actor))
+		{
+			ActorNames.Add(Actor->GetFName());
+			ActorTransforms.Add(Actor->GetActorTransform());
+		}
+	}
+
+	for (TActorIterator<ABotanicusPlayerController> ControllerIt(World);
+		 ControllerIt;
+		 ++ControllerIt)
+	{
+		if (bReliable)
+		{
+			ControllerIt->ClientApplyPurchasedBuildingSnapshot(
+				ActorNames,
+				ActorTransforms);
+		}
+		else
+		{
+			ControllerIt->ClientApplyPurchasedBuildingPreviewSnapshot(
+				ActorNames,
+				ActorTransforms);
+		}
+	}
+}
+
+void ABotanicusPlayerController::QueuePurchasedBuildingSnapshot(
+	const TArray<FName>& ActorNames,
+	const TArray<FTransform>& ActorTransforms)
+{
+	if (ActorNames.Num() == 0 ||
+		ActorNames.Num() != ActorTransforms.Num())
+	{
+		return;
+	}
+
+	if (PendingPurchasedBuildingActorNames != ActorNames)
+	{
+		PurchasedBuildingSnapshotRetryCount = 0;
+	}
+	PendingPurchasedBuildingActorNames = ActorNames;
+	PendingPurchasedBuildingTransforms = ActorTransforms;
+	TryApplyPurchasedBuildingSnapshot();
+}
+
+void ABotanicusPlayerController::TryApplyPurchasedBuildingSnapshot()
+{
+	UWorld* World = GetWorld();
+	if (!World ||
+		PendingPurchasedBuildingActorNames.Num() == 0 ||
+		PendingPurchasedBuildingActorNames.Num() !=
+			PendingPurchasedBuildingTransforms.Num())
+	{
+		return;
+	}
+
+	TMap<FName, AActor*> ActorsByName;
+	for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
+	{
+		AActor* Actor = *ActorIt;
+		if (IsValid(Actor))
+		{
+			ActorsByName.Add(Actor->GetFName(), Actor);
+		}
+	}
+
+	int32 AppliedActorCount = 0;
+	for (int32 Index = 0;
+		 Index < PendingPurchasedBuildingActorNames.Num();
+		 ++Index)
+	{
+		AActor* const* FoundActor =
+			ActorsByName.Find(PendingPurchasedBuildingActorNames[Index]);
+		if (!FoundActor || !IsValid(*FoundActor))
+		{
+			continue;
+		}
+
+		(*FoundActor)->SetActorTransform(
+			PendingPurchasedBuildingTransforms[Index],
+			false,
+			nullptr,
+			ETeleportType::TeleportPhysics);
+		(*FoundActor)->MarkComponentsRenderStateDirty();
+		++AppliedActorCount;
+	}
+
+	if (AppliedActorCount <
+			PendingPurchasedBuildingActorNames.Num() &&
+		PurchasedBuildingSnapshotRetryCount < 100)
+	{
+		++PurchasedBuildingSnapshotRetryCount;
+		if (!GetWorldTimerManager().IsTimerActive(
+				PurchasedBuildingSnapshotRetryTimer))
+		{
+			GetWorldTimerManager().SetTimer(
+				PurchasedBuildingSnapshotRetryTimer,
+				this,
+				&ABotanicusPlayerController::
+					TryApplyPurchasedBuildingSnapshot,
+				0.1f,
+				false);
+		}
+		return;
+	}
+
+	GetWorldTimerManager().ClearTimer(
+		PurchasedBuildingSnapshotRetryTimer);
+	const int32 ExpectedActorCount =
+		PendingPurchasedBuildingActorNames.Num();
+	PendingPurchasedBuildingActorNames.Reset();
+	PendingPurchasedBuildingTransforms.Reset();
+	PurchasedBuildingSnapshotRetryCount = 0;
+
+	// Only refresh EBS once all replicated actors exist locally. This is the
+	// refresh that entering top-down previously happened to trigger.
+	AdvanceEbsViewMode();
+	AdvanceEbsViewMode();
+	AdvanceEbsViewMode();
+	if (!bBuildingTopDownViewActive)
+	{
+		ForceFirstPersonView();
+	}
+
+	UE_LOG(
+		LogBotanicus,
+		Display,
+		TEXT(
+			"Client applied purchased building snapshot to %d/%d actors and refreshed EBS."),
+		AppliedActorCount,
+		ExpectedActorCount);
+}
+
 bool ABotanicusPlayerController::
 	IsServerBuildingGroupPlacementValid() const
 {
@@ -2749,6 +3109,7 @@ void ABotanicusPlayerController::ClearServerBuildingGroupMove()
 	ServerBuildingInitialYaw = 0.0f;
 	ServerBuildingGroundOffset = 0.0f;
 	bServerBuildingPlacementValid = true;
+	bServerBuildingPurchasePlacement = false;
 }
 
 bool ABotanicusPlayerController::ShouldUseTouchControls() const

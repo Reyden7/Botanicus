@@ -66,6 +66,23 @@ Manual `T` access remains available for prototype testing. In the production
 flow, buying a building will automatically enter this mode for the purchaser and
 provide the newly purchased complete building as the selected group.
 
+## Test building purchase
+
+The native top-down toolbar currently exposes an `ACHETER BATIMENT TEST`
+button. Until the final catalogue exists, it uses the complete building nearest
+to the player as a template, duplicates the whole structural group on the
+server, and immediately gives the copy to the purchaser for placement.
+
+- The test purchase is free.
+- Confirming keeps the new complete building.
+- Cancelling destroys the provisional copy.
+- The spawned actors replicate to every player.
+- Runtime-purchased buildings store their class and transform in autosave
+  version 2 and are respawned when the map is loaded.
+
+The temporary template lookup will be replaced by explicit catalogue entries,
+prices and unlock conditions.
+
 ## Planned connection between buildings
 
 If a purchased building is placed against an existing building:

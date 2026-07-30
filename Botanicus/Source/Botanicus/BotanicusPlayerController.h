@@ -212,6 +212,19 @@ protected:
 	UFUNCTION(Client, Unreliable)
 	void ClientUpdateBuildingPlacementValidity(bool bPlacementValid);
 
+	UFUNCTION(Client, Reliable)
+	void ClientApplyPurchasedBuildingSnapshot(
+		const TArray<FName>& ActorNames,
+		const TArray<FTransform>& ActorTransforms);
+
+	UFUNCTION(Client, Unreliable)
+	void ClientApplyPurchasedBuildingPreviewSnapshot(
+		const TArray<FName>& ActorNames,
+		const TArray<FTransform>& ActorTransforms);
+
+	UFUNCTION(Client, Reliable)
+	void ClientCancelPurchasedBuildingSnapshot();
+
 	UFUNCTION(Server, Reliable)
 	void ServerPlacePing(FVector_NetQuantize10 RequestedLocation);
 
@@ -233,6 +246,11 @@ protected:
 	void ReleaseBuildingGroupLock();
 	FVector CalculateBuildingGroupPivot(const TArray<AActor*>& GroupActors) const;
 	void ApplyServerBuildingGroupTransform(const FVector& NewPivot, float NewYaw);
+	void BroadcastPurchasedBuildingSnapshot(bool bReliable);
+	void QueuePurchasedBuildingSnapshot(
+		const TArray<FName>& ActorNames,
+		const TArray<FTransform>& ActorTransforms);
+	void TryApplyPurchasedBuildingSnapshot();
 	bool IsServerBuildingGroupPlacementValid() const;
 	void ClearServerBuildingGroupMove();
 
@@ -317,4 +335,8 @@ protected:
 	bool bPathPlacementActive = false;
 	bool bPathDeletionActive = false;
 	TArray<FVector> PendingPathPoints;
+	TArray<FName> PendingPurchasedBuildingActorNames;
+	TArray<FTransform> PendingPurchasedBuildingTransforms;
+	FTimerHandle PurchasedBuildingSnapshotRetryTimer;
+	int32 PurchasedBuildingSnapshotRetryCount = 0;
 };
