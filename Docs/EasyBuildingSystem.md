@@ -174,12 +174,19 @@ iterations.
 The toolbar also exposes `COMMANDER GROS OBJET`. This creates a replicated
 large-equipment placeholder on the same delivery pad. It never enters the
 hotbar: while close and looking at the object, `[ E ] PORTER` attaches it to one
-player's character on the server. Pressing `E` again deposits the carried
-object in front of that player without requiring them to look at it. Only one
-player can carry a given object, and one player can carry only one large object
-at a time.
-Final hand sockets, carrying animations, movement penalties, placement
-validation and two-player heavy loads remain later refinements.
+player on the server and immediately starts placement mode. The equipment is
+never displayed in front of the character: its ground preview appears directly.
+The mouse wheel rotates it in 5-degree steps, or 1-degree steps while holding
+`Shift`. Left click confirms a valid position; right click or `Escape` restores
+the object to the position from which it was taken. Green and red overlay
+materials show placement validity. Green ground lines also indicate when the
+preview centre is visually aligned with a nearby equipment actor, without
+magnetically changing its position. Floor slope, range and overlaps with world
+geometry, other equipment and players are validated locally and again by the
+authoritative server. Only one player can reserve a given object, and one
+player can place only one large object at a time.
+Final hand sockets, carrying animations, movement penalties and two-player
+heavy loads remain later refinements.
 
 Autosave version 3 persists every uncollected parcel and large equipment actor
 with its exact class, world position, rotation, scale, item identifier and

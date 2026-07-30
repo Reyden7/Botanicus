@@ -9,6 +9,7 @@
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
+#include "Materials/MaterialInterface.h"
 #include "Net/UnrealNetwork.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -33,6 +34,22 @@ ABotanicusLargeEquipmentActor::ABotanicusLargeEquipmentActor()
 		Mesh->SetStaticMesh(CubeFinder.Object);
 	}
 	Mesh->SetRelativeScale3D(FVector(1.0f, 0.65f, 0.75f));
+
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface>
+		ValidPlacementMaterialFinder(
+			TEXT("/Game/EasyBuildingSystem/Materials/Instances/Dummy/MI_Can_Build.MI_Can_Build"));
+	if (ValidPlacementMaterialFinder.Succeeded())
+	{
+		ValidPlacementMaterial = ValidPlacementMaterialFinder.Object;
+	}
+
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface>
+		InvalidPlacementMaterialFinder(
+			TEXT("/Game/EasyBuildingSystem/Materials/Instances/Dummy/MI_CanNot_Build.MI_CanNot_Build"));
+	if (InvalidPlacementMaterialFinder.Succeeded())
+	{
+		InvalidPlacementMaterial = InvalidPlacementMaterialFinder.Object;
+	}
 
 	InteractionIndicator =
 		CreateDefaultSubobject<UTextRenderComponent>(
@@ -89,6 +106,8 @@ void ABotanicusLargeEquipmentActor::GetLifetimeReplicatedProps(
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(ABotanicusLargeEquipmentActor, Carrier);
+	DOREPLIFETIME(ABotanicusLargeEquipmentActor, bPlacementMode);
+	DOREPLIFETIME(ABotanicusLargeEquipmentActor, bPlacementValid);
 }
 
 FBotanicusInteractionPrompt
@@ -164,7 +183,10 @@ void ABotanicusLargeEquipmentActor::Interact_Implementation(
 void ABotanicusLargeEquipmentActor::PickUp(
 	ABotanicusCharacter* Character)
 {
+	PlacementOriginTransform = GetActorTransform();
 	Carrier = Character;
+	bPlacementMode = false;
+	bPlacementValid = false;
 	SetOwner(Character ? Character->GetController() : nullptr);
 	ApplyCarryState();
 	ForceNetUpdate();
@@ -189,6 +211,8 @@ void ABotanicusLargeEquipmentActor::Drop()
 		nullptr,
 		ETeleportType::TeleportPhysics);
 	Carrier = nullptr;
+	bPlacementMode = false;
+	bPlacementValid = false;
 	SetOwner(nullptr);
 	ApplyCarryState();
 	ForceNetUpdate();
@@ -196,10 +220,11 @@ void ABotanicusLargeEquipmentActor::Drop()
 
 void ABotanicusLargeEquipmentActor::ApplyCarryState()
 {
-	const bool bIsCarried = IsValid(Carrier);
-	SetActorEnableCollision(!bIsCarried);
+	const bool bIsReserved = IsValid(Carrier);
+	const bool bIsCarried = bIsReserved && !bPlacementMode;
+	SetActorEnableCollision(!bIsReserved);
 	Mesh->SetCollisionEnabled(
-		bIsCarried
+		bIsReserved
 			? ECollisionEnabled::NoCollision
 			: ECollisionEnabled::QueryAndPhysics);
 
@@ -216,6 +241,13 @@ void ABotanicusLargeEquipmentActor::ApplyCarryState()
 		DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 	}
 
+	Mesh->SetOverlayMaterial(
+		bPlacementMode
+			? (bPlacementValid
+				   ? ValidPlacementMaterial
+				   : InvalidPlacementMaterial)
+			: nullptr);
+
 	if (InteractionIndicator)
 	{
 		InteractionIndicator->SetVisibility(false);
@@ -225,4 +257,104 @@ void ABotanicusLargeEquipmentActor::ApplyCarryState()
 void ABotanicusLargeEquipmentActor::OnRep_Carrier()
 {
 	ApplyCarryState();
+}
+
+void ABotanicusLargeEquipmentActor::OnRep_PlacementState()
+{
+	ApplyCarryState();
+}
+
+FVector ABotanicusLargeEquipmentActor::GetPlacementBoxExtent() const
+{
+	return Mesh
+		? Mesh->CalcBounds(Mesh->GetComponentTransform()).BoxExtent
+		: FVector(50.0f);
+}
+
+void ABotanicusLargeEquipmentActor::BeginPlacement(
+	ABotanicusCharacter* Character)
+{
+	if (!HasAuthority() || Carrier != Character)
+	{
+		return;
+	}
+
+	bPlacementMode = true;
+	bPlacementValid = false;
+	ApplyCarryState();
+	ForceNetUpdate();
+}
+
+void ABotanicusLargeEquipmentActor::UpdatePlacement(
+	const FTransform& PlacementTransform,
+	bool bIsValid)
+{
+	if (!HasAuthority() || !bPlacementMode || !IsValid(Carrier))
+	{
+		return;
+	}
+
+	bPlacementValid = bIsValid;
+	SetActorTransform(
+		PlacementTransform,
+		false,
+		nullptr,
+		ETeleportType::TeleportPhysics);
+	ApplyCarryState();
+	ForceNetUpdate();
+}
+
+void ABotanicusLargeEquipmentActor::ConfirmPlacement()
+{
+	if (!HasAuthority() || !bPlacementMode || !bPlacementValid)
+	{
+		return;
+	}
+
+	Carrier = nullptr;
+	bPlacementMode = false;
+	bPlacementValid = false;
+	SetOwner(nullptr);
+	ApplyCarryState();
+	ForceNetUpdate();
+}
+
+void ABotanicusLargeEquipmentActor::CancelPlacement()
+{
+	if (!HasAuthority() || !bPlacementMode || !IsValid(Carrier))
+	{
+		return;
+	}
+
+	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+	SetActorTransform(
+		PlacementOriginTransform,
+		false,
+		nullptr,
+		ETeleportType::TeleportPhysics);
+	Carrier = nullptr;
+	bPlacementMode = false;
+	bPlacementValid = false;
+	SetOwner(nullptr);
+	ApplyCarryState();
+	ForceNetUpdate();
+}
+
+void ABotanicusLargeEquipmentActor::SetLocalPlacementPreview(
+	const FTransform& PlacementTransform,
+	bool bIsValid)
+{
+	if (HasAuthority())
+	{
+		return;
+	}
+
+	bPlacementMode = true;
+	bPlacementValid = bIsValid;
+	ApplyCarryState();
+	SetActorTransform(
+		PlacementTransform,
+		false,
+		nullptr,
+		ETeleportType::TeleportPhysics);
 }

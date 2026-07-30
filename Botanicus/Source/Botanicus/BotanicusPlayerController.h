@@ -195,6 +195,19 @@ protected:
 	void UpdateCommunicationDoorPreview();
 	bool TryCollectNearbyDeliveryParcel();
 	bool TryHandleNearbyLargeEquipment();
+	void BeginLargeEquipmentPlacement(
+		ABotanicusLargeEquipmentActor* Equipment);
+	void UpdateLargeEquipmentPlacement(float DeltaTime);
+	void RotateLargeEquipmentPlacement(float Direction);
+	void DrawLargeEquipmentAlignmentGuides(
+		const FTransform& PlacementTransform) const;
+	void ConfirmLargeEquipmentPlacement();
+	void CancelLargeEquipmentPlacement();
+	bool ResolveLargeEquipmentPlacement(
+		ABotanicusLargeEquipmentActor* Equipment,
+		const FVector& RequestedLocation,
+		float RequestedYaw,
+		FTransform& OutTransform) const;
 	bool IsLookingAtWorldItem(
 		const AActor* Item,
 		float MaximumDistance) const;
@@ -242,6 +255,28 @@ protected:
 
 	UFUNCTION(Server, Reliable)
 	void ServerToggleCarryLargeEquipment(
+		ABotanicusLargeEquipmentActor* Equipment);
+
+	UFUNCTION(Server, Reliable)
+	void ServerBeginLargeEquipmentPlacement(
+		ABotanicusLargeEquipmentActor* Equipment);
+
+	UFUNCTION(Server, Unreliable)
+	void ServerUpdateLargeEquipmentPlacement(
+		ABotanicusLargeEquipmentActor* Equipment,
+		FVector_NetQuantize10 RequestedLocation,
+		float RequestedYaw);
+
+	UFUNCTION(Server, Reliable)
+	void ServerConfirmLargeEquipmentPlacement(
+		ABotanicusLargeEquipmentActor* Equipment);
+
+	UFUNCTION(Server, Reliable)
+	void ServerCancelLargeEquipmentPlacement(
+		ABotanicusLargeEquipmentActor* Equipment);
+
+	UFUNCTION(Client, Reliable)
+	void ClientBeginLargeEquipmentPlacement(
 		ABotanicusLargeEquipmentActor* Equipment);
 
 	UFUNCTION(Server, Reliable)
@@ -373,6 +408,24 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Interaction", meta=(ClampMin="1.0", ClampMax="60.0"))
 	float WorldItemLookAngle = 22.0f;
 
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Equipment Placement", meta=(ClampMin="50.0"))
+	float EquipmentPlacementDistance = 300.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Equipment Placement", meta=(ClampMin="1.0"))
+	float EquipmentRotationStep = 5.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Equipment Placement", meta=(ClampMin="0.1"))
+	float FineEquipmentRotationStep = 1.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Equipment Placement", meta=(ClampMin="1.0"))
+	float EquipmentAlignmentGuideTolerance = 25.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Equipment Placement", meta=(ClampMin="50.0"))
+	float EquipmentAlignmentGuideDistance = 800.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Equipment Placement", meta=(ClampMin="100.0"))
+	float MaximumEquipmentPlacementDistance = 650.0f;
+
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Path", meta=(ClampMin="25.0"))
 	float BuildingEntranceSnapDistance = 350.0f;
 
@@ -390,6 +443,10 @@ protected:
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<AActor>> ServerBuildingGroup;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ABotanicusLargeEquipmentActor>
+		LocalLargeEquipmentPlacement;
 
 	TArray<FTransform> LocalBuildingOriginalTransforms;
 	TArray<FTransform> ServerBuildingOriginalTransforms;
@@ -409,7 +466,10 @@ protected:
 	float LocalBuildingGroundOffset = 0.0f;
 	float ServerBuildingGroundOffset = 0.0f;
 	float BuildingPreviewUpdateAccumulator = 0.0f;
+	float LargeEquipmentPlacementYaw = 0.0f;
+	float LargeEquipmentPreviewUpdateAccumulator = 0.0f;
 	float TopDownRoofRefreshAccumulator = 0.0f;
+	bool bLocalLargeEquipmentPlacementValid = false;
 	double LastServerPingTime = -1000.0;
 	bool bLocalBuildingPlacementValid = true;
 	bool bServerBuildingPlacementValid = true;

@@ -7,6 +7,7 @@
 #include "BotanicusLargeEquipmentActor.generated.h"
 
 class ABotanicusCharacter;
+class UMaterialInterface;
 class UTextRenderComponent;
 
 /** Prototype equipment that must be carried in the world instead of a hotbar. */
@@ -30,6 +31,19 @@ public:
 	virtual void Interact_Implementation(AActor* Interactor) override;
 
 	ABotanicusCharacter* GetCarrier() const { return Carrier; }
+	bool IsInPlacementMode() const { return bPlacementMode; }
+	bool IsPlacementValid() const { return bPlacementValid; }
+	FVector GetPlacementBoxExtent() const;
+
+	void BeginPlacement(ABotanicusCharacter* Character);
+	void UpdatePlacement(
+		const FTransform& PlacementTransform,
+		bool bIsValid);
+	void ConfirmPlacement();
+	void CancelPlacement();
+	void SetLocalPlacementPreview(
+		const FTransform& PlacementTransform,
+		bool bIsValid);
 
 private:
 	void PickUp(ABotanicusCharacter* Character);
@@ -39,9 +53,26 @@ private:
 	UFUNCTION()
 	void OnRep_Carrier();
 
+	UFUNCTION()
+	void OnRep_PlacementState();
+
 	UPROPERTY(ReplicatedUsing=OnRep_Carrier)
 	TObjectPtr<ABotanicusCharacter> Carrier;
 
+	UPROPERTY(ReplicatedUsing=OnRep_PlacementState)
+	bool bPlacementMode = false;
+
+	UPROPERTY(ReplicatedUsing=OnRep_PlacementState)
+	bool bPlacementValid = false;
+
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UTextRenderComponent> InteractionIndicator;
+
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> ValidPlacementMaterial;
+
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> InvalidPlacementMaterial;
+
+	FTransform PlacementOriginTransform = FTransform::Identity;
 };
