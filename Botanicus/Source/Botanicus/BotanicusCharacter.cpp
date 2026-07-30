@@ -51,6 +51,33 @@ ABotanicusCharacter::ABotanicusCharacter()
 	GetCharacterMovement()->AirControl = 0.5f;
 }
 
+void ABotanicusCharacter::BeginPlay()
+{
+	Super::BeginPlay();
+
+#if WITH_EDITOR
+	// Prototype-only bootstrap: PIE players receive one distinct test packet.
+	// Production inventories will be filled by delivered orders and pickups.
+	if (HasAuthority() &&
+		GetWorld() &&
+		GetWorld()->WorldType == EWorldType::PIE &&
+		QuickBarComponent)
+	{
+		int32 AddedSlotIndex = INDEX_NONE;
+		if (!QuickBarComponent->AddItem(
+			TEXT("SeedPacket_Test"),
+			10,
+			AddedSlotIndex))
+		{
+			UE_LOG(
+				LogBotanicus,
+				Warning,
+				TEXT("Prototype seed packet could not be added. Verify its Item Data asset."));
+		}
+	}
+#endif
+}
+
 void ABotanicusCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {	
 	// Set up action bindings
@@ -86,6 +113,8 @@ void ABotanicusCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInput
 		PlayerInputComponent->BindKey(EKeys::Six, IE_Pressed, QuickBarComponent, &UBotanicusQuickBarComponent::SelectSlot6);
 		PlayerInputComponent->BindKey(EKeys::Seven, IE_Pressed, QuickBarComponent, &UBotanicusQuickBarComponent::SelectSlot7);
 		PlayerInputComponent->BindKey(EKeys::Eight, IE_Pressed, QuickBarComponent, &UBotanicusQuickBarComponent::SelectSlot8);
+		PlayerInputComponent->BindKey(EKeys::Nine, IE_Pressed, QuickBarComponent, &UBotanicusQuickBarComponent::SelectSlot9);
+		PlayerInputComponent->BindKey(EKeys::Zero, IE_Pressed, QuickBarComponent, &UBotanicusQuickBarComponent::SelectSlot10);
 		PlayerInputComponent->BindKey(EKeys::MouseScrollUp, IE_Pressed, QuickBarComponent, &UBotanicusQuickBarComponent::SelectPreviousSlot);
 		PlayerInputComponent->BindKey(EKeys::MouseScrollDown, IE_Pressed, QuickBarComponent, &UBotanicusQuickBarComponent::SelectNextSlot);
 	}

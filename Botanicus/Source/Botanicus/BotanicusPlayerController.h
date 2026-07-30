@@ -9,8 +9,13 @@
 class UInputMappingContext;
 class UUserWidget;
 class UBotanicusMultiplayerSubsystem;
+class UBotanicusQuickBarWidget;
+class UBotanicusTopDownToolbarWidget;
 class ACameraActor;
 class AActor;
+class ABotanicusPathActor;
+class UActorComponent;
+class UMaterialInterface;
 struct FInputKeyEventArgs;
 
 /**
@@ -56,6 +61,10 @@ public:
 	UFUNCTION(Exec)
 	void BotanicusTestBuildingGrouping();
 
+	/** Development command: places a ping in front of the controlled pawn. */
+	UFUNCTION(Exec)
+	void BotanicusTestPing();
+
 	/** Toggles the two-state Botanicus building camera. Bound to the T key. */
 	UFUNCTION(BlueprintCallable, Exec, Category="Botanicus|Building")
 	void ToggleBuildingTopDownView();
@@ -63,6 +72,31 @@ public:
 	/** True while the local player is using the free top-down building camera. */
 	UFUNCTION(BlueprintPure, Category="Botanicus|Building")
 	bool IsBuildingTopDownViewActive() const { return bBuildingTopDownViewActive; }
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Path")
+	void BeginPathPlacement();
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Path")
+	void ConfirmPathPlacement();
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Path")
+	void CancelPathPlacement();
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Path")
+	void BeginPathDeletion();
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Path")
+	void CancelPathDeletion();
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Building")
+	void PurchaseTestBuilding();
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Path")
+	bool IsPathPlacementActive() const { return bPathPlacementActive; }
+
+	/** Prevents hotbar shortcuts from colliding with construction controls. */
+	UFUNCTION(BlueprintPure, Category="Botanicus|Inventory")
+	bool IsQuickBarInputBlocked() const;
 
 protected:
 
@@ -81,6 +115,12 @@ protected:
 	/** Pointer to the mobile controls widget */
 	UPROPERTY()
 	TObjectPtr<UUserWidget> MobileControlsWidget;
+
+	/** Temporary functional hotbar; its visual design can be replaced later. */
+	UPROPERTY(Transient)
+	TObjectPtr<UBotanicusQuickBarWidget> QuickBarWidget;
+
+	bool bEbsDemoHudHidden = false;
 
 	/** If true, the player will use UMG touch controls even if not playing on mobile platforms */
 	UPROPERTY(EditAnywhere, Config, Category = "Input|Touch Controls")
@@ -107,16 +147,42 @@ protected:
 	void EnterBuildingTopDownView();
 	void ExitBuildingTopDownView();
 	void ForceFirstPersonView();
+	void InitializeQuickBarWidget();
+	void InitializeTopDownToolbarWidget();
+	void HideEbsDemoHud();
 	void AdvanceEbsViewMode();
 	void MoveBuildingCameraForward(float AxisValue);
 	void MoveBuildingCameraRight(float AxisValue);
+	void ZoomBuildingCamera(float Direction);
+	void AddPathPointAtCursor();
+	void RemoveLastPathPoint();
+	void UpdatePathPreview();
+	void RefreshTopDownToolbar();
+	void TryDeletePathSegmentAtCursor();
+	bool GetPathCursorPoint(FVector& OutPoint) const;
+	bool SnapPathPoint(
+		const FVector& RawPoint,
+		FVector& OutSnappedPoint,
+		ABotanicusPathActor*& OutConnectedPath) const;
+	bool FindNearestBuildingEntrance(
+		const FVector& RawPoint,
+		FVector& OutEntrancePoint) const;
+	ABotanicusPathActor* FindNearestExistingPath(
+		const FVector& RawPoint,
+		FVector& OutPathPoint) const;
+	bool IsCursorOverTopDownToolbar() const;
 	void TrySelectBuildingGroup();
 	void ConfirmBuildingGroupMove();
 	void CancelBuildingGroupMove();
 	void RotateBuildingGroup(float Direction);
 	void UpdateBuildingGroupPreview(float DeltaTime);
+	bool TryPlacePing();
+	bool IsEbsConstructionModeActive(UActorComponent*& OutBuildingComponent) const;
 	void SetBuildingGroupHighlighted(bool bHighlighted);
-	bool TraceTopDownCursor(FHitResult& OutHit) const;
+	void UpdateBuildingGroupPlacementVisual(bool bPlacementValid);
+	bool TraceTopDownCursor(
+		FHitResult& OutHit,
+		bool* bOutOnLandscape = nullptr) const;
 	bool FindLandscapeHeight(const FVector2D& WorldXY, float& OutHeight) const;
 
 	UFUNCTION(Server, Reliable)
@@ -131,6 +197,9 @@ protected:
 	UFUNCTION(Server, Reliable)
 	void ServerCancelBuildingGroupMove();
 
+	UFUNCTION(Server, Reliable)
+	void ServerPurchaseTestBuilding();
+
 	UFUNCTION(Client, Reliable)
 	void ClientBeginBuildingGroupMove(
 		const TArray<AActor*>& GroupActors,
@@ -140,19 +209,53 @@ protected:
 	UFUNCTION(Client, Reliable)
 	void ClientEndBuildingGroupMove(bool bConfirmed);
 
+	UFUNCTION(Client, Unreliable)
+	void ClientUpdateBuildingPlacementValidity(bool bPlacementValid);
+
+	UFUNCTION(Server, Reliable)
+	void ServerPlacePing(FVector_NetQuantize10 RequestedLocation);
+
+	UFUNCTION(Server, Reliable)
+	void ServerCreatePath(
+		const TArray<FVector_NetQuantize10>& RequestedPoints);
+
+	UFUNCTION(Server, Reliable)
+	void ServerDeletePathSegment(
+		ABotanicusPathActor* Path,
+		int32 SegmentIndex,
+		FVector_NetQuantize10 RequestedHitLocation);
+
 	TArray<AActor*> BuildCompleteBuildingGroup(AActor* HitActor) const;
 	bool IsEbsBuildingActor(const AActor* Actor) const;
 	bool IsStructuralBuildingActor(const AActor* Actor) const;
 	bool IsBuildingOwnedByThisPlayer(AActor* Actor) const;
+	bool TryAcquireBuildingGroupLock(const TArray<AActor*>& GroupActors);
+	void ReleaseBuildingGroupLock();
 	FVector CalculateBuildingGroupPivot(const TArray<AActor*>& GroupActors) const;
 	void ApplyServerBuildingGroupTransform(const FVector& NewPivot, float NewYaw);
+	bool IsServerBuildingGroupPlacementValid() const;
 	void ClearServerBuildingGroupMove();
 
 	UPROPERTY(Transient)
 	TObjectPtr<ACameraActor> BuildingCameraActor;
 
+	UPROPERTY(Transient)
+	TObjectPtr<UBotanicusTopDownToolbarWidget> TopDownToolbarWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ABotanicusPathActor> PathPreviewActor;
+
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="500.0"))
 	float BuildingCameraHeight = 1800.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="100.0"))
+	float MinimumBuildingCameraHeight = 600.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="100.0"))
+	float MaximumBuildingCameraHeight = 5000.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="10.0"))
+	float BuildingCameraZoomStep = 250.0f;
 
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="100.0"))
 	float BuildingCameraPanSpeed = 1400.0f;
@@ -168,6 +271,27 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Editing", meta=(ClampMin="1000.0"))
 	float MaximumBuildingEditDistance = 30000.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Ping", meta=(ClampMin="100.0"))
+	float MaximumPingDistance = 30000.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Ping", meta=(ClampMin="0.1"))
+	float PingLifeTime = 8.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Ping", meta=(ClampMin="0.1"))
+	float PingCooldown = 1.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Path", meta=(ClampMin="25.0"))
+	float BuildingEntranceSnapDistance = 350.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Path", meta=(ClampMin="25.0"))
+	float ExistingPathSnapDistance = 260.0f;
+
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> ValidBuildingPlacementMaterial;
+
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> InvalidBuildingPlacementMaterial;
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<AActor>> LocalBuildingGroup;
@@ -185,5 +309,12 @@ protected:
 	float LocalBuildingGroundOffset = 0.0f;
 	float ServerBuildingGroundOffset = 0.0f;
 	float BuildingPreviewUpdateAccumulator = 0.0f;
+	double LastServerPingTime = -1000.0;
+	bool bLocalBuildingPlacementValid = true;
+	bool bServerBuildingPlacementValid = true;
+	bool bServerBuildingPurchasePlacement = false;
 	bool bBuildingTopDownViewActive = false;
+	bool bPathPlacementActive = false;
+	bool bPathDeletionActive = false;
+	TArray<FVector> PendingPathPoints;
 };

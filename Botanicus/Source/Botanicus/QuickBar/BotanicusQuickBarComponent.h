@@ -9,10 +9,10 @@
 class UItemDataAsset;
 
 /**
- * A lightweight reference from the quick bar to Item Data Framework.
+ * One private inventory/hotbar slot backed by Item Data Framework.
  *
- * Quantities and ownership deliberately remain the responsibility of the future
- * inventory. The quick bar only remembers which item is assigned to each key.
+ * InstanceId keeps two packets of the same seed species distinct, while
+ * Quantity stores the number of uses/seeds remaining in that physical item.
  */
 USTRUCT(BlueprintType)
 struct BOTANICUS_API FBotanicusQuickBarSlot
@@ -23,14 +23,22 @@ struct BOTANICUS_API FBotanicusQuickBarSlot
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Quick Bar")
 	FName ItemKey = NAME_None;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Quick Bar", meta=(ClampMin="0"))
+	int32 Quantity = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Quick Bar")
+	FGuid InstanceId;
+
 	bool IsEmpty() const
 	{
-		return ItemKey.IsNone();
+		return ItemKey.IsNone() || Quantity <= 0;
 	}
 
 	bool operator==(const FBotanicusQuickBarSlot& Other) const
 	{
-		return ItemKey == Other.ItemKey;
+		return ItemKey == Other.ItemKey &&
+			Quantity == Other.Quantity &&
+			InstanceId == Other.InstanceId;
 	}
 };
 
@@ -45,7 +53,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	FBotanicusQuickBarSlot, Slot);
 
 /**
- * Eight-slot, keyboard-first quick bar with owner-only replication.
+ * Ten-slot, keyboard-first personal inventory with owner-only replication.
  *
  * Slot contents can only be changed by authoritative gameplay code. Clients may
  * select and activate slots, but the server validates every request.
@@ -56,13 +64,13 @@ class BOTANICUS_API UBotanicusQuickBarComponent : public UActorComponent
 	GENERATED_BODY()
 
 public:
-	static constexpr int32 SlotCount = 8;
+	static constexpr int32 SlotCount = 10;
 
 	UBotanicusQuickBarComponent();
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
-	/** Returns a copy of all eight slots for UI rendering. */
+	/** Returns a copy of all ten slots for UI rendering. */
 	UFUNCTION(BlueprintPure, Category="Botanicus|Quick Bar")
 	TArray<FBotanicusQuickBarSlot> GetSlots() const;
 
@@ -91,6 +99,30 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Botanicus|Quick Bar")
 	bool ClearSlot(int32 SlotIndex);
+
+	/** Creates one distinct item instance in the first empty slot. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Botanicus|Inventory")
+	bool AddItem(FName ItemKey, int32 Quantity, int32& OutSlotIndex);
+
+	/** Removes a quantity from one slot, clearing it when it reaches zero. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Botanicus|Inventory")
+	bool RemoveQuantity(int32 SlotIndex, int32 Quantity);
+
+	/** Convenience operation used by seed packets and consumable tools. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Botanicus|Inventory")
+	bool ConsumeSelectedItem(int32 Quantity = 1);
+
+	/** Requests an authoritative consumption from the owning local player. */
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Inventory")
+	void RequestConsumeSelectedItem(int32 Quantity = 1);
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Inventory")
+	int32 GetTotalQuantity(FName ItemKey) const;
+
+	/** Restores an authoritative save snapshot and replicates it to the owner. */
+	void ApplySavedState(
+		const TArray<FBotanicusQuickBarSlot>& SavedSlots,
+		int32 SavedSelectedSlotIndex);
 
 	/** Selects a slot locally and synchronizes the selection with the server. */
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Quick Bar")
@@ -125,6 +157,8 @@ public:
 	void SelectSlot6();
 	void SelectSlot7();
 	void SelectSlot8();
+	void SelectSlot9();
+	void SelectSlot10();
 
 protected:
 	virtual void BeginPlay() override;
@@ -154,4 +188,7 @@ private:
 
 	UFUNCTION(Server, Reliable)
 	void ServerActivateSelectedSlot();
+
+	UFUNCTION(Server, Reliable)
+	void ServerConsumeSelectedItem(int32 Quantity);
 };

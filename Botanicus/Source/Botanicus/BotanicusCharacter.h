@@ -37,7 +37,7 @@ class ABotanicusCharacter : public ACharacter
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta = (AllowPrivateAccess = "true"))
 	UBotanicusInteractionComponent* BotanicusInteractionComponent;
 
-	/** Eight keyboard-accessible references to Item Data Framework items. */
+	/** Ten keyboard-accessible private inventory slots. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta = (AllowPrivateAccess = "true"))
 	UBotanicusQuickBarComponent* QuickBarComponent;
 
@@ -63,6 +63,7 @@ public:
 	ABotanicusCharacter();
 
 protected:
+	virtual void BeginPlay() override;
 
 	/** Called from Input Actions for movement input */
 	void MoveInput(const FInputActionValue& Value);

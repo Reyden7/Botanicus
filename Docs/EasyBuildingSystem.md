@@ -1,142 +1,120 @@
-# Easy Building System V10 in Botanicus
+# EBS compatibility layer in Botanicus
 
-## Status
+## Product rule
 
-Easy Building System V10 is integrated and enabled as the gameplay foundation.
+Botanicus is not a survival or modular construction game. Players never place
+individual foundations, walls, roofs or ceilings, and never damage or destroy a
+building piece.
 
-- Fab source project: Unreal Engine 5.3
-- Botanicus target: Unreal Engine 5.8
-- UE 5.8 Blueprint verification: 0 errors, 0 warnings
-- Runtime smoke test: successful
-- Steam Online Subsystem remained available during the runtime test
+Players start inside a complete building. Progression comes from:
 
-The vendor folder contains 1,075 files (about 531 MB):
+- ordering equipment and decorations;
+- collecting delivered objects from the delivery area;
+- carrying small objects in the ten-slot inventory;
+- carrying large objects with two hands or cooperatively, depending on weight;
+- purchasing complete buildings with predefined gameplay functions;
+- creating outdoor paths to connect buildings.
 
-`/Game/EasyBuildingSystem`
+## What remains from Easy Building System
 
-Do not edit this folder for Botanicus-specific work. Keeping the marketplace
-content untouched makes updates and troubleshooting much easier.
+The marketplace pack is retained only as a temporary compatibility layer for:
 
-## Botanicus integration layer
+- identifying the structural actors belonging to one complete building;
+- grouping the building and all contents located inside it;
+- moving and rotating that complete group in top-down mode;
+- authoritative multiplayer transforms, placement collision and edit locks;
+- existing prototype building meshes and save interfaces.
 
-Botanicus-specific copies live here:
+Vendor content remains untouched in `/Game/EasyBuildingSystem`. Botanicus-owned
+integration assets remain in `/Game/Botanicus/Building`.
 
-`/Game/Botanicus/Building`
+## Features deliberately disabled
 
-The active classes are:
+Player input no longer exposes:
 
-- `BP_BotanicusBuilderCharacter`
-  - derives from native `ABotanicusCharacter`;
-  - retains the EBS character interaction component and animation events;
-  - also owns the native Botanicus interaction and quick-bar components.
-- `BP_BotanicusPlayerController`
-  - derives from native `ABotanicusPlayerController`;
-  - retains EBS building, resources, save/load, HUD and player-interface logic;
-  - retains Botanicus Steam session commands and camera setup.
-- `BP_BotanicusBuildingGameMode`
-  - derives from native `ABotanicusGameMode`;
-  - uses the two integration classes above.
+- the `Q` modular building menu;
+- snapping and grid controls (`C`, `G`);
+- floor/debug/demo save controls (`Page Up`, `Page Down`, `Z`, numpad `1/3`);
+- EBS hatchet, pickaxe and mallet inventory slots;
+- left-click damage/destruction traces;
+- right-click mallet interaction;
+- the original `V` three-camera cycle.
 
-`DefaultEngine.ini` selects `BP_BotanicusBuildingGameMode` as the global game
-mode. Steam-hosted travel to `Lvl_FirstPerson` therefore uses the same
-integrated classes.
+The complete EBS demonstration HUD is collapsed at runtime, including its
+resource counters, shortcut list, construction menus and tool strip. Keyboard
+numbers belong to the Botanicus inventory.
 
-## Input
+## Complete-building placement
 
-Botanicus continues to support keyboard and mouse only.
+The current prototype top-down system already:
 
-Legacy mappings were added only so the EBS demonstration graphs remain
-compilable:
+- locks character movement;
+- pans the camera with `W`, `A`, `S`, `D`;
+- zooms the camera with the mouse wheel when no building is selected;
+- zooms with `Shift + mouse wheel` while moving a selected building;
+- selects a complete connected building, never an isolated piece of furniture;
+- includes equipment and decoration inside the building volume;
+- follows Landscape height while moving on X/Y;
+- rotates in 15-degree steps with the mouse wheel while a building is selected;
+- shows valid/invalid placement;
+- validates collision and Landscape placement again on the server;
+- confirms with left click or `E`;
+- cancels with right click or `Escape`;
+- locks the building against concurrent editing by another player.
 
-- movement: `W`, `A`, `S`, `D`;
-- camera: mouse;
-- jump: `Space`;
-- alternate camera rate: arrow keys.
+Manual `T` access remains available for prototype testing. In the production
+flow, buying a building will automatically enter this mode for the purchaser and
+provide the newly purchased complete building as the selected group.
 
-Controls confirmed during the first in-editor test:
+## Planned connection between buildings
 
-- `Q`: open/close the building menu;
-- `T`: toggle between first-person gameplay and the top-down building view;
-- `1`, `2`, `3`: change tool/building mode;
-- mouse wheel: rotate the preview;
-- `E`: confirm/place a valid green preview;
-- left mouse button: damage trace;
-- right mouse button: mallet interaction.
+If a purchased building is placed against an existing building:
 
-The original EBS `V` binding is disabled. It cycled through first person,
-top-down and third person, while Botanicus intentionally supports only first
-person and top-down construction. The original `T` radial/square-menu shortcut
-is also replaced by the Botanicus camera toggle.
+1. detect the common wall and compatible connection zone;
+2. preview an automatic communication door;
+3. let the purchaser slide the door along the valid part of the common wall;
+4. validate the building transform and door position together on the server;
+5. create the opening/door without giving players direct wall-editing tools.
 
-During normal gameplay, the native Botanicus first-person camera is forced and
-all inherited third-person cameras are disabled.
+This door workflow is not implemented yet.
 
-In Botanicus top-down mode:
+## Player-created paths
 
-- the character cannot move or rotate;
-- `W`, `A`, `S`, `D` pan the camera freely on the world X/Y axes;
-- the mouse remains available for cursor-based construction;
-- left-clicking a structural piece selects its complete connected building;
-- clicking furniture selects the containing building and never the furniture
-  alone;
-- the selected group includes connected foundations, walls, ceilings, roofs
-  and all EBS contents located inside the resulting building volume;
-- moving the mouse changes only the building's world X/Y position;
-- its Z position is sampled directly from the Landscape so the complete group
-  follows the terrain relief instead of colliding with roofs, trees or foliage;
-- the original foundation-to-ground offset is preserved while moving;
-- the mouse wheel rotates the complete group in 15-degree steps;
-- left click or `E` confirms the new transform;
-- right click or `Escape` cancels and restores every actor to its original
-  transform;
-- pressing `T` returns directly to first person;
-- third person is not exposed as a playable camera state.
+Paths are the only player-created exterior construction network. They are not
+made from EBS foundations or modular building pieces.
 
-Whole-building transformations are requested by the owning client, applied by
-the server and replicated actor by actor. EBS ownership is checked when the
-source building enables its ownership interface. Demonstration buildings that
-do not use ownership remain editable for prototype testing.
+The first native path prototype now:
 
-The EBS player controller also contains direct key events for `Tab`, `C`, `G`,
-`Z`, `Left Shift`, right mouse button, `Page Up`, `Page Down`, numpad `1` and
-numpad `3`. Their final assignments will be normalized later.
+- exposes a `CHEMIN` button in the top-down planning toolbar;
+- adds Landscape-projected spline points with left click;
+- previews the next segment under the cursor;
+- magnetically snaps path endpoints to nearby building doors;
+- snaps endpoints to the nearest point on an existing path and creates a
+  replicated junction piece;
+- exposes a `SUPPRIMER ROUTE` mode that removes the clicked segment;
+- splits a multi-segment route into its valid remaining pieces after deletion;
+- removes the last point with right click;
+- confirms or cancels from the toolbar;
+- replicates confirmed paths from the authoritative server;
+- saves and reloads the complete path network.
 
-These direct bindings are inherited from the pack. They should be normalized
-into Botanicus Enhanced Input actions after the first playable building test
-and after the final UI/control scheme is chosen.
+Slope/obstacle validation, final art meshes and path costs remain planned
+refinements.
 
-## Building content
+When a complete building is moved, connected path endpoints must be detected.
+The placement preview will show whether they can reconnect to a door at the new
+position; existing paths must never be silently stretched through obstacles.
 
-The main data tables are:
+Path meshes, materials, width variants, construction cost and more advanced
+editing tools still require final game-design decisions.
 
-- `/Game/EasyBuildingSystem/Blueprints/DataTables/DT_EBS_BuildingLists`
-- `/Game/EasyBuildingSystem/Blueprints/DataTables/DT_EBS_BuildingObjects`
-- `/Game/EasyBuildingSystem/Blueprints/DataTables/DT_EBS_Requirements`
+## Multiplayer authority
 
-They define the available construction pieces and their requirements. Replace
-the dummy, polygonal or stylized meshes through Botanicus-owned child
-Blueprints or data-table rows; do not overwrite the vendor assets.
-
-Initial foundations and free-standing objects expect an Unreal `Landscape`.
-The geometric floor in `Lvl_FirstPerson` is a `StaticMeshActor`, so EBS treats
-it as an invalid initial placement surface and keeps the preview red. Use
-`/Game/Botanicus/Maps/Lvl_BuildingTest` for integration tests; it contains a
-compatible Landscape and uses the Botanicus building GameMode.
-
-## Multiplayer caution
-
-The EBS components and building actors contain replicated/server-side logic,
-and the combined GameMode starts correctly with the Steam subsystem. This is
-not yet a full multiplayer acceptance test. Before building production content,
-validate with two Steam users that:
-
-1. a client can join the host;
-2. a client placement is authorized and spawned by the server;
-3. both players see placement, upgrades, repairs and destruction;
-4. ownership and resource deductions are authoritative;
-5. saved buildings reload correctly on the host/server.
+Building purchase, placement, rotation, door creation and ownership must be
+server-authoritative. A building always moves with all of its contents. No API
+should expose individual structural-piece destruction or movement to players.
 
 ## Rebuilding the bridge
 
-`Tools/IntegrateEBS.py` recreates or repairs the three Botanicus integration
-Blueprints without changing the source marketplace assets.
+`Tools/IntegrateEBS.py` recreates or repairs the Botanicus integration Blueprints
+without modifying the marketplace source assets.

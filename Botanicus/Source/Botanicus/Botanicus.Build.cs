@@ -10,6 +10,7 @@ public class Botanicus : ModuleRules
 
 		PublicDependencyModuleNames.AddRange(new string[] {
 			"Core",
+			"CoreOnline",
 			"CoreUObject",
 			"Engine",
 			"InputCore",
@@ -22,7 +23,8 @@ public class Botanicus : ModuleRules
 			"GameplayStateTreeModule",
 			"Landscape",
 			"UMG",
-			"Slate"
+			"Slate",
+			"SlateCore"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });
