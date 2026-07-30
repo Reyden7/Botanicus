@@ -152,6 +152,35 @@ position; existing paths must never be silently stretched through obstacles.
 Path meshes, materials, width variants, construction cost and more advanced
 editing tools still require final game-design decisions.
 
+## Data-driven item catalogue
+
+The active catalogue is
+`/Game/Botanicus/Data/DA_BotanicusItemCatalog`. It is selected in
+`Project Settings > Game > Botanicus Item Catalog` and contains one editable
+entry per inventory, delivery, equipment or decoration item. Adding a normal
+content item no longer requires a C++ change.
+
+Each entry defines:
+
+- a stable `Item Key`, display name, category and UI icon;
+- its world static mesh, scale and optional custom world actor class;
+- maximum hotbar stack size;
+- weight class: `Hotbar`, `One Player Carry` or `Two Player Carry`;
+- purchase price and quantity delivered per parcel;
+- allowed placement surfaces: floor, table and/or wall;
+- normal and precision rotation steps;
+- whether alignment guides are enabled and their edge/angle tolerances;
+- an optional collision half-extent override for meshes whose automatic bounds
+  do not represent their usable footprint.
+
+`SeedPacket_Test` and `LargeEquipment_Test` are already present and native
+fallback definitions keep tests operational even if the catalogue asset is
+temporarily unavailable. The hotbar now fills existing compatible stacks up to
+the catalogue maximum before using another slot, and refuses a delivery
+atomically if the complete quantity cannot fit. Runtime actors load their mesh,
+scale and display name from the same definition. Catalogue weight and placement
+rules are validated again by the server.
+
 ## Equipment delivery prototype
 
 The temporary top-down toolbar exposes `COMMANDER COLIS TEST`. The authoritative
@@ -165,28 +194,50 @@ hotbar. A full hotbar leaves the parcel in place.
 Delivery parcels show a yellow `[ E ]` world indicator only while the local
 player is within range and looking toward them.
 
-The test parcel currently contains one `SeedPacket_Test` item so it can reuse
-the validated Item Data entry. This placeholder flow establishes the boundary
-between shared world deliveries and private player inventories. Catalogue
-prices, delivery delays, final art and two-player carrying remain later
-iterations.
+The test parcel currently contains ten units of `SeedPacket_Test` so it can
+reuse the validated Item Data entry and demonstrate quantity handling. With
+the slot selected, `A` opens a local ground-placement preview. The mouse wheel
+rotates it in 5-degree steps (`Shift` gives 1-degree steps), green guide lines
+show nearby item alignment, left click asks the server to place it, and right
+click or `Escape` cancels without consuming anything. The server verifies the
+exact private slot instance and removes one unit only after the replicated
+world actor is created successfully. Placed small items are included in world
+autosave. This placeholder flow establishes the boundary between shared world
+deliveries and private player inventories. Catalogue prices, delivery delays,
+final art and two-player carrying remain later iterations.
 
-The toolbar also exposes `COMMANDER GROS OBJET`. This creates a replicated
-large-equipment placeholder on the same delivery pad. It never enters the
-hotbar: while close and looking at the object, `[ E ] PORTER` attaches it to one
-player on the server and immediately starts placement mode. The equipment is
-never displayed in front of the character: its ground preview appears directly.
+The temporary toolbar exposes `OBJET LOURD SOLO` and
+`OBJET LOURD A DEUX`. They create separate replicated placeholders on the same
+delivery pad so both weight classes can be tested. Neither enters the hotbar.
+Holding `E` fills a small circular progress indicator before
+the object can be lifted. An item marked `One Player Carry` activates after one
+player completes the hold. For a `Two Player Carry` item, a first player
+completes the hold to request help and a second nearby player must complete the
+same hold on that object to activate placement. Both players must then keep `E`
+held and remain within seven metres of each other. Releasing `E`, moving too far
+away or cancelling restores the object to its original transform. The first
+player controls and confirms the preview.
+The equipment is never displayed in front of the character: its ground preview
+appears directly.
+Active carriers cannot jump and receive a replicated animation role: `Solo`,
+`Primary` or `Helper`. The character Blueprint event
+`On Equipment Carry State Changed` is the integration point for final carrying
+poses and animations. The role returns to `None` after placement or
+cancellation.
 The mouse wheel rotates it in 5-degree steps, or 1-degree steps while holding
 `Shift`. Left click confirms a valid position; right click or `Escape` restores
 the object to the position from which it was taken. Green and red overlay
-materials show placement validity. Green ground lines also indicate when the
-preview centre is visually aligned with a nearby equipment actor, without
-magnetically changing its position. Floor slope, range and overlaps with world
+materials show placement validity. Green ground lines appear only when nearby
+objects have the same orientation within 2 degrees and a pair of their actual
+parallel edges is aligned within 5 cm. The line follows the matching edge
+instead of comparing object centres and never magnetically changes the preview
+position. Floor slope, range and overlaps with world
 geometry, other equipment and players are validated locally and again by the
-authoritative server. Only one player can reserve a given object, and one
-player can place only one large object at a time.
-Final hand sockets, carrying animations, movement penalties and two-player
-heavy loads remain later refinements.
+authoritative server. Only one pair can reserve a given object, and one player
+can participate in only one heavy-object move at a time. Items configured as
+`One Player Carry` retain the same placement system without requiring a helper.
+Final hand sockets, carrying animations and movement penalties remain later
+refinements.
 
 Autosave version 3 persists every uncollected parcel and large equipment actor
 with its exact class, world position, rotation, scale, item identifier and

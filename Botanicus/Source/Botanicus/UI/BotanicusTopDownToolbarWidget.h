@@ -49,6 +49,9 @@ private:
 	void HandleOrderLargeEquipmentClicked();
 
 	UFUNCTION()
+	void HandleOrderSoloEquipmentClicked();
+
+	UFUNCTION()
 	void HandleCancelClicked();
 
 	UPROPERTY(Transient)
@@ -71,6 +74,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UButton> OrderLargeEquipmentButton;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UButton> OrderSoloEquipmentButton;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UButton> CancelButton;

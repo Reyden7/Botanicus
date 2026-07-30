@@ -31,6 +31,19 @@ public:
 	virtual void Interact_Implementation(AActor* Interactor) override;
 
 	ABotanicusCharacter* GetCarrier() const { return Carrier; }
+	ABotanicusCharacter* GetHelper() const { return Helper; }
+	FName GetItemKey() const { return ItemKey; }
+	void InitializeEquipment(FName InItemKey);
+	bool RequiresTwoPlayers() const { return bCooperativeCarry; }
+	bool IsWaitingForHelper() const
+	{
+		return bCooperativeCarry &&
+			Carrier != nullptr &&
+			Helper == nullptr &&
+			!bPlacementMode;
+	}
+	void BeginCooperativeHold(ABotanicusCharacter* Character);
+	void EndCooperativeHold(ABotanicusCharacter* Character);
 	bool IsInPlacementMode() const { return bPlacementMode; }
 	bool IsPlacementValid() const { return bPlacementValid; }
 	FVector GetPlacementBoxExtent() const;
@@ -56,8 +69,26 @@ private:
 	UFUNCTION()
 	void OnRep_PlacementState();
 
+	UFUNCTION()
+	void OnRep_ItemKey();
+
+	void ApplyItemDefinition();
+	void ApplyCarrierMovementPenalty();
+	void RestoreCarrierMovement();
+
+	UPROPERTY(ReplicatedUsing=OnRep_ItemKey)
+	FName ItemKey = TEXT("LargeEquipment_Test");
+
 	UPROPERTY(ReplicatedUsing=OnRep_Carrier)
 	TObjectPtr<ABotanicusCharacter> Carrier;
+
+	UPROPERTY(ReplicatedUsing=OnRep_Carrier)
+	TObjectPtr<ABotanicusCharacter> Helper;
+
+	UPROPERTY(ReplicatedUsing=OnRep_PlacementState)
+	bool bCooperativeCarry = false;
+
+	float CarryMovementSpeedMultiplier = 0.55f;
 
 	UPROPERTY(ReplicatedUsing=OnRep_PlacementState)
 	bool bPlacementMode = false;

@@ -8,6 +8,7 @@
 #include "Building/BotanicusCommunicationDoorActor.h"
 #include "Delivery/BotanicusDeliveryParcelActor.h"
 #include "Delivery/BotanicusLargeEquipmentActor.h"
+#include "Delivery/BotanicusPlaceableItemActor.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
@@ -218,7 +219,27 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 			CurrentSaveGame->WorldItems.AddDefaulted_GetRef();
 		SavedItem.ActorClass = FSoftClassPath(EquipmentIt->GetClass());
 		SavedItem.Transform = EquipmentIt->GetActorTransform();
+		SavedItem.ItemKey = EquipmentIt->GetItemKey();
 		SavedItem.Quantity = 1;
+	}
+
+	for (TActorIterator<ABotanicusPlaceableItemActor> ItemIt(World);
+		 ItemIt;
+		 ++ItemIt)
+	{
+		if (!IsValid(*ItemIt) ||
+			ItemIt->IsActorBeingDestroyed() ||
+			ItemIt->ActorHasTag(TEXT("BotanicusPlacementPreview")))
+		{
+			continue;
+		}
+
+		FBotanicusSavedWorldItem& SavedItem =
+			CurrentSaveGame->WorldItems.AddDefaulted_GetRef();
+		SavedItem.ActorClass = FSoftClassPath(ItemIt->GetClass());
+		SavedItem.Transform = ItemIt->GetActorTransform();
+		SavedItem.ItemKey = ItemIt->GetItemKey();
+		SavedItem.Quantity = ItemIt->GetQuantity();
 	}
 
 	for (FConstPlayerControllerIterator ControllerIt =
@@ -494,6 +515,12 @@ void ABotanicusGameMode::RestoreWorldState()
 	{
 		ExistingWorldItems.Add(*EquipmentIt);
 	}
+	for (TActorIterator<ABotanicusPlaceableItemActor> ItemIt(World);
+		 ItemIt;
+		 ++ItemIt)
+	{
+		ExistingWorldItems.Add(*ItemIt);
+	}
 	for (AActor* ExistingWorldItem : ExistingWorldItems)
 	{
 		if (IsValid(ExistingWorldItem))
@@ -516,7 +543,9 @@ void ABotanicusGameMode::RestoreWorldState()
 			(!ItemClass->IsChildOf(
 				 ABotanicusDeliveryParcelActor::StaticClass()) &&
 			 !ItemClass->IsChildOf(
-				 ABotanicusLargeEquipmentActor::StaticClass())))
+				 ABotanicusLargeEquipmentActor::StaticClass()) &&
+			 !ItemClass->IsChildOf(
+				 ABotanicusPlaceableItemActor::StaticClass())))
 		{
 			continue;
 		}
@@ -539,6 +568,18 @@ void ABotanicusGameMode::RestoreWorldState()
 			Parcel->InitializeParcel(
 				SavedItem.ItemKey,
 				SavedItem.Quantity);
+		}
+		else if (ABotanicusPlaceableItemActor* PlacedItem =
+			Cast<ABotanicusPlaceableItemActor>(RestoredItem))
+		{
+			PlacedItem->InitializePlacedItem(
+				SavedItem.ItemKey,
+				SavedItem.Quantity);
+		}
+		else if (ABotanicusLargeEquipmentActor* Equipment =
+			Cast<ABotanicusLargeEquipmentActor>(RestoredItem))
+		{
+			Equipment->InitializeEquipment(SavedItem.ItemKey);
 		}
 
 		RestoredItem->SetOwner(nullptr);

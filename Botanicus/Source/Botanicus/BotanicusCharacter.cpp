@@ -11,6 +11,7 @@
 #include "Botanicus.h"
 #include "InputCoreTypes.h"
 #include "Interaction/BotanicusInteractionComponent.h"
+#include "Net/UnrealNetwork.h"
 #include "QuickBar/BotanicusQuickBarComponent.h"
 
 ABotanicusCharacter::ABotanicusCharacter()
@@ -65,6 +66,8 @@ void ABotanicusCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
+	DefaultMaxWalkSpeed = GetCharacterMovement()->MaxWalkSpeed;
+	ApplyCarryMovementMultiplier();
 	ConfigureTrueFirstPersonLocalView();
 
 #if WITH_EDITOR
@@ -88,6 +91,92 @@ void ABotanicusCharacter::BeginPlay()
 		}
 	}
 #endif
+}
+
+void ABotanicusCharacter::GetLifetimeReplicatedProps(
+	TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(
+		ABotanicusCharacter,
+		CarryMovementMultiplier);
+	DOREPLIFETIME(
+		ABotanicusCharacter,
+		EquipmentCarryRole);
+}
+
+void ABotanicusCharacter::SetCarryMovementMultiplier(
+	float InMultiplier)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	CarryMovementMultiplier =
+		FMath::Clamp(InMultiplier, 0.1f, 1.0f);
+	ApplyCarryMovementMultiplier();
+	ForceNetUpdate();
+}
+
+void ABotanicusCharacter::SetEquipmentCarryState(
+	EBotanicusEquipmentCarryRole InRole,
+	float InMovementMultiplier)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	const EBotanicusEquipmentCarryRole PreviousRole =
+		EquipmentCarryRole;
+	EquipmentCarryRole = InRole;
+	CarryMovementMultiplier =
+		InRole == EBotanicusEquipmentCarryRole::None
+			? 1.0f
+			: FMath::Clamp(
+				  InMovementMultiplier,
+				  0.1f,
+				  1.0f);
+	ApplyCarryMovementMultiplier();
+	if (PreviousRole != EquipmentCarryRole)
+	{
+		ReceiveEquipmentCarryStateChanged(EquipmentCarryRole);
+	}
+	ForceNetUpdate();
+}
+
+void ABotanicusCharacter::OnRep_CarryMovementMultiplier()
+{
+	ApplyCarryMovementMultiplier();
+}
+
+void ABotanicusCharacter::OnRep_EquipmentCarryRole()
+{
+	ApplyCarryMovementMultiplier();
+	ReceiveEquipmentCarryStateChanged(EquipmentCarryRole);
+}
+
+void ABotanicusCharacter::ApplyCarryMovementMultiplier()
+{
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	if (!Movement)
+	{
+		return;
+	}
+	if (DefaultMaxWalkSpeed <= 0.0f)
+	{
+		DefaultMaxWalkSpeed = Movement->MaxWalkSpeed;
+	}
+	Movement->MaxWalkSpeed =
+		DefaultMaxWalkSpeed * CarryMovementMultiplier;
+}
+
+bool ABotanicusCharacter::CanJumpInternal_Implementation() const
+{
+	return EquipmentCarryRole ==
+			EBotanicusEquipmentCarryRole::None &&
+		Super::CanJumpInternal_Implementation();
 }
 
 void ABotanicusCharacter::PawnClientRestart()

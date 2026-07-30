@@ -11,12 +11,14 @@ class UUserWidget;
 class UBotanicusMultiplayerSubsystem;
 class UBotanicusQuickBarWidget;
 class UBotanicusTopDownToolbarWidget;
+class UBotanicusCarryProgressWidget;
 class ACameraActor;
 class AActor;
 class ABotanicusPathActor;
 class ABotanicusCommunicationDoorActor;
 class ABotanicusDeliveryParcelActor;
 class ABotanicusLargeEquipmentActor;
+class ABotanicusPlaceableItemActor;
 class UActorComponent;
 class UMaterialInterface;
 class UPrimitiveComponent;
@@ -100,6 +102,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Delivery")
 	void OrderTestLargeEquipment();
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Delivery")
+	void OrderTestSoloEquipment();
 
 	UFUNCTION(Client, Reliable)
 	void ClientHideRemovedBuildingActors(
@@ -195,6 +200,10 @@ protected:
 	void UpdateCommunicationDoorPreview();
 	bool TryCollectNearbyDeliveryParcel();
 	bool TryHandleNearbyLargeEquipment();
+	void BeginEquipmentCarryCharge(
+		ABotanicusLargeEquipmentActor* Equipment);
+	void UpdateEquipmentCarryCharge(float DeltaTime);
+	void CancelEquipmentCarryCharge(bool bNotifyServer);
 	void BeginLargeEquipmentPlacement(
 		ABotanicusLargeEquipmentActor* Equipment);
 	void UpdateLargeEquipmentPlacement(float DeltaTime);
@@ -208,9 +217,22 @@ protected:
 		const FVector& RequestedLocation,
 		float RequestedYaw,
 		FTransform& OutTransform) const;
+	void BeginQuickBarItemPlacement();
+	void UpdateQuickBarItemPlacement(float DeltaTime);
+	void RotateQuickBarItemPlacement(float Direction);
+	void ConfirmQuickBarItemPlacement();
+	void CancelQuickBarItemPlacement();
+	bool ResolveQuickBarItemPlacement(
+		FName ItemKey,
+		const FVector& RequestedLocation,
+		float RequestedYaw,
+		FTransform& OutTransform) const;
+	void DrawQuickBarItemAlignmentGuides(
+		const FTransform& PlacementTransform) const;
 	bool IsLookingAtWorldItem(
 		const AActor* Item,
 		float MaximumDistance) const;
+	void SpawnTestLargeEquipment(FName ItemKey);
 	bool FindBuildingConnectionSnap(
 		const TArray<TObjectPtr<AActor>>& MovingGroup,
 		FVector& OutCorrection,
@@ -254,8 +276,16 @@ protected:
 	void ServerOrderTestLargeEquipment();
 
 	UFUNCTION(Server, Reliable)
+	void ServerOrderTestSoloEquipment();
+
+	UFUNCTION(Server, Reliable)
 	void ServerToggleCarryLargeEquipment(
 		ABotanicusLargeEquipmentActor* Equipment);
+
+	UFUNCTION(Server, Reliable)
+	void ServerSetHeavyEquipmentHold(
+		ABotanicusLargeEquipmentActor* Equipment,
+		bool bHeld);
 
 	UFUNCTION(Server, Reliable)
 	void ServerBeginLargeEquipmentPlacement(
@@ -278,6 +308,18 @@ protected:
 	UFUNCTION(Client, Reliable)
 	void ClientBeginLargeEquipmentPlacement(
 		ABotanicusLargeEquipmentActor* Equipment);
+
+	UFUNCTION(Client, Reliable)
+	void ClientCancelHeavyEquipmentPlacement(
+		ABotanicusLargeEquipmentActor* Equipment);
+
+	UFUNCTION(Server, Reliable)
+	void ServerPlaceQuickBarItem(
+		int32 SlotIndex,
+		FGuid InstanceId,
+		FName ItemKey,
+		FVector_NetQuantize10 RequestedLocation,
+		float RequestedYaw);
 
 	UFUNCTION(Server, Reliable)
 	void ServerConfirmCommunicationDoor(int32 CandidateIndex);
@@ -408,6 +450,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Interaction", meta=(ClampMin="1.0", ClampMax="60.0"))
 	float WorldItemLookAngle = 22.0f;
 
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Interaction", meta=(ClampMin="0.1", ClampMax="5.0"))
+	float EquipmentLiftHoldDuration = 1.0f;
+
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Equipment Placement", meta=(ClampMin="50.0"))
 	float EquipmentPlacementDistance = 300.0f;
 
@@ -417,14 +462,23 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Equipment Placement", meta=(ClampMin="0.1"))
 	float FineEquipmentRotationStep = 1.0f;
 
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Equipment Placement", meta=(ClampMin="1.0"))
-	float EquipmentAlignmentGuideTolerance = 25.0f;
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Equipment Placement", meta=(ClampMin="0.1"))
+	float EquipmentAlignmentGuideTolerance = 5.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Equipment Placement", meta=(ClampMin="0.1", ClampMax="10.0"))
+	float EquipmentAlignmentAngleTolerance = 2.0f;
 
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Equipment Placement", meta=(ClampMin="50.0"))
 	float EquipmentAlignmentGuideDistance = 800.0f;
 
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Equipment Placement", meta=(ClampMin="100.0"))
 	float MaximumEquipmentPlacementDistance = 650.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Item Placement", meta=(ClampMin="50.0"))
+	float QuickBarItemPlacementDistance = 250.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Item Placement", meta=(ClampMin="100.0"))
+	float MaximumQuickBarItemPlacementDistance = 600.0f;
 
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Path", meta=(ClampMin="25.0"))
 	float BuildingEntranceSnapDistance = 350.0f;
@@ -448,6 +502,18 @@ protected:
 	TObjectPtr<ABotanicusLargeEquipmentActor>
 		LocalLargeEquipmentPlacement;
 
+	UPROPERTY(Transient)
+	TObjectPtr<ABotanicusLargeEquipmentActor>
+		LocalHeldHeavyEquipment;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBotanicusCarryProgressWidget>
+		CarryProgressWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ABotanicusPlaceableItemActor>
+		LocalQuickBarItemPreview;
+
 	TArray<FTransform> LocalBuildingOriginalTransforms;
 	TArray<FTransform> ServerBuildingOriginalTransforms;
 	TObjectPtr<AActor> ServerSnappedMovingWall;
@@ -468,8 +534,17 @@ protected:
 	float BuildingPreviewUpdateAccumulator = 0.0f;
 	float LargeEquipmentPlacementYaw = 0.0f;
 	float LargeEquipmentPreviewUpdateAccumulator = 0.0f;
+	float QuickBarItemPlacementYaw = 0.0f;
+	float QuickBarItemPreviewUpdateAccumulator = 0.0f;
+	float EquipmentCarryChargeElapsed = 0.0f;
 	float TopDownRoofRefreshAccumulator = 0.0f;
 	bool bLocalLargeEquipmentPlacementValid = false;
+	bool bLocalQuickBarItemPlacementValid = false;
+	bool bEquipmentCarryHoldActivated = false;
+	bool bEquipmentCarryKeyHeld = false;
+	int32 LocalQuickBarItemSlotIndex = INDEX_NONE;
+	FGuid LocalQuickBarItemInstanceId;
+	FName LocalQuickBarItemKey = NAME_None;
 	double LastServerPingTime = -1000.0;
 	bool bLocalBuildingPlacementValid = true;
 	bool bServerBuildingPlacementValid = true;

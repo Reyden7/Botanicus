@@ -13,6 +13,7 @@ public class Botanicus : ModuleRules
 			"CoreOnline",
 			"CoreUObject",
 			"Engine",
+			"DeveloperSettings",
 			"InputCore",
 			"EnhancedInput",
 			"ItemDataRuntime",

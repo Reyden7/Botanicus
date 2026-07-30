@@ -3,6 +3,8 @@
 #include "QuickBar/BotanicusQuickBarComponent.h"
 
 #include "BotanicusPlayerController.h"
+#include "Catalog/BotanicusItemCatalogSubsystem.h"
+#include "Engine/GameInstance.h"
 #include "GameFramework/Pawn.h"
 #include "ItemDataAsset.h"
 #include "ItemDataSubsystem.h"
@@ -142,30 +144,96 @@ bool UBotanicusQuickBarComponent::AddItem(
 		return false;
 	}
 
+	int32 MaximumStack = 1;
+	if (UGameInstance* GameInstance = GetWorld()->GetGameInstance())
+	{
+		if (const UBotanicusItemCatalogSubsystem* Catalog =
+			GameInstance->GetSubsystem<
+				UBotanicusItemCatalogSubsystem>())
+		{
+			if (const FBotanicusItemDefinition* Definition =
+				Catalog->FindItem(ItemKey))
+			{
+				MaximumStack =
+					FMath::Max(1, Definition->MaximumStack);
+			}
+		}
+	}
+
+	int32 AvailableCapacity = 0;
+	for (const FBotanicusQuickBarSlot& Slot : Slots)
+	{
+		if (Slot.IsEmpty())
+		{
+			AvailableCapacity += MaximumStack;
+		}
+		else if (Slot.ItemKey == ItemKey)
+		{
+			AvailableCapacity +=
+				FMath::Max(0, MaximumStack - Slot.Quantity);
+		}
+	}
+	if (AvailableCapacity < Quantity)
+	{
+		return false;
+	}
+
+	int32 RemainingQuantity = Quantity;
 	for (int32 SlotIndex = 0; SlotIndex < Slots.Num(); ++SlotIndex)
 	{
-		if (!Slots[SlotIndex].IsEmpty())
+		FBotanicusQuickBarSlot& Slot = Slots[SlotIndex];
+		if (Slot.IsEmpty() ||
+			Slot.ItemKey != ItemKey ||
+			Slot.Quantity >= MaximumStack)
 		{
 			continue;
 		}
 
-		FBotanicusQuickBarSlot& Slot = Slots[SlotIndex];
-		Slot.ItemKey = ItemKey;
-		Slot.Quantity = Quantity;
-		Slot.InstanceId = FGuid::NewGuid();
-		OutSlotIndex = SlotIndex;
-
-		OnQuickBarChanged.Broadcast();
-		if (SlotIndex == SelectedSlotIndex)
+		const int32 AddedQuantity =
+			FMath::Min(
+				RemainingQuantity,
+				MaximumStack - Slot.Quantity);
+		Slot.Quantity += AddedQuantity;
+		RemainingQuantity -= AddedQuantity;
+		if (OutSlotIndex == INDEX_NONE)
 		{
-			BroadcastSelection();
+			OutSlotIndex = SlotIndex;
 		}
-
-		OwnerActor->ForceNetUpdate();
-		return true;
+		if (RemainingQuantity == 0)
+		{
+			break;
+		}
 	}
 
-	return false;
+	for (int32 SlotIndex = 0;
+		 RemainingQuantity > 0 && SlotIndex < Slots.Num();
+		 ++SlotIndex)
+	{
+		FBotanicusQuickBarSlot& Slot = Slots[SlotIndex];
+		if (!Slot.IsEmpty())
+		{
+			continue;
+		}
+
+		const int32 AddedQuantity =
+			FMath::Min(RemainingQuantity, MaximumStack);
+		Slot.ItemKey = ItemKey;
+		Slot.Quantity = AddedQuantity;
+		Slot.InstanceId = FGuid::NewGuid();
+		RemainingQuantity -= AddedQuantity;
+		if (OutSlotIndex == INDEX_NONE)
+		{
+			OutSlotIndex = SlotIndex;
+		}
+	}
+
+	OnQuickBarChanged.Broadcast();
+	if (OutSlotIndex == SelectedSlotIndex)
+	{
+		BroadcastSelection();
+	}
+	OwnerActor->ForceNetUpdate();
+	return RemainingQuantity == 0;
 }
 
 bool UBotanicusQuickBarComponent::RemoveQuantity(int32 SlotIndex, int32 Quantity)

@@ -17,6 +17,15 @@ struct FInputActionValue;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogTemplateCharacter, Log, All);
 
+UENUM(BlueprintType)
+enum class EBotanicusEquipmentCarryRole : uint8
+{
+	None,
+	Solo,
+	Primary,
+	Helper
+};
+
 /**
  *  A basic first person character
  */
@@ -61,11 +70,14 @@ protected:
 	
 public:
 	ABotanicusCharacter();
+	virtual void GetLifetimeReplicatedProps(
+		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void PawnClientRestart() override;
+	virtual bool CanJumpInternal_Implementation() const override;
 	void ConfigureTrueFirstPersonLocalView();
 
 	bool bTrueFirstPersonConfigured = false;
@@ -113,5 +125,47 @@ public:
 	UFUNCTION(BlueprintPure, Category="Botanicus|Quick Bar")
 	UBotanicusQuickBarComponent* GetQuickBarComponent() const { return QuickBarComponent; }
 
+	void SetCarryMovementMultiplier(float InMultiplier);
+	void SetEquipmentCarryState(
+		EBotanicusEquipmentCarryRole InRole,
+		float InMovementMultiplier);
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Equipment Carry")
+	EBotanicusEquipmentCarryRole GetEquipmentCarryRole() const
+	{
+		return EquipmentCarryRole;
+	}
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Equipment Carry")
+	bool IsCarryingEquipment() const
+	{
+		return EquipmentCarryRole !=
+			EBotanicusEquipmentCarryRole::None;
+	}
+
+	UFUNCTION(
+		BlueprintImplementableEvent,
+		Category="Botanicus|Equipment Carry",
+		meta=(DisplayName="On Equipment Carry State Changed"))
+	void ReceiveEquipmentCarryStateChanged(
+		EBotanicusEquipmentCarryRole NewRole);
+
+private:
+	UFUNCTION()
+	void OnRep_CarryMovementMultiplier();
+
+	UFUNCTION()
+	void OnRep_EquipmentCarryRole();
+
+	void ApplyCarryMovementMultiplier();
+
+	UPROPERTY(ReplicatedUsing=OnRep_CarryMovementMultiplier)
+	float CarryMovementMultiplier = 1.0f;
+
+	UPROPERTY(ReplicatedUsing=OnRep_EquipmentCarryRole)
+	EBotanicusEquipmentCarryRole EquipmentCarryRole =
+		EBotanicusEquipmentCarryRole::None;
+
+	float DefaultMaxWalkSpeed = 0.0f;
 };
 

@@ -138,6 +138,7 @@ void UBotanicusTopDownToolbarWidget::BuildLayout()
 	UTextBlock* PurchaseBuildingLabel = nullptr;
 	UTextBlock* OrderDeliveryLabel = nullptr;
 	UTextBlock* OrderLargeEquipmentLabel = nullptr;
+	UTextBlock* OrderSoloEquipmentLabel = nullptr;
 	UTextBlock* CancelLabel = nullptr;
 	PurchaseBuildingButton = AddToolbarButton(
 		WidgetTree,
@@ -161,8 +162,16 @@ void UBotanicusTopDownToolbarWidget::BuildLayout()
 		NSLOCTEXT(
 			"Botanicus",
 			"OrderTestLargeEquipmentButton",
-			"COMMANDER GROS OBJET"),
+			"OBJET LOURD A DEUX"),
 		OrderLargeEquipmentLabel);
+	OrderSoloEquipmentButton = AddToolbarButton(
+		WidgetTree,
+		Row,
+		NSLOCTEXT(
+			"Botanicus",
+			"OrderTestSoloEquipmentButton",
+			"OBJET LOURD SOLO"),
+		OrderSoloEquipmentLabel);
 	PathButton = AddToolbarButton(
 		WidgetTree,
 		Row,
@@ -198,6 +207,9 @@ void UBotanicusTopDownToolbarWidget::BuildLayout()
 	OrderLargeEquipmentButton->OnClicked.AddDynamic(
 		this,
 		&UBotanicusTopDownToolbarWidget::HandleOrderLargeEquipmentClicked);
+	OrderSoloEquipmentButton->OnClicked.AddDynamic(
+		this,
+		&UBotanicusTopDownToolbarWidget::HandleOrderSoloEquipmentClicked);
 	ConfirmButton->OnClicked.AddDynamic(
 		this,
 		&UBotanicusTopDownToolbarWidget::HandleConfirmClicked);
@@ -256,6 +268,15 @@ void UBotanicusTopDownToolbarWidget::
 	if (BotanicusController)
 	{
 		BotanicusController->OrderTestLargeEquipment();
+	}
+}
+
+void UBotanicusTopDownToolbarWidget::
+	HandleOrderSoloEquipmentClicked()
+{
+	if (BotanicusController)
+	{
+		BotanicusController->OrderTestSoloEquipment();
 	}
 }
 

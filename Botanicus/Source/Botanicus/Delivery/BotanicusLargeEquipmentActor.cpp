@@ -3,10 +3,12 @@
 #include "Delivery/BotanicusLargeEquipmentActor.h"
 
 #include "BotanicusCharacter.h"
+#include "Catalog/BotanicusItemCatalogSubsystem.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/GameInstance.h"
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInterface.h"
@@ -71,6 +73,23 @@ void ABotanicusLargeEquipmentActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
+	if (HasAuthority() &&
+		bCooperativeCarry &&
+		IsValid(Carrier) &&
+		((IsValid(Helper) &&
+		  FVector::DistSquared(
+			  Carrier->GetActorLocation(),
+			  Helper->GetActorLocation()) >
+			  FMath::Square(700.0f)) ||
+		 (!IsValid(Helper) &&
+		  FVector::DistSquared(
+			  Carrier->GetActorLocation(),
+			  GetActorLocation()) >
+			  FMath::Square(700.0f))))
+	{
+		EndCooperativeHold(Carrier);
+	}
+
 	APawn* LocalPawn = UGameplayStatics::GetPlayerPawn(this, 0);
 	APlayerCameraManager* CameraManager =
 		UGameplayStatics::GetPlayerCameraManager(this, 0);
@@ -82,8 +101,11 @@ void ABotanicusLargeEquipmentActor::Tick(float DeltaSeconds)
 	const FVector CameraToEquipment =
 		GetActorLocation() - CameraManager->GetCameraLocation();
 	const float CameraDistance = CameraToEquipment.Size();
+	const bool bCanJoinHeavyCarry =
+		IsWaitingForHelper() &&
+		LocalPawn != Carrier;
 	const bool bShowIndicator =
-		!IsValid(Carrier) &&
+		(!IsValid(Carrier) || bCanJoinHeavyCarry) &&
 		FVector::DistSquared(
 			LocalPawn->GetActorLocation(),
 			GetActorLocation()) <= FMath::Square(500.0f) &&
@@ -92,6 +114,11 @@ void ABotanicusLargeEquipmentActor::Tick(float DeltaSeconds)
 			CameraManager->GetCameraRotation().Vector(),
 			CameraToEquipment / CameraDistance) >=
 			FMath::Cos(FMath::DegreesToRadians(22.0f));
+	InteractionIndicator->SetText(
+		FText::FromString(
+			bCanJoinHeavyCarry
+				? TEXT("[ E MAINTENU ] AIDER")
+				: TEXT("[ E MAINTENU ] SOULEVER")));
 	InteractionIndicator->SetVisibility(bShowIndicator);
 	if (bShowIndicator)
 	{
@@ -106,8 +133,11 @@ void ABotanicusLargeEquipmentActor::GetLifetimeReplicatedProps(
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(ABotanicusLargeEquipmentActor, Carrier);
+	DOREPLIFETIME(ABotanicusLargeEquipmentActor, Helper);
+	DOREPLIFETIME(ABotanicusLargeEquipmentActor, ItemKey);
 	DOREPLIFETIME(ABotanicusLargeEquipmentActor, bPlacementMode);
 	DOREPLIFETIME(ABotanicusLargeEquipmentActor, bPlacementValid);
+	DOREPLIFETIME(ABotanicusLargeEquipmentActor, bCooperativeCarry);
 }
 
 FBotanicusInteractionPrompt
@@ -192,6 +222,63 @@ void ABotanicusLargeEquipmentActor::PickUp(
 	ForceNetUpdate();
 }
 
+void ABotanicusLargeEquipmentActor::BeginCooperativeHold(
+	ABotanicusCharacter* Character)
+{
+	if (!HasAuthority() ||
+		!bCooperativeCarry ||
+		!IsValid(Character) ||
+		bPlacementMode)
+	{
+		return;
+	}
+
+	if (!IsValid(Carrier))
+	{
+		PlacementOriginTransform = GetActorTransform();
+		Carrier = Character;
+		Helper = nullptr;
+		SetOwner(Character->GetController());
+	}
+	else if (Carrier != Character && !IsValid(Helper))
+	{
+		Helper = Character;
+		bPlacementMode = true;
+		bPlacementValid = false;
+		ApplyCarrierMovementPenalty();
+	}
+
+	ApplyCarryState();
+	ForceNetUpdate();
+}
+
+void ABotanicusLargeEquipmentActor::EndCooperativeHold(
+	ABotanicusCharacter* Character)
+{
+	if (!HasAuthority() ||
+		!bCooperativeCarry ||
+		!IsValid(Character) ||
+		(Character != Carrier && Character != Helper))
+	{
+		return;
+	}
+
+	RestoreCarrierMovement();
+	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+	SetActorTransform(
+		PlacementOriginTransform,
+		false,
+		nullptr,
+		ETeleportType::TeleportPhysics);
+	Carrier = nullptr;
+	Helper = nullptr;
+	bPlacementMode = false;
+	bPlacementValid = false;
+	SetOwner(nullptr);
+	ApplyCarryState();
+	ForceNetUpdate();
+}
+
 void ABotanicusLargeEquipmentActor::Drop()
 {
 	if (!Carrier)
@@ -199,6 +286,7 @@ void ABotanicusLargeEquipmentActor::Drop()
 		return;
 	}
 
+	RestoreCarrierMovement();
 	const FVector DropLocation =
 		Carrier->GetActorLocation() +
 		Carrier->GetActorForwardVector() * 150.0f +
@@ -220,11 +308,15 @@ void ABotanicusLargeEquipmentActor::Drop()
 
 void ABotanicusLargeEquipmentActor::ApplyCarryState()
 {
-	const bool bIsReserved = IsValid(Carrier);
-	const bool bIsCarried = bIsReserved && !bPlacementMode;
-	SetActorEnableCollision(!bIsReserved);
+	const bool bIsCarried =
+		IsValid(Carrier) &&
+		!bPlacementMode &&
+		!bCooperativeCarry;
+	const bool bHasPlacementReservation =
+		bPlacementMode || bIsCarried;
+	SetActorEnableCollision(!bHasPlacementReservation);
 	Mesh->SetCollisionEnabled(
-		bIsReserved
+		bHasPlacementReservation
 			? ECollisionEnabled::NoCollision
 			: ECollisionEnabled::QueryAndPhysics);
 
@@ -264,11 +356,106 @@ void ABotanicusLargeEquipmentActor::OnRep_PlacementState()
 	ApplyCarryState();
 }
 
+void ABotanicusLargeEquipmentActor::InitializeEquipment(
+	FName InItemKey)
+{
+	if (!InItemKey.IsNone())
+	{
+		ItemKey = InItemKey;
+	}
+	ApplyItemDefinition();
+	ForceNetUpdate();
+}
+
+void ABotanicusLargeEquipmentActor::OnRep_ItemKey()
+{
+	ApplyItemDefinition();
+}
+
+void ABotanicusLargeEquipmentActor::ApplyItemDefinition()
+{
+	UGameInstance* GameInstance = GetGameInstance();
+	const UBotanicusItemCatalogSubsystem* Catalog =
+		GameInstance
+			? GameInstance->GetSubsystem<
+				UBotanicusItemCatalogSubsystem>()
+			: nullptr;
+	const FBotanicusItemDefinition* Definition =
+		Catalog ? Catalog->FindItem(ItemKey) : nullptr;
+	if (!Definition)
+	{
+		return;
+	}
+
+	if (UStaticMesh* DefinitionMesh =
+		Definition->WorldMesh.LoadSynchronous())
+	{
+		Mesh->SetStaticMesh(DefinitionMesh);
+	}
+	Mesh->SetRelativeScale3D(Definition->WorldScale);
+	InteractionName = Definition->DisplayName;
+	bCooperativeCarry =
+		Definition->WeightClass ==
+			EBotanicusItemWeightClass::TwoPlayerCarry;
+	CarryMovementSpeedMultiplier =
+		FMath::Clamp(
+			Definition->CarryMovementSpeedMultiplier,
+			0.1f,
+			1.0f);
+	ApplyCarryState();
+}
+
+void ABotanicusLargeEquipmentActor::ApplyCarrierMovementPenalty()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	if (IsValid(Carrier))
+	{
+		Carrier->SetEquipmentCarryState(
+			bCooperativeCarry
+				? EBotanicusEquipmentCarryRole::Primary
+				: EBotanicusEquipmentCarryRole::Solo,
+			CarryMovementSpeedMultiplier);
+	}
+	if (IsValid(Helper))
+	{
+		Helper->SetEquipmentCarryState(
+			EBotanicusEquipmentCarryRole::Helper,
+			CarryMovementSpeedMultiplier);
+	}
+}
+
+void ABotanicusLargeEquipmentActor::RestoreCarrierMovement()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	if (IsValid(Carrier))
+	{
+		Carrier->SetEquipmentCarryState(
+			EBotanicusEquipmentCarryRole::None,
+			1.0f);
+	}
+	if (IsValid(Helper))
+	{
+		Helper->SetEquipmentCarryState(
+			EBotanicusEquipmentCarryRole::None,
+			1.0f);
+	}
+}
+
 FVector ABotanicusLargeEquipmentActor::GetPlacementBoxExtent() const
 {
-	return Mesh
-		? Mesh->CalcBounds(Mesh->GetComponentTransform()).BoxExtent
-		: FVector(50.0f);
+	if (!Mesh || !Mesh->GetStaticMesh())
+	{
+		return FVector(50.0f);
+	}
+
+	return Mesh->GetStaticMesh()->GetBounds().BoxExtent *
+		Mesh->GetComponentScale().GetAbs();
 }
 
 void ABotanicusLargeEquipmentActor::BeginPlacement(
@@ -281,6 +468,7 @@ void ABotanicusLargeEquipmentActor::BeginPlacement(
 
 	bPlacementMode = true;
 	bPlacementValid = false;
+	ApplyCarrierMovementPenalty();
 	ApplyCarryState();
 	ForceNetUpdate();
 }
@@ -311,7 +499,9 @@ void ABotanicusLargeEquipmentActor::ConfirmPlacement()
 		return;
 	}
 
+	RestoreCarrierMovement();
 	Carrier = nullptr;
+	Helper = nullptr;
 	bPlacementMode = false;
 	bPlacementValid = false;
 	SetOwner(nullptr);
@@ -326,6 +516,7 @@ void ABotanicusLargeEquipmentActor::CancelPlacement()
 		return;
 	}
 
+	RestoreCarrierMovement();
 	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 	SetActorTransform(
 		PlacementOriginTransform,
@@ -333,6 +524,7 @@ void ABotanicusLargeEquipmentActor::CancelPlacement()
 		nullptr,
 		ETeleportType::TeleportPhysics);
 	Carrier = nullptr;
+	Helper = nullptr;
 	bPlacementMode = false;
 	bPlacementValid = false;
 	SetOwner(nullptr);
