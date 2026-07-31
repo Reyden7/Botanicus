@@ -72,3 +72,66 @@ unreal.EditorAssetLibrary.save_loaded_asset(
     only_if_is_dirty=False,
 )
 unreal.log(f"Botanicus prototype item ready: {ASSET_PATH}")
+
+for item_key, asset_name, item_name, description, item_order in (
+    (
+        "PlantPot",
+        "DA_PlantPot",
+        "Pot de culture",
+        "Pot vide à placer avant d'ajouter terreau, graines et eau.",
+        10,
+    ),
+    (
+        "PottingSoil",
+        "DA_PottingSoil",
+        "Dose de terreau",
+        "Une dose remplit un pot vide.",
+        11,
+    ),
+    (
+        "SeedPacket_Basil",
+        "DA_SeedPacket_Basil",
+        "Graines de basilic",
+        "Une graine peut être plantée dans un pot rempli de terreau.",
+        12,
+    ),
+    (
+        "WateringCan",
+        "DA_WateringCan",
+        "Arrosoir",
+        "Outil réutilisable qui ajoute de l'eau au pot sélectionné.",
+        13,
+    ),
+):
+    growing_asset_path = f"{ASSET_DIRECTORY}/{asset_name}"
+    growing_asset = unreal.EditorAssetLibrary.load_asset(
+        growing_asset_path
+    )
+    if not growing_asset:
+        factory = unreal.DataAssetFactory()
+        factory.set_editor_property(
+            "data_asset_class",
+            unreal.ItemDataAsset,
+        )
+        growing_asset = (
+            unreal.AssetToolsHelpers.get_asset_tools().create_asset(
+                asset_name,
+                ASSET_DIRECTORY,
+                unreal.ItemDataAsset,
+                factory,
+            )
+        )
+    if not growing_asset:
+        raise RuntimeError(f"Unable to create {growing_asset_path}")
+    growing_asset.set_editor_property("item_key", item_key)
+    growing_asset.set_editor_property("item_name", item_name)
+    growing_asset.set_editor_property(
+        "item_description",
+        description,
+    )
+    growing_asset.set_editor_property("item_order", item_order)
+    unreal.EditorAssetLibrary.save_loaded_asset(
+        growing_asset,
+        only_if_is_dirty=False,
+    )
+    unreal.log(f"Botanicus growing item ready: {growing_asset_path}")

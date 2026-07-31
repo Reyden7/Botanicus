@@ -5,11 +5,15 @@
 #include "Botanicus.h"
 #include "BotanicusCharacter.h"
 #include "BotanicusPlayerController.h"
+#include "Building/BotanicusCatalogBuildingActor.h"
 #include "Building/BotanicusCommunicationDoorActor.h"
 #include "Delivery/BotanicusDeliveryParcelActor.h"
 #include "Delivery/BotanicusLargeEquipmentActor.h"
 #include "Delivery/BotanicusPlaceableItemActor.h"
+#include "Growing/BotanicusPlantPotActor.h"
+#include "Engine/LocalPlayer.h"
 #include "EngineUtils.h"
+#include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
 #include "Kismet/GameplayStatics.h"
@@ -53,6 +57,16 @@ void ABotanicusGameMode::BeginPlay()
 	{
 		LoadAutosave();
 		RestoreWorldState();
+		if (UWorld* World = GetWorld())
+		{
+			for (FConstPlayerControllerIterator ControllerIt =
+					 World->GetPlayerControllerIterator();
+				 ControllerIt;
+				 ++ControllerIt)
+			{
+				RestorePlayerEconomy(ControllerIt->Get());
+			}
+		}
 	}
 }
 
@@ -67,6 +81,16 @@ void ABotanicusGameMode::EndPlay(
 	Super::EndPlay(EndPlayReason);
 }
 
+void ABotanicusGameMode::PostLogin(APlayerController* NewPlayer)
+{
+	Super::PostLogin(NewPlayer);
+
+	if (HasAuthority())
+	{
+		RestorePlayerEconomy(NewPlayer);
+	}
+}
+
 void ABotanicusGameMode::RestartPlayer(AController* NewPlayer)
 {
 	Super::RestartPlayer(NewPlayer);
@@ -74,6 +98,7 @@ void ABotanicusGameMode::RestartPlayer(AController* NewPlayer)
 	if (HasAuthority())
 	{
 		RestorePlayerInventory(NewPlayer);
+		RestorePlayerEconomy(NewPlayer);
 		if (ABotanicusPlayerController* BotanicusController =
 			Cast<ABotanicusPlayerController>(NewPlayer))
 		{
@@ -87,7 +112,14 @@ void ABotanicusGameMode::Logout(AController* Exiting)
 {
 	if (HasAuthority())
 	{
+		if (ABotanicusPlayerController* BotanicusController =
+			Cast<ABotanicusPlayerController>(Exiting))
+		{
+			BotanicusController->
+				CancelPendingBuildingPurchaseForLogout();
+		}
 		CapturePlayerInventory(Exiting);
+		CapturePlayerEconomy(Exiting);
 	}
 
 	Super::Logout(Exiting);
@@ -123,7 +155,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 
 	CurrentSaveGame->MapName =
 		UGameplayStatics::GetCurrentLevelName(this, true);
-	CurrentSaveGame->SaveVersion = 3;
+	CurrentSaveGame->SaveVersion = 6;
 	CurrentSaveGame->BuildingActors.Reset();
 	CurrentSaveGame->Paths.Reset();
 	CurrentSaveGame->WorldItems.Reset();
@@ -135,8 +167,9 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 	{
 		AActor* Actor = *ActorIt;
 		if (!IsValid(Actor) ||
-			!Actor->GetClass()->GetPathName().Contains(
-				TEXT("/EasyBuildingSystem/Blueprints/BuildingObjects/")))
+			(!Actor->ActorHasTag(PurchasedBuildingTag) &&
+			 !Actor->GetClass()->GetPathName().Contains(
+				 TEXT("/EasyBuildingSystem/Blueprints/BuildingObjects/"))))
 		{
 			continue;
 		}
@@ -240,6 +273,17 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		SavedItem.Transform = ItemIt->GetActorTransform();
 		SavedItem.ItemKey = ItemIt->GetItemKey();
 		SavedItem.Quantity = ItemIt->GetQuantity();
+		if (const ABotanicusPlantPotActor* PlantPot =
+			Cast<ABotanicusPlantPotActor>(*ItemIt))
+		{
+			SavedItem.bPlantPotHasSoil = PlantPot->HasSoil();
+			SavedItem.PlantKey = PlantPot->GetPlantKey();
+			SavedItem.PlantWaterLevel = PlantPot->GetWaterLevel();
+			SavedItem.PlantGrowthProgress =
+				PlantPot->GetGrowthProgress();
+			SavedItem.PlantWateringCount =
+				PlantPot->GetWateringCount();
+		}
 	}
 
 	for (FConstPlayerControllerIterator ControllerIt =
@@ -248,6 +292,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		 ++ControllerIt)
 	{
 		CapturePlayerInventory(ControllerIt->Get());
+		CapturePlayerEconomy(ControllerIt->Get());
 	}
 
 	const FString SlotName = GetAutosaveSlotName();
@@ -258,10 +303,11 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		UE_LOG(
 			LogBotanicus,
 			Display,
-			TEXT("Botanicus autosave completed: slot '%s', %d building actors, %d player inventories, %d paths, %d world items."),
+			TEXT("Botanicus autosave completed: slot '%s', %d building actors, %d player inventories, %d player economies, %d paths, %d world items."),
 			*SlotName,
 			CurrentSaveGame->BuildingActors.Num(),
 			CurrentSaveGame->PlayerInventories.Num(),
+			CurrentSaveGame->PlayerEconomies.Num(),
 			CurrentSaveGame->Paths.Num(),
 			CurrentSaveGame->WorldItems.Num());
 	}
@@ -284,7 +330,7 @@ FString ABotanicusGameMode::GetAutosaveSlotName() const
 }
 
 FString ABotanicusGameMode::GetPlayerSaveKey(
-	const AController* Controller) const
+	const AController* Controller)
 {
 	if (!Controller)
 	{
@@ -294,6 +340,52 @@ FString ABotanicusGameMode::GetPlayerSaveKey(
 	const APlayerState* PlayerState = Controller->PlayerState;
 	if (PlayerState)
 	{
+		// OnlineSubsystemUtils creates a new synthetic Unique Net ID every
+		// time a PIE session starts. It looks valid, but using it as a save
+		// key creates a fresh wallet and inventory on every editor launch.
+		// Player IDs also keep incrementing across PIE restarts. Use only
+		// topology that is recreated deterministically for every test run.
+		if (const UWorld* World = GetWorld();
+			World && World->WorldType == EWorldType::PIE)
+		{
+			const APlayerController* PlayerController =
+				Cast<APlayerController>(Controller);
+			if (PlayerController &&
+				PlayerController->IsLocalPlayerController())
+			{
+				const ULocalPlayer* LocalPlayer =
+					PlayerController->GetLocalPlayer();
+				return FString::Printf(
+					TEXT("PIELocal_%d"),
+					LocalPlayer ? LocalPlayer->GetControllerId() : 0);
+			}
+
+			AController* MutableController =
+				const_cast<AController*>(Controller);
+			if (const int32* ExistingSlot =
+				PIERemotePlayerSlots.Find(MutableController))
+			{
+				return FString::Printf(
+					TEXT("PIEClient_%d"),
+					*ExistingSlot);
+			}
+
+			for (auto SlotIt = PIERemotePlayerSlots.CreateIterator();
+				 SlotIt;
+				 ++SlotIt)
+			{
+				if (!SlotIt.Key().IsValid())
+				{
+					SlotIt.RemoveCurrent();
+				}
+			}
+			const int32 NewSlot = NextPIERemotePlayerSlot++;
+			PIERemotePlayerSlots.Add(MutableController, NewSlot);
+			return FString::Printf(
+				TEXT("PIEClient_%d"),
+				NewSlot);
+		}
+
 		const FUniqueNetIdRepl& UniqueId = PlayerState->GetUniqueId();
 		if (UniqueId.IsValid())
 		{
@@ -332,10 +424,12 @@ void ABotanicusGameMode::LoadAutosave()
 	UE_LOG(
 		LogBotanicus,
 		Display,
-		TEXT("Loaded Botanicus autosave '%s': %d building actors, %d player inventories, %d paths, %d world items."),
+		TEXT("Loaded Botanicus autosave '%s' (version %d): %d building actors, %d player inventories, %d player economies, %d paths, %d world items."),
 		*SlotName,
+		CurrentSaveGame->SaveVersion,
 		CurrentSaveGame->BuildingActors.Num(),
 		CurrentSaveGame->PlayerInventories.Num(),
+		CurrentSaveGame->PlayerEconomies.Num(),
 		CurrentSaveGame->Paths.Num(),
 		CurrentSaveGame->WorldItems.Num());
 }
@@ -575,6 +669,17 @@ void ABotanicusGameMode::RestoreWorldState()
 			PlacedItem->InitializePlacedItem(
 				SavedItem.ItemKey,
 				SavedItem.Quantity);
+			if (ABotanicusPlantPotActor* PlantPot =
+				Cast<ABotanicusPlantPotActor>(PlacedItem))
+			{
+				PlantPot->RestoreGrowingState(
+					SavedItem.bPlantPotHasSoil,
+					SavedItem.PlantKey,
+					SavedItem.PlantWaterLevel,
+					SavedItem.PlantGrowthProgress);
+				PlantPot->RestoreWateringCount(
+					SavedItem.PlantWateringCount);
+			}
 		}
 		else if (ABotanicusLargeEquipmentActor* Equipment =
 			Cast<ABotanicusLargeEquipmentActor>(RestoredItem))
@@ -664,4 +769,169 @@ void ABotanicusGameMode::RestorePlayerInventory(AController* Controller)
 	QuickBar->ApplySavedState(
 		SavedInventory->Slots,
 		SavedInventory->SelectedSlotIndex);
+}
+
+void ABotanicusGameMode::CapturePlayerEconomy(
+	const AController* Controller)
+{
+	if (!CurrentSaveGame || !Controller || !GetWorld())
+	{
+		return;
+	}
+
+	const ABotanicusPlayerController* BotanicusController =
+		Cast<ABotanicusPlayerController>(Controller);
+	const FString PlayerKey = GetPlayerSaveKey(Controller);
+	if (!BotanicusController || PlayerKey.IsEmpty())
+	{
+		return;
+	}
+
+	FBotanicusSavedPlayerEconomy* SavedEconomy =
+		CurrentSaveGame->PlayerEconomies.FindByPredicate(
+			[&PlayerKey](const FBotanicusSavedPlayerEconomy& Entry)
+			{
+				return Entry.PlayerKey == PlayerKey;
+			});
+	if (!SavedEconomy)
+	{
+		SavedEconomy =
+			&CurrentSaveGame->PlayerEconomies.AddDefaulted_GetRef();
+		SavedEconomy->PlayerKey = PlayerKey;
+	}
+
+	SavedEconomy->AvailableFunds =
+		BotanicusController->GetAvailableFunds();
+	SavedEconomy->BuildingProgressionLevel =
+		BotanicusController->GetBuildingProgressionLevel();
+	SavedEconomy->PendingOrders.Reset();
+
+	const AGameStateBase* CurrentGameState = GetWorld()->GetGameState();
+	const float ServerTime = CurrentGameState
+		? CurrentGameState->GetServerWorldTimeSeconds()
+		: GetWorld()->GetTimeSeconds();
+	for (const FBotanicusPendingOrder& PendingOrder :
+		 BotanicusController->GetPendingOrders())
+	{
+		if (PendingOrder.ItemKey.IsNone())
+		{
+			continue;
+		}
+
+		FBotanicusSavedPendingOrder& SavedOrder =
+			SavedEconomy->PendingOrders.AddDefaulted_GetRef();
+		SavedOrder.OrderId = PendingOrder.OrderId;
+		SavedOrder.ItemKey = PendingOrder.ItemKey;
+		SavedOrder.Quantity = FMath::Max(1, PendingOrder.Quantity);
+		SavedOrder.ChargedPrice =
+			FMath::Max(0, PendingOrder.ChargedPrice);
+		SavedOrder.RemainingDeliverySeconds =
+			FMath::Max(
+				0.1f,
+				PendingOrder.DeliveryServerTime - ServerTime);
+	}
+}
+
+void ABotanicusGameMode::RestorePlayerEconomy(
+	AController* Controller)
+{
+	if (!CurrentSaveGame || !Controller)
+	{
+		return;
+	}
+
+	ABotanicusPlayerController* BotanicusController =
+		Cast<ABotanicusPlayerController>(Controller);
+	const FString PlayerKey = GetPlayerSaveKey(Controller);
+	if (!BotanicusController || PlayerKey.IsEmpty())
+	{
+		return;
+	}
+
+	const FBotanicusSavedPlayerEconomy* SavedEconomy =
+		CurrentSaveGame->SaveVersion >= 4
+			? CurrentSaveGame->PlayerEconomies.FindByPredicate(
+				[&PlayerKey](
+					const FBotanicusSavedPlayerEconomy& Entry)
+				{
+					return Entry.PlayerKey == PlayerKey;
+				})
+			: nullptr;
+
+	UE_LOG(
+		LogBotanicus,
+		Display,
+		TEXT(
+			"Economy lookup for %s uses save key '%s' (%s)."),
+		Controller->PlayerState
+			? *Controller->PlayerState->GetPlayerName()
+			: TEXT("UnknownPlayer"),
+		*PlayerKey,
+		SavedEconomy ? TEXT("found") : TEXT("new"));
+
+	TArray<FBotanicusPendingOrder> RestoredOrders;
+	int32 RestoredFunds =
+		BotanicusController->GetDefaultStartingFunds();
+	int32 RestoredBuildingProgressionLevel = 1;
+	if (SavedEconomy)
+	{
+		RestoredFunds = FMath::Max(0, SavedEconomy->AvailableFunds);
+		if (CurrentSaveGame->SaveVersion >= 5)
+		{
+			RestoredBuildingProgressionLevel =
+				FMath::Max(
+					1,
+					SavedEconomy->BuildingProgressionLevel);
+		}
+		RestoredOrders.Reserve(SavedEconomy->PendingOrders.Num());
+		for (const FBotanicusSavedPendingOrder& SavedOrder :
+			 SavedEconomy->PendingOrders)
+		{
+			FBotanicusPendingOrder& RestoredOrder =
+				RestoredOrders.AddDefaulted_GetRef();
+			RestoredOrder.OrderId = SavedOrder.OrderId;
+			RestoredOrder.ItemKey = SavedOrder.ItemKey;
+			RestoredOrder.Quantity = SavedOrder.Quantity;
+			RestoredOrder.ChargedPrice = SavedOrder.ChargedPrice;
+			// RestoreCatalogOrderState interprets this field as duration.
+			RestoredOrder.DeliveryServerTime =
+				SavedOrder.RemainingDeliverySeconds;
+		}
+	}
+
+	// Version-4 saves can already contain a confirmed compact greenhouse even
+	// though player progression did not exist yet. Preserve that achievement
+	// during the one-time migration and grant the same level-up reward.
+	if (CurrentSaveGame->SaveVersion == 4)
+	{
+		bool bHasLegacyCompactGreenhouse = false;
+		for (TActorIterator<ABotanicusCompactGreenhouseActor> BuildingIt(
+				 GetWorld());
+			 BuildingIt;
+			 ++BuildingIt)
+		{
+			if (BuildingIt->ActorHasTag(PurchasedBuildingTag))
+			{
+				bHasLegacyCompactGreenhouse = true;
+				break;
+			}
+		}
+		if (bHasLegacyCompactGreenhouse)
+		{
+			RestoredBuildingProgressionLevel = 2;
+			RestoredFunds += 500;
+			UE_LOG(
+				LogBotanicus,
+				Display,
+				TEXT(
+					"Migrated legacy compact greenhouse achievement to development level 2 with a 500-credit grant."));
+		}
+	}
+
+	// Calling this even without a version-4 entry locks in the default starting
+	// balance and prevents a later pawn restart from replaying stale save data.
+	BotanicusController->RestoreCatalogOrderState(
+		RestoredFunds,
+		RestoredOrders,
+		RestoredBuildingProgressionLevel);
 }

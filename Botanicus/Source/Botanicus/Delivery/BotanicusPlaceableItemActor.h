@@ -24,7 +24,7 @@ public:
 		AActor* Interactor) const override;
 
 	void InitializePlacedItem(FName InItemKey, int32 InQuantity = 1);
-	void ConfigureAsLocalPreview(bool bIsValid);
+	virtual void ConfigureAsLocalPreview(bool bIsValid);
 	FVector GetPlacementBoxExtent() const;
 
 	FName GetItemKey() const { return ItemKey; }

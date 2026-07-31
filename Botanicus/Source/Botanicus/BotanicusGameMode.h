@@ -23,6 +23,7 @@ public:
 
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void PostLogin(APlayerController* NewPlayer) override;
 	virtual void RestartPlayer(AController* NewPlayer) override;
 	virtual void Logout(AController* Exiting) override;
 
@@ -34,16 +35,20 @@ public:
 
 private:
 	FString GetAutosaveSlotName() const;
-	FString GetPlayerSaveKey(const AController* Controller) const;
+	FString GetPlayerSaveKey(const AController* Controller);
 	void LoadAutosave();
 	void RestoreWorldState();
 	void CapturePlayerInventory(const AController* Controller);
 	void RestorePlayerInventory(AController* Controller);
+	void CapturePlayerEconomy(const AController* Controller);
+	void RestorePlayerEconomy(AController* Controller);
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusWorldSaveGame> CurrentSaveGame;
 
 	TSet<FName> RemovedBuildingActorNames;
+	TMap<TWeakObjectPtr<AController>, int32> PIERemotePlayerSlots;
+	int32 NextPIERemotePlayerSlot = 0;
 };
 
 

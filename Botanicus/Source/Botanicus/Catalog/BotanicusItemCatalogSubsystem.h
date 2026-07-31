@@ -25,6 +25,10 @@ public:
 		FName ItemKey,
 		FBotanicusItemDefinition& OutDefinition) const;
 
+	/** Returns the editable catalogue followed by non-duplicate native fallbacks. */
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Catalog")
+	TArray<FBotanicusItemDefinition> GetAllItems() const;
+
 private:
 	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusItemCatalog> LoadedCatalog;

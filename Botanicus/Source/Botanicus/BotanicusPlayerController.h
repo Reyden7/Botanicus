@@ -12,17 +12,45 @@ class UBotanicusMultiplayerSubsystem;
 class UBotanicusQuickBarWidget;
 class UBotanicusTopDownToolbarWidget;
 class UBotanicusCarryProgressWidget;
+class UBotanicusOrderCatalogWidget;
+class UBotanicusBuildingCatalogWidget;
 class ACameraActor;
 class AActor;
 class ABotanicusPathActor;
 class ABotanicusCommunicationDoorActor;
 class ABotanicusDeliveryParcelActor;
+class ABotanicusDeliveryZoneActor;
 class ABotanicusLargeEquipmentActor;
 class ABotanicusPlaceableItemActor;
+class ABotanicusPlantPotActor;
 class UActorComponent;
 class UMaterialInterface;
 class UPrimitiveComponent;
 struct FInputKeyEventArgs;
+
+USTRUCT(BlueprintType)
+struct BOTANICUS_API FBotanicusPendingOrder
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly)
+	FGuid OrderId;
+
+	UPROPERTY(BlueprintReadOnly)
+	FName ItemKey = NAME_None;
+
+	UPROPERTY(BlueprintReadOnly)
+	FText DisplayName;
+
+	UPROPERTY(BlueprintReadOnly)
+	int32 Quantity = 1;
+
+	UPROPERTY(BlueprintReadOnly)
+	int32 ChargedPrice = 0;
+
+	UPROPERTY(BlueprintReadOnly)
+	float DeliveryServerTime = 0.0f;
+};
 
 /**
  *  Simple first person Player Controller
@@ -63,6 +91,10 @@ public:
 	UFUNCTION(Exec)
 	void BotanicusOnlineStatus();
 
+	/** Development command: places one server-authoritative catalogue order. */
+	UFUNCTION(Exec)
+	void BotanicusOrder(FName ItemKey);
+
 	/** Development command: validates whole-building grouping on the current map. */
 	UFUNCTION(Exec)
 	void BotanicusTestBuildingGrouping();
@@ -95,16 +127,47 @@ public:
 	void CancelPathDeletion();
 
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Building")
-	void PurchaseTestBuilding();
+	void ToggleBuildingCatalog();
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Building")
+	void PurchaseCatalogBuilding(FName BuildingKey);
 
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Delivery")
-	void OrderTestDelivery();
+	void ToggleOrderCatalog();
 
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Delivery")
-	void OrderTestLargeEquipment();
+	void PlaceCatalogOrder(FName ItemKey);
 
-	UFUNCTION(BlueprintCallable, Category="Botanicus|Delivery")
-	void OrderTestSoloEquipment();
+	UFUNCTION(BlueprintPure, Category="Botanicus|Delivery")
+	int32 GetAvailableFunds() const { return AvailableFunds; }
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Building")
+	int32 GetBuildingProgressionLevel() const
+	{
+		return BuildingProgressionLevel;
+	}
+
+	int32 GetDefaultStartingFunds() const
+	{
+		return FMath::Max(0, StartingFunds);
+	}
+
+	const TArray<FBotanicusPendingOrder>& GetPendingOrders() const
+	{
+		return PendingOrders;
+	}
+
+	/**
+	 * Server-only load hook. DeliveryServerTime in RestoredOrders contains a
+	 * remaining duration and is converted back to server time here.
+	 */
+	void RestoreCatalogOrderState(
+		int32 RestoredFunds,
+		const TArray<FBotanicusPendingOrder>& RestoredOrders,
+		int32 RestoredBuildingProgressionLevel = 1);
+
+	/** Cancels and refunds an unconfirmed building before logout is saved. */
+	void CancelPendingBuildingPurchaseForLogout();
 
 	UFUNCTION(Client, Reliable)
 	void ClientHideRemovedBuildingActors(
@@ -149,6 +212,8 @@ protected:
 	virtual void BeginPlay() override;
 
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void GetLifetimeReplicatedProps(
+		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	virtual void PlayerTick(float DeltaTime) override;
 
@@ -168,6 +233,8 @@ protected:
 	void ForceFirstPersonView();
 	void InitializeQuickBarWidget();
 	void InitializeTopDownToolbarWidget();
+	void InitializeOrderCatalogWidget();
+	void InitializeBuildingCatalogWidget();
 	void HideEbsDemoHud();
 	void RefreshTopDownRoofVisibility();
 	void RestoreTopDownRoofVisibility();
@@ -199,6 +266,13 @@ protected:
 	void UpdateBuildingGroupPreview(float DeltaTime);
 	void UpdateCommunicationDoorPreview();
 	bool TryCollectNearbyDeliveryParcel();
+	bool TryMoveNearbyPlaceableItem();
+	void BeginPlaceableItemMoveCharge(
+		ABotanicusPlaceableItemActor* WorldItem);
+	void UpdatePlaceableItemMoveCharge(float DeltaTime);
+	void CancelPlaceableItemMoveCharge();
+	bool TryBeginNearbyPlantPotAction();
+	void EndPlantPotAction();
 	bool TryHandleNearbyLargeEquipment();
 	void BeginEquipmentCarryCharge(
 		ABotanicusLargeEquipmentActor* Equipment);
@@ -218,6 +292,8 @@ protected:
 		float RequestedYaw,
 		FTransform& OutTransform) const;
 	void BeginQuickBarItemPlacement();
+	void BeginWorldItemMove(
+		ABotanicusPlaceableItemActor* WorldItem);
 	void UpdateQuickBarItemPlacement(float DeltaTime);
 	void RotateQuickBarItemPlacement(float Direction);
 	void ConfirmQuickBarItemPlacement();
@@ -226,12 +302,19 @@ protected:
 		FName ItemKey,
 		const FVector& RequestedLocation,
 		float RequestedYaw,
-		FTransform& OutTransform) const;
+		FTransform& OutTransform,
+		const AActor* IgnoredWorldItem = nullptr) const;
 	void DrawQuickBarItemAlignmentGuides(
 		const FTransform& PlacementTransform) const;
 	bool IsLookingAtWorldItem(
 		const AActor* Item,
 		float MaximumDistance) const;
+	ABotanicusDeliveryZoneActor* FindOrCreateDeliveryZone();
+	bool DeliverCatalogItem(
+		FName ItemKey,
+		int32 Quantity);
+	void CompleteCatalogOrder(FGuid OrderId);
+	void RefreshOrderCatalog();
 	void SpawnTestLargeEquipment(FName ItemKey);
 	bool FindBuildingConnectionSnap(
 		const TArray<TObjectPtr<AActor>>& MovingGroup,
@@ -263,20 +346,30 @@ protected:
 	void ServerCancelBuildingGroupMove();
 
 	UFUNCTION(Server, Reliable)
-	void ServerPurchaseTestBuilding();
-
-	UFUNCTION(Server, Reliable)
-	void ServerOrderTestDelivery();
+	void ServerPurchaseCatalogBuilding(FName BuildingKey);
 
 	UFUNCTION(Server, Reliable)
 	void ServerCollectDeliveryParcel(
 		ABotanicusDeliveryParcelActor* Parcel);
 
 	UFUNCTION(Server, Reliable)
-	void ServerOrderTestLargeEquipment();
+	void ServerBeginPlantPotAction(
+		ABotanicusPlantPotActor* PlantPot);
 
 	UFUNCTION(Server, Reliable)
-	void ServerOrderTestSoloEquipment();
+	void ServerEndPlantPotAction(
+		ABotanicusPlantPotActor* PlantPot);
+
+	UFUNCTION(Server, Reliable)
+	void ServerPlaceCatalogOrder(FName ItemKey);
+
+	/** Legacy implementations kept binary-local while old test entry points are retired. */
+	void ServerOrderTestDelivery_Implementation();
+	void ServerOrderTestLargeEquipment_Implementation();
+	void ServerOrderTestSoloEquipment_Implementation();
+
+	UFUNCTION()
+	void OnRep_OrderState();
 
 	UFUNCTION(Server, Reliable)
 	void ServerToggleCarryLargeEquipment(
@@ -320,6 +413,20 @@ protected:
 		FName ItemKey,
 		FVector_NetQuantize10 RequestedLocation,
 		float RequestedYaw);
+
+	UFUNCTION(Server, Reliable)
+	void ServerBeginPlaceableItemMove(
+		ABotanicusPlaceableItemActor* WorldItem);
+
+	UFUNCTION(Server, Reliable)
+	void ServerConfirmPlaceableItemMove(
+		ABotanicusPlaceableItemActor* WorldItem,
+		FVector_NetQuantize10 RequestedLocation,
+		float RequestedYaw);
+
+	UFUNCTION(Server, Reliable)
+	void ServerCancelPlaceableItemMove(
+		ABotanicusPlaceableItemActor* WorldItem);
 
 	UFUNCTION(Server, Reliable)
 	void ServerConfirmCommunicationDoor(int32 CandidateIndex);
@@ -388,12 +495,19 @@ protected:
 	void TryApplyPurchasedBuildingSnapshot();
 	bool IsServerBuildingGroupPlacementValid() const;
 	void ClearServerBuildingGroupMove();
+	void RefundPendingBuildingPurchase();
 
 	UPROPERTY(Transient)
 	TObjectPtr<ACameraActor> BuildingCameraActor;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusTopDownToolbarWidget> TopDownToolbarWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBotanicusOrderCatalogWidget> OrderCatalogWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBotanicusBuildingCatalogWidget> BuildingCatalogWidget;
 
 	UPROPERTY(Transient)
 	TObjectPtr<ABotanicusPathActor> PathPreviewActor;
@@ -450,8 +564,30 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Interaction", meta=(ClampMin="1.0", ClampMax="60.0"))
 	float WorldItemLookAngle = 22.0f;
 
+	UPROPERTY(EditDefaultsOnly, Config, Category="Botanicus|Delivery", meta=(ClampMin="0"))
+	int32 StartingFunds = 2000;
+
+	UPROPERTY(
+		EditDefaultsOnly,
+		Config,
+		Category="Botanicus|Building Progression",
+		meta=(ClampMin="0"))
+	int32 DevelopmentLevelRewardCredits = 500;
+
+	UPROPERTY(ReplicatedUsing=OnRep_OrderState)
+	int32 AvailableFunds = 0;
+
+	UPROPERTY(ReplicatedUsing=OnRep_OrderState)
+	TArray<FBotanicusPendingOrder> PendingOrders;
+
+	UPROPERTY(ReplicatedUsing=OnRep_OrderState)
+	int32 BuildingProgressionLevel = 1;
+
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Interaction", meta=(ClampMin="0.1", ClampMax="5.0"))
 	float EquipmentLiftHoldDuration = 1.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Interaction", meta=(ClampMin="0.1", ClampMax="5.0"))
+	float PlaceableItemMoveHoldDuration = 0.75f;
 
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Equipment Placement", meta=(ClampMin="50.0"))
 	float EquipmentPlacementDistance = 300.0f;
@@ -514,6 +650,22 @@ protected:
 	TObjectPtr<ABotanicusPlaceableItemActor>
 		LocalQuickBarItemPreview;
 
+	UPROPERTY(Transient)
+	TObjectPtr<ABotanicusPlaceableItemActor>
+		LocalMovedPlaceableItem;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ABotanicusPlaceableItemActor>
+		LocalPlaceableItemMoveCandidate;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ABotanicusPlaceableItemActor>
+		ServerMovedPlaceableItem;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ABotanicusPlantPotActor>
+		LocalActivePlantPot;
+
 	TArray<FTransform> LocalBuildingOriginalTransforms;
 	TArray<FTransform> ServerBuildingOriginalTransforms;
 	TObjectPtr<AActor> ServerSnappedMovingWall;
@@ -537,11 +689,14 @@ protected:
 	float QuickBarItemPlacementYaw = 0.0f;
 	float QuickBarItemPreviewUpdateAccumulator = 0.0f;
 	float EquipmentCarryChargeElapsed = 0.0f;
+	float PlaceableItemMoveChargeElapsed = 0.0f;
 	float TopDownRoofRefreshAccumulator = 0.0f;
 	bool bLocalLargeEquipmentPlacementValid = false;
 	bool bLocalQuickBarItemPlacementValid = false;
 	bool bEquipmentCarryHoldActivated = false;
 	bool bEquipmentCarryKeyHeld = false;
+	bool bPlantPotActionHeld = false;
+	bool bCatalogOrderStateRestored = false;
 	int32 LocalQuickBarItemSlotIndex = INDEX_NONE;
 	FGuid LocalQuickBarItemInstanceId;
 	FName LocalQuickBarItemKey = NAME_None;
@@ -549,6 +704,8 @@ protected:
 	bool bLocalBuildingPlacementValid = true;
 	bool bServerBuildingPlacementValid = true;
 	bool bServerBuildingPurchasePlacement = false;
+	int32 ServerPendingBuildingPurchasePrice = 0;
+	FName ServerPendingBuildingPurchaseKey = NAME_None;
 	bool bBuildingTopDownViewActive = false;
 	bool bPathPlacementActive = false;
 	bool bPathDeletionActive = false;
@@ -562,5 +719,6 @@ protected:
 	TArray<FName> PendingPurchasedBuildingActorNames;
 	TArray<FTransform> PendingPurchasedBuildingTransforms;
 	FTimerHandle PurchasedBuildingSnapshotRetryTimer;
+	TMap<FGuid, FTimerHandle> PendingOrderTimers;
 	int32 PurchasedBuildingSnapshotRetryCount = 0;
 };

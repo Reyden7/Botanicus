@@ -62,9 +62,34 @@ The current prototype top-down system already:
 - cancels with right click or `Escape`;
 - locks the building against concurrent editing by another player.
 
-Manual `T` access remains available for prototype testing. In the production
-flow, buying a building will automatically enter this mode for the purchaser and
-provide the newly purchased complete building as the selected group.
+The old free test-purchase button is replaced by `CATALOGUE BATIMENTS`.
+`DA_BotanicusBuildingCatalog` currently exposes:
+
+- `GreenhouseCompact` — Serre compacte — 900 credits;
+- `GreenhouseWorkshop` — Serre atelier — 1400 credits.
+
+Each entry carries a stable key, display text, price, unlock state and template
+reference. The server validates the definition and available credits, duplicates
+the complete EBS group and immediately enters top-down placement for the buyer.
+Credits are refunded if spawning or locking fails, or if the player cancels the
+placement. Confirming makes the debit final.
+
+Building progression is owner-only and server-authoritative. Players begin at
+development level 1: the compact greenhouse is available and the workshop
+greenhouse displays `NIVEAU 2 REQUIS — VERROUILLÉ`. Confirming the compact
+greenhouse raises the player to level 2 and immediately unlocks the workshop.
+This first level-up also grants 500 credits, leaving enough funds to purchase
+the newly unlocked workshop with the default starting balance.
+Every catalogue purchase is revalidated against the required level on the
+server. Autosave version 5 persists the level with the player's economy.
+
+Modern maps identify their templates through persistent actor tags. The current
+legacy test map is also supported by a deterministic complete-group index at
+runtime. If the map contains no EBS reference at all, each catalogue entry owns
+a native complete-building prefab so an accepted purchase can never end
+silently. These replicated prefabs move and autosave atomically like an EBS
+group. `Tools/CreateBuildingCatalog.py` regenerates the data asset and adds
+template tags whenever editor-visible reference actors are available.
 
 Botanicus uses a native AZERTY movement layer: `Z/S` moves forward/backward and
 `Q/D` moves left/right in both first-person and top-down modes. These keys are
@@ -96,7 +121,7 @@ server, and immediately gives the copy to the purchaser for placement.
 - Cancelling destroys the provisional copy.
 - The spawned actors replicate to every player.
 - Runtime-purchased buildings store their class and transform in autosave
-  version 3 and are respawned when the map is loaded.
+  version 4 and are respawned when the map is loaded.
 
 The temporary template lookup will be replaced by explicit catalogue entries,
 prices and unlock conditions.
@@ -166,7 +191,7 @@ Each entry defines:
 - its world static mesh, scale and optional custom world actor class;
 - maximum hotbar stack size;
 - weight class: `Hotbar`, `One Player Carry` or `Two Player Carry`;
-- purchase price and quantity delivered per parcel;
+- purchase price, quantity delivered and delivery delay;
 - allowed placement surfaces: floor, table and/or wall;
 - normal and precision rotation steps;
 - whether alignment guides are enabled and their edge/angle tolerances;
@@ -181,21 +206,52 @@ atomically if the complete quantity cannot fit. Runtime actors load their mesh,
 scale and display name from the same definition. Catalogue weight and placement
 rules are validated again by the server.
 
-## Equipment delivery prototype
+## Catalogue orders and delivery
 
-The temporary top-down toolbar exposes `COMMANDER COLIS TEST`. The authoritative
-server creates or reuses the nearest replicated delivery pad and places a small
-replicated parcel on it. Back in first person, a player must be close, face the
-parcel, look at it within a 22-degree camera cone and have an unobstructed line
-of sight before pressing `E`. The server validates the same conditions before
-the parcel is destroyed and its item is added to that player's owner-only
-hotbar. A full hotbar leaves the parcel in place.
+The top-down toolbar exposes one `CATALOGUE COMMANDES` button. It opens a native
+catalogue screen populated entirely from the configured Item Data asset. Each
+row shows the item name, weight class, delivered quantity, price and delivery
+delay. The screen also shows the player's current credit balance and a live
+countdown for every pending delivery.
+
+Players currently begin a session with 2,000 credits. This default can be
+changed on the player-controller defaults with `Starting Funds`. Pressing
+`COMMANDER` sends only the stable item key to the authoritative server. The
+server resolves the catalogue definition again, validates the balance, deducts
+the configured price and creates an owner-only replicated pending order. The
+client never supplies a price, quantity or delay.
+
+When the countdown ends, the server creates or reuses the nearest replicated
+delivery pad and spawns the correct delivery actor:
+
+- `Hotbar` items arrive in a parcel with the configured delivery quantity;
+- `One Player Carry` items arrive as solo heavy equipment;
+- `Two Player Carry` items arrive as cooperative heavy equipment.
+
+If the server cannot create the delivery actor, it removes the pending order
+and refunds its exact charged price. Multiple orders can be pending at the same
+time. Pending-order state and credits are private to the owning player; delivered
+world actors remain replicated to everyone.
+
+Credits and pending orders are stored per platform player identity in autosave
+version 4. On restart or reconnection, the server restores the exact balance,
+recreates every delivery timer from its saved remaining duration and continues
+the queue. Version 3 saves migrate safely by assigning the configured starting
+balance and an empty order queue. Editor PIE sessions use stable local/remote
+topology slots rather than Unreal's synthetic online identifier or its
+cross-session player counter.
+
+Back in first person, a player must be close, face a parcel, look at it within
+a 22-degree camera cone and have an unobstructed line of sight before pressing
+`E`. The server validates the same conditions before the parcel is destroyed
+and its item is added to that player's owner-only hotbar. A full hotbar leaves
+the parcel in place.
 
 Delivery parcels show a yellow `[ E ]` world indicator only while the local
 player is within range and looking toward them.
 
-The test parcel currently contains ten units of `SeedPacket_Test` so it can
-reuse the validated Item Data entry and demonstrate quantity handling. With
+`SeedPacket_Test` currently delivers ten units so it can demonstrate quantity
+handling. With
 the slot selected, `A` opens a local ground-placement preview. The mouse wheel
 rotates it in 5-degree steps (`Shift` gives 1-degree steps), green guide lines
 show nearby item alignment, left click asks the server to place it, and right
@@ -203,12 +259,10 @@ click or `Escape` cancels without consuming anything. The server verifies the
 exact private slot instance and removes one unit only after the replicated
 world actor is created successfully. Placed small items are included in world
 autosave. This placeholder flow establishes the boundary between shared world
-deliveries and private player inventories. Catalogue prices, delivery delays,
-final art and two-player carrying remain later iterations.
+deliveries and private player inventories.
 
-The temporary toolbar exposes `OBJET LOURD SOLO` and
-`OBJET LOURD A DEUX`. They create separate replicated placeholders on the same
-delivery pad so both weight classes can be tested. Neither enters the hotbar.
+The same catalogue screen exposes the solo and cooperative heavy-equipment
+definitions. Neither category enters the hotbar.
 Holding `E` fills a small circular progress indicator before
 the object can be lifted. An item marked `One Player Carry` activates after one
 player completes the hold. For a `Two Player Carry` item, a first player
@@ -236,10 +290,11 @@ geometry, other equipment and players are validated locally and again by the
 authoritative server. Only one pair can reserve a given object, and one player
 can participate in only one heavy-object move at a time. Items configured as
 `One Player Carry` retain the same placement system without requiring a helper.
-Final hand sockets, carrying animations and movement penalties remain later
-refinements.
+Final hand sockets and carrying animations remain later refinements. Movement
+penalties are already data-driven per catalogue item: the current solo and
+cooperative test definitions use 70% and 55% movement speed respectively.
 
-Autosave version 3 persists every uncollected parcel and large equipment actor
+Autosave version 4 persists every uncollected parcel and large equipment actor
 with its exact class, world position, rotation, scale, item identifier and
 quantity. Loading happens only on the authoritative server, which removes any
 temporary level copies before spawning the saved actors so clients receive one

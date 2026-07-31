@@ -85,6 +85,9 @@ struct BOTANICUS_API FBotanicusItemDefinition
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Delivery", meta=(ClampMin="1"))
 	int32 DeliveryQuantity = 1;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Delivery", meta=(ClampMin="0.1", Units="s"))
+	float DeliveryDelaySeconds = 5.0f;
+
 	UPROPERTY(
 		EditAnywhere,
 		BlueprintReadOnly,

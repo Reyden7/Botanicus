@@ -136,42 +136,24 @@ void UBotanicusTopDownToolbarWidget::BuildLayout()
 	UTextBlock* ConfirmLabel = nullptr;
 	UTextBlock* DeletePathLabel = nullptr;
 	UTextBlock* PurchaseBuildingLabel = nullptr;
-	UTextBlock* OrderDeliveryLabel = nullptr;
-	UTextBlock* OrderLargeEquipmentLabel = nullptr;
-	UTextBlock* OrderSoloEquipmentLabel = nullptr;
+	UTextBlock* OrderCatalogLabel = nullptr;
 	UTextBlock* CancelLabel = nullptr;
 	PurchaseBuildingButton = AddToolbarButton(
 		WidgetTree,
 		Row,
 		NSLOCTEXT(
 			"Botanicus",
-			"PurchaseTestBuildingButton",
-			"ACHETER BATIMENT TEST"),
+			"BuildingCatalogButton",
+			"CATALOGUE BATIMENTS"),
 		PurchaseBuildingLabel);
-	OrderDeliveryButton = AddToolbarButton(
+	OrderCatalogButton = AddToolbarButton(
 		WidgetTree,
 		Row,
 		NSLOCTEXT(
 			"Botanicus",
-			"OrderTestDeliveryButton",
-			"COMMANDER COLIS TEST"),
-		OrderDeliveryLabel);
-	OrderLargeEquipmentButton = AddToolbarButton(
-		WidgetTree,
-		Row,
-		NSLOCTEXT(
-			"Botanicus",
-			"OrderTestLargeEquipmentButton",
-			"OBJET LOURD A DEUX"),
-		OrderLargeEquipmentLabel);
-	OrderSoloEquipmentButton = AddToolbarButton(
-		WidgetTree,
-		Row,
-		NSLOCTEXT(
-			"Botanicus",
-			"OrderTestSoloEquipmentButton",
-			"OBJET LOURD SOLO"),
-		OrderSoloEquipmentLabel);
+			"OrderCatalogButton",
+			"CATALOGUE COMMANDES"),
+		OrderCatalogLabel);
 	PathButton = AddToolbarButton(
 		WidgetTree,
 		Row,
@@ -201,15 +183,9 @@ void UBotanicusTopDownToolbarWidget::BuildLayout()
 	PurchaseBuildingButton->OnClicked.AddDynamic(
 		this,
 		&UBotanicusTopDownToolbarWidget::HandlePurchaseBuildingClicked);
-	OrderDeliveryButton->OnClicked.AddDynamic(
+	OrderCatalogButton->OnClicked.AddDynamic(
 		this,
-		&UBotanicusTopDownToolbarWidget::HandleOrderDeliveryClicked);
-	OrderLargeEquipmentButton->OnClicked.AddDynamic(
-		this,
-		&UBotanicusTopDownToolbarWidget::HandleOrderLargeEquipmentClicked);
-	OrderSoloEquipmentButton->OnClicked.AddDynamic(
-		this,
-		&UBotanicusTopDownToolbarWidget::HandleOrderSoloEquipmentClicked);
+		&UBotanicusTopDownToolbarWidget::HandleOrderCatalogClicked);
 	ConfirmButton->OnClicked.AddDynamic(
 		this,
 		&UBotanicusTopDownToolbarWidget::HandleConfirmClicked);
@@ -250,33 +226,15 @@ void UBotanicusTopDownToolbarWidget::HandlePurchaseBuildingClicked()
 {
 	if (BotanicusController)
 	{
-		BotanicusController->PurchaseTestBuilding();
+		BotanicusController->ToggleBuildingCatalog();
 	}
 }
 
-void UBotanicusTopDownToolbarWidget::HandleOrderDeliveryClicked()
+void UBotanicusTopDownToolbarWidget::HandleOrderCatalogClicked()
 {
 	if (BotanicusController)
 	{
-		BotanicusController->OrderTestDelivery();
-	}
-}
-
-void UBotanicusTopDownToolbarWidget::
-	HandleOrderLargeEquipmentClicked()
-{
-	if (BotanicusController)
-	{
-		BotanicusController->OrderTestLargeEquipment();
-	}
-}
-
-void UBotanicusTopDownToolbarWidget::
-	HandleOrderSoloEquipmentClicked()
-{
-	if (BotanicusController)
-	{
-		BotanicusController->OrderTestSoloEquipment();
+		BotanicusController->ToggleOrderCatalog();
 	}
 }
 

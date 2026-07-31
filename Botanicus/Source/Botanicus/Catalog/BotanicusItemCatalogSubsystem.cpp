@@ -2,6 +2,8 @@
 
 #include "Catalog/BotanicusItemCatalogSubsystem.h"
 
+#include "Growing/BotanicusPlantPotActor.h"
+
 void UBotanicusItemCatalogSubsystem::Initialize(
 	FSubsystemCollectionBase& Collection)
 {
@@ -25,7 +27,9 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	SmallTest.WorldScale = FVector(0.4f);
 	SmallTest.MaximumStack = 99;
 	SmallTest.WeightClass = EBotanicusItemWeightClass::Hotbar;
+	SmallTest.Price = 25;
 	SmallTest.DeliveryQuantity = 10;
+	SmallTest.DeliveryDelaySeconds = 3.0f;
 
 	FBotanicusItemDefinition& LargeTest =
 		NativeFallbackItems.AddDefaulted_GetRef();
@@ -40,6 +44,8 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	LargeTest.WeightClass =
 		EBotanicusItemWeightClass::TwoPlayerCarry;
 	LargeTest.CarryMovementSpeedMultiplier = 0.55f;
+	LargeTest.Price = 600;
+	LargeTest.DeliveryDelaySeconds = 10.0f;
 
 	FBotanicusItemDefinition& SoloLargeTest =
 		NativeFallbackItems.AddDefaulted_GetRef();
@@ -57,6 +63,72 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	SoloLargeTest.WeightClass =
 		EBotanicusItemWeightClass::OnePlayerCarry;
 	SoloLargeTest.CarryMovementSpeedMultiplier = 0.7f;
+	SoloLargeTest.Price = 350;
+	SoloLargeTest.DeliveryDelaySeconds = 6.0f;
+
+	FBotanicusItemDefinition& PlantPot =
+		NativeFallbackItems.AddDefaulted_GetRef();
+	PlantPot.ItemKey = TEXT("PlantPot");
+	PlantPot.DisplayName =
+		NSLOCTEXT("BotanicusCatalog", "PlantPot", "Pot de culture");
+	PlantPot.Category = EBotanicusItemCategory::Decoration;
+	PlantPot.WorldMesh = TSoftObjectPtr<UStaticMesh>(
+		FSoftObjectPath(TEXT("/Engine/BasicShapes/Cylinder.Cylinder")));
+	PlantPot.WorldScale = FVector(0.42f, 0.42f, 0.34f);
+	PlantPot.WorldActorClass = ABotanicusPlantPotActor::StaticClass();
+	PlantPot.MaximumStack = 10;
+	PlantPot.WeightClass = EBotanicusItemWeightClass::Hotbar;
+	PlantPot.Price = 75;
+	PlantPot.DeliveryQuantity = 1;
+	PlantPot.DeliveryDelaySeconds = 2.0f;
+
+	FBotanicusItemDefinition& PottingSoil =
+		NativeFallbackItems.AddDefaulted_GetRef();
+	PottingSoil.ItemKey = TEXT("PottingSoil");
+	PottingSoil.DisplayName =
+		NSLOCTEXT("BotanicusCatalog", "PottingSoil", "Dose de terreau");
+	PottingSoil.Category = EBotanicusItemCategory::Supply;
+	PottingSoil.WorldMesh = TSoftObjectPtr<UStaticMesh>(
+		FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube.Cube")));
+	PottingSoil.WorldScale = FVector(0.24f);
+	PottingSoil.MaximumStack = 20;
+	PottingSoil.WeightClass = EBotanicusItemWeightClass::Hotbar;
+	PottingSoil.Price = 25;
+	PottingSoil.DeliveryQuantity = 5;
+	PottingSoil.DeliveryDelaySeconds = 2.0f;
+	PottingSoil.AllowedPlacementSurfaces = 0;
+
+	FBotanicusItemDefinition& BasilSeeds =
+		NativeFallbackItems.AddDefaulted_GetRef();
+	BasilSeeds.ItemKey = TEXT("SeedPacket_Basil");
+	BasilSeeds.DisplayName =
+		NSLOCTEXT("BotanicusCatalog", "BasilSeeds", "Graines de basilic");
+	BasilSeeds.Category = EBotanicusItemCategory::Supply;
+	BasilSeeds.WorldMesh = TSoftObjectPtr<UStaticMesh>(
+		FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube.Cube")));
+	BasilSeeds.WorldScale = FVector(0.18f, 0.08f, 0.24f);
+	BasilSeeds.MaximumStack = 20;
+	BasilSeeds.WeightClass = EBotanicusItemWeightClass::Hotbar;
+	BasilSeeds.Price = 30;
+	BasilSeeds.DeliveryQuantity = 5;
+	BasilSeeds.DeliveryDelaySeconds = 2.0f;
+	BasilSeeds.AllowedPlacementSurfaces = 0;
+
+	FBotanicusItemDefinition& WateringCan =
+		NativeFallbackItems.AddDefaulted_GetRef();
+	WateringCan.ItemKey = TEXT("WateringCan");
+	WateringCan.DisplayName =
+		NSLOCTEXT("BotanicusCatalog", "WateringCan", "Arrosoir");
+	WateringCan.Category = EBotanicusItemCategory::Tool;
+	WateringCan.WorldMesh = TSoftObjectPtr<UStaticMesh>(
+		FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube.Cube")));
+	WateringCan.WorldScale = FVector(0.38f, 0.2f, 0.28f);
+	WateringCan.MaximumStack = 1;
+	WateringCan.WeightClass = EBotanicusItemWeightClass::Hotbar;
+	WateringCan.Price = 120;
+	WateringCan.DeliveryQuantity = 1;
+	WateringCan.DeliveryDelaySeconds = 2.0f;
+	WateringCan.AllowedPlacementSurfaces = 0;
 }
 
 const FBotanicusItemDefinition*
@@ -89,4 +161,27 @@ bool UBotanicusItemCatalogSubsystem::GetItemDefinition(
 		return true;
 	}
 	return false;
+}
+
+TArray<FBotanicusItemDefinition>
+UBotanicusItemCatalogSubsystem::GetAllItems() const
+{
+	TArray<FBotanicusItemDefinition> Result;
+	if (LoadedCatalog)
+	{
+		Result = LoadedCatalog->Items;
+	}
+
+	for (const FBotanicusItemDefinition& Fallback : NativeFallbackItems)
+	{
+		if (!Result.ContainsByPredicate(
+				[&Fallback](const FBotanicusItemDefinition& Existing)
+				{
+					return Existing.ItemKey == Fallback.ItemKey;
+				}))
+		{
+			Result.Add(Fallback);
+		}
+	}
+	return Result;
 }
