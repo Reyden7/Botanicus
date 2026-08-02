@@ -6,7 +6,10 @@
 #include "QuickBar/BotanicusQuickBarComponent.h"
 #include "Sales/BotanicusSalesDisplayActor.h"
 #include "Sales/BotanicusSalePotActor.h"
+#include "Sales/BotanicusCashRegisterActor.h"
+#include "Sales/BotanicusSelfCheckoutActor.h"
 #include "Preparation/BotanicusPreparationWorkbenchActor.h"
+#include "Preparation/BotanicusComputerActor.h"
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
 #include "Components/ActorComponent.h"
@@ -50,8 +53,11 @@
 #include "UI/BotanicusCarryProgressWidget.h"
 #include "UI/BotanicusBuildingCatalogWidget.h"
 #include "UI/BotanicusOrderCatalogWidget.h"
+#include "UI/BotanicusDevelopmentPanelWidget.h"
 #include "UI/BotanicusSharedFundsWidget.h"
 #include "UI/BotanicusShopObjectivesWidget.h"
+#include "UI/BotanicusDaySummaryWidget.h"
+#include "UI/BotanicusClockWidget.h"
 #include "UI/BotanicusTopDownToolbarWidget.h"
 #include "Visitors/BotanicusVisitorZoneActor.h"
 #include "Net/UnrealNetwork.h"
@@ -86,6 +92,27 @@ namespace
 		{
 			GameState->AddSharedFunds(Amount);
 		}
+	}
+
+	ABotanicusPreparationWorkbenchActor*
+	FindPrimaryPreparationWorkbench(const UObject* Context)
+	{
+		UWorld* World = Context ? Context->GetWorld() : nullptr;
+		if (!World)
+		{
+			return nullptr;
+		}
+		for (TActorIterator<ABotanicusPreparationWorkbenchActor> It(
+				 World);
+			 It;
+			 ++It)
+		{
+			if (!It->ActorHasTag(TEXT("BotanicusPlacementPreview")))
+			{
+				return *It;
+			}
+		}
+		return nullptr;
 	}
 
 	void ScheduleSharedStateAutosave(const UObject* Context)
@@ -575,6 +602,16 @@ void ABotanicusPlayerController::BeginPlay()
 	GetWorldTimerManager().SetTimerForNextTick(
 		this,
 		&ABotanicusPlayerController::InitializeShopObjectivesWidget);
+	GetWorldTimerManager().SetTimerForNextTick(
+		this,
+		&ABotanicusPlayerController::InitializeDaySummaryWidget);
+	GetWorldTimerManager().SetTimerForNextTick(
+		this,
+		&ABotanicusPlayerController::InitializeClockWidget);
+	GetWorldTimerManager().SetTimerForNextTick(
+		this,
+		&ABotanicusPlayerController::
+			InitializeDevelopmentPanelWidget);
 	
 	// only spawn touch controls on local player controllers
 	if (IsLocalPlayerController() && ShouldUseTouchControls())
@@ -625,6 +662,11 @@ void ABotanicusPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReaso
 		OrderCatalogWidget->RemoveFromParent();
 		OrderCatalogWidget = nullptr;
 	}
+	if (DevelopmentPanelWidget)
+	{
+		DevelopmentPanelWidget->RemoveFromParent();
+		DevelopmentPanelWidget = nullptr;
+	}
 	if (BuildingCatalogWidget)
 	{
 		BuildingCatalogWidget->RemoveFromParent();
@@ -654,6 +696,16 @@ void ABotanicusPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReaso
 	{
 		ShopObjectivesWidget->RemoveFromParent();
 		ShopObjectivesWidget = nullptr;
+	}
+	if (DaySummaryWidget)
+	{
+		DaySummaryWidget->RemoveFromParent();
+		DaySummaryWidget = nullptr;
+	}
+	if (ClockWidget)
+	{
+		ClockWidget->RemoveFromParent();
+		ClockWidget = nullptr;
 	}
 	if (CarryProgressWidget)
 	{
@@ -689,6 +741,14 @@ void ABotanicusPlayerController::PlayerTick(float DeltaTime)
 	if (IsLocalPlayerController() && !ShopObjectivesWidget)
 	{
 		InitializeShopObjectivesWidget();
+	}
+	if (IsLocalPlayerController() && !DaySummaryWidget)
+	{
+		InitializeDaySummaryWidget();
+	}
+	if (IsLocalPlayerController() && !ClockWidget)
+	{
+		InitializeClockWidget();
 	}
 
 	if (IsLocalPlayerController())
@@ -776,6 +836,27 @@ void ABotanicusPlayerController::SetupInputComponent()
 
 bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 {
+	if (Params.Key == EKeys::Tab)
+	{
+		if (Params.Event == IE_Pressed)
+		{
+			ToggleDevelopmentPanel();
+		}
+		return true;
+	}
+
+	if (DevelopmentPanelWidget &&
+		DevelopmentPanelWidget->GetVisibility() ==
+			ESlateVisibility::Visible)
+	{
+		if (Params.Key == EKeys::Escape &&
+			Params.Event == IE_Pressed)
+		{
+			ToggleDevelopmentPanel();
+		}
+		return true;
+	}
+
 	if (BuildingCatalogWidget &&
 		BuildingCatalogWidget->GetVisibility() == ESlateVisibility::Visible)
 	{
@@ -789,7 +870,7 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 	if (OrderCatalogWidget &&
 		OrderCatalogWidget->GetVisibility() == ESlateVisibility::Visible)
 	{
-		if ((Params.Key == EKeys::Escape || Params.Key == EKeys::T) &&
+		if (Params.Key == EKeys::Escape &&
 			Params.Event == IE_Pressed)
 		{
 			ToggleOrderCatalog();
@@ -844,7 +925,6 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 	// deliberately unavailable to players.
 	if (Params.Key == EKeys::C ||
 		Params.Key == EKeys::G ||
-		Params.Key == EKeys::Tab ||
 		Params.Key == EKeys::PageUp ||
 		Params.Key == EKeys::PageDown ||
 		Params.Key == EKeys::NumPadOne ||
@@ -893,7 +973,20 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		}
 		if (IsValid(LocalPlaceableItemMoveCandidate))
 		{
+			ABotanicusComputerActor* Computer =
+				Cast<ABotanicusComputerActor>(
+					LocalPlaceableItemMoveCandidate);
+			const bool bUseComputer =
+				IsValid(Computer) &&
+				PlaceableItemMoveChargeElapsed <
+					GetMoveHoldDurationForActor(
+						Computer,
+						PlaceableItemMoveHoldDuration);
 			CancelPlaceableItemMoveCharge();
+			if (bUseComputer)
+			{
+				ServerUseComputer(Computer);
+			}
 			return true;
 		}
 		if (IsValid(LocalParcelMoveCandidate))
@@ -1172,7 +1265,8 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		Params.Key == EKeys::LeftMouseButton)
 	{
 		if (Params.Event == IE_Pressed &&
-			(TryBeginNearbyParcelCut() ||
+			(TryCheckoutNearbyRegister() ||
+			 TryBeginNearbyParcelCut() ||
 			 TryRefillHeldWateringCan() ||
 			 TryBeginNearbyPlantPotAction() ||
 			 TryBeginNearbySalePotAction() ||
@@ -1478,6 +1572,40 @@ void ABotanicusPlayerController::InitializeShopObjectivesWidget()
 	ShopObjectivesWidget->AddToPlayerScreen(39);
 }
 
+void ABotanicusPlayerController::InitializeDaySummaryWidget()
+{
+	if (!IsLocalPlayerController() || DaySummaryWidget)
+	{
+		return;
+	}
+	DaySummaryWidget =
+		CreateWidget<UBotanicusDaySummaryWidget>(
+			this,
+			UBotanicusDaySummaryWidget::StaticClass());
+	if (!DaySummaryWidget)
+	{
+		return;
+	}
+	DaySummaryWidget->AddToPlayerScreen(55);
+}
+
+void ABotanicusPlayerController::InitializeClockWidget()
+{
+	if (!IsLocalPlayerController() || ClockWidget)
+	{
+		return;
+	}
+	ClockWidget =
+		CreateWidget<UBotanicusClockWidget>(
+			this,
+			UBotanicusClockWidget::StaticClass());
+	if (!ClockWidget)
+	{
+		return;
+	}
+	ClockWidget->AddToPlayerScreen(38);
+}
+
 void ABotanicusPlayerController::InitializeTopDownToolbarWidget()
 {
 	if (!IsLocalPlayerController() || TopDownToolbarWidget)
@@ -1525,6 +1653,31 @@ void ABotanicusPlayerController::InitializeOrderCatalogWidget()
 	OrderCatalogWidget->InitializeWithController(this);
 	OrderCatalogWidget->AddToPlayerScreen(45);
 	OrderCatalogWidget->SetVisibility(ESlateVisibility::Collapsed);
+}
+
+void ABotanicusPlayerController::
+	InitializeDevelopmentPanelWidget()
+{
+	if (!IsLocalPlayerController() || DevelopmentPanelWidget)
+	{
+		return;
+	}
+	DevelopmentPanelWidget =
+		CreateWidget<UBotanicusDevelopmentPanelWidget>(
+			this,
+			UBotanicusDevelopmentPanelWidget::StaticClass());
+	if (!DevelopmentPanelWidget)
+	{
+		UE_LOG(
+			LogBotanicus,
+			Error,
+			TEXT("Could not create the development command panel."));
+		return;
+	}
+	DevelopmentPanelWidget->InitializeWithController(this);
+	DevelopmentPanelWidget->AddToPlayerScreen(70);
+	DevelopmentPanelWidget->SetVisibility(
+		ESlateVisibility::Collapsed);
 }
 
 void ABotanicusPlayerController::InitializeBuildingCatalogWidget()
@@ -1950,9 +2103,18 @@ void ABotanicusPlayerController::ToggleBuildingCatalog()
 void ABotanicusPlayerController::PurchaseCatalogBuilding(
 	FName BuildingKey)
 {
-	if (!bBuildingTopDownViewActive ||
-		!IsLocalPlayerController() ||
+	if (!IsLocalPlayerController() ||
 		BuildingKey.IsNone())
+	{
+		return;
+	}
+	if (!bBuildingTopDownViewActive &&
+		bOrderCatalogOpenedFromComputer)
+	{
+		ToggleOrderCatalog();
+		EnterBuildingTopDownView();
+	}
+	if (!bBuildingTopDownViewActive)
 	{
 		return;
 	}
@@ -1987,7 +2149,7 @@ void ABotanicusPlayerController::PurchaseCatalogBuilding(
 
 void ABotanicusPlayerController::ToggleOrderCatalog()
 {
-	if (!IsLocalPlayerController() || !bBuildingTopDownViewActive)
+	if (!IsLocalPlayerController())
 	{
 		return;
 	}
@@ -1999,7 +2161,12 @@ void ABotanicusPlayerController::ToggleOrderCatalog()
 	}
 
 	const bool bOpening =
-		OrderCatalogWidget->GetVisibility() != ESlateVisibility::Visible;
+		OrderCatalogWidget->GetVisibility() !=
+			ESlateVisibility::Visible;
+	if (bOpening && !bBuildingTopDownViewActive)
+	{
+		return;
+	}
 	OrderCatalogWidget->SetVisibility(
 		bOpening
 			? ESlateVisibility::Visible
@@ -2016,12 +2183,112 @@ void ABotanicusPlayerController::ToggleOrderCatalog()
 		bAzertyRightPressed = false;
 		OrderCatalogWidget->Refresh();
 	}
+	else if (bOrderCatalogOpenedFromComputer)
+	{
+		bOrderCatalogOpenedFromComputer = false;
+		bShowMouseCursor = false;
+		SetInputMode(FInputModeGameOnly());
+	}
+}
+
+void ABotanicusPlayerController::ToggleDevelopmentPanel()
+{
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+	InitializeDevelopmentPanelWidget();
+	if (!DevelopmentPanelWidget)
+	{
+		return;
+	}
+
+	const bool bOpening =
+		DevelopmentPanelWidget->GetVisibility() !=
+			ESlateVisibility::Visible;
+	DevelopmentPanelWidget->SetVisibility(
+		bOpening
+			? ESlateVisibility::Visible
+			: ESlateVisibility::Collapsed);
+	if (bOpening)
+	{
+		if (OrderCatalogWidget)
+		{
+			OrderCatalogWidget->SetVisibility(
+				ESlateVisibility::Collapsed);
+		}
+		if (BuildingCatalogWidget)
+		{
+			BuildingCatalogWidget->SetVisibility(
+				ESlateVisibility::Collapsed);
+		}
+		bOrderCatalogOpenedFromComputer = false;
+		bAzertyForwardPressed = false;
+		bAzertyBackwardPressed = false;
+		bAzertyLeftPressed = false;
+		bAzertyRightPressed = false;
+		DevelopmentPanelWidget->Refresh();
+		bShowMouseCursor = true;
+		FInputModeUIOnly InputMode;
+		InputMode.SetLockMouseToViewportBehavior(
+			EMouseLockMode::DoNotLock);
+		InputMode.SetWidgetToFocus(
+			DevelopmentPanelWidget->TakeWidget());
+		SetInputMode(InputMode);
+		DevelopmentPanelWidget->SetKeyboardFocus();
+	}
+	else if (bBuildingTopDownViewActive)
+	{
+		bShowMouseCursor = true;
+		FInputModeGameAndUI InputMode;
+		InputMode.SetHideCursorDuringCapture(false);
+		InputMode.SetLockMouseToViewportBehavior(
+			EMouseLockMode::DoNotLock);
+		SetInputMode(InputMode);
+	}
+	else
+	{
+		bShowMouseCursor = false;
+		SetInputMode(FInputModeGameOnly());
+	}
+}
+
+void ABotanicusPlayerController::
+	ClientOpenOrderCatalogFromComputer_Implementation()
+{
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+	InitializeOrderCatalogWidget();
+	if (!OrderCatalogWidget)
+	{
+		return;
+	}
+
+	bOrderCatalogOpenedFromComputer = true;
+	OrderCatalogWidget->SetVisibility(ESlateVisibility::Visible);
+	if (BuildingCatalogWidget)
+	{
+		BuildingCatalogWidget->SetVisibility(
+			ESlateVisibility::Collapsed);
+	}
+	bShowMouseCursor = true;
+	FInputModeGameAndUI InputMode;
+	InputMode.SetHideCursorDuringCapture(false);
+	InputMode.SetLockMouseToViewportBehavior(
+		EMouseLockMode::DoNotLock);
+	InputMode.SetWidgetToFocus(
+		OrderCatalogWidget->TakeWidget());
+	SetInputMode(InputMode);
+	OrderCatalogWidget->Refresh();
 }
 
 void ABotanicusPlayerController::PlaceCatalogOrder(FName ItemKey)
 {
 	if (IsLocalPlayerController() &&
-		bBuildingTopDownViewActive &&
+		(bBuildingTopDownViewActive ||
+		 bOrderCatalogOpenedFromComputer) &&
 		!ItemKey.IsNone())
 	{
 		ServerPlaceCatalogOrder(ItemKey);
@@ -2043,6 +2310,70 @@ int32 ABotanicusPlayerController::GetMainShopLevel() const
 	return GameState ? GameState->GetMainShopLevel() : 1;
 }
 
+int32 ABotanicusPlayerController::GetSelfCheckoutLimit() const
+{
+	const int32 ShopLevel = GetMainShopLevel();
+	return ShopLevel < 3 ? 0 : 2 + (ShopLevel - 3);
+}
+
+int32 ABotanicusPlayerController::
+	GetSelfCheckoutOwnedOrOrderedCount() const
+{
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return 0;
+	}
+
+	int32 Count = 0;
+	for (TActorIterator<ABotanicusSelfCheckoutActor> CheckoutIt(World);
+		 CheckoutIt;
+		 ++CheckoutIt)
+	{
+		if (!CheckoutIt->ActorHasTag(
+				TEXT("BotanicusPlacementPreview")))
+		{
+			++Count;
+		}
+	}
+	for (TActorIterator<ABotanicusDeliveryParcelActor> ParcelIt(World);
+		 ParcelIt;
+		 ++ParcelIt)
+	{
+		if (!ParcelIt->IsOpened() &&
+			ParcelIt->GetItemKey() == TEXT("SelfCheckout"))
+		{
+			Count += FMath::Max(1, ParcelIt->GetQuantity());
+		}
+	}
+	for (TActorIterator<ABotanicusPlayerController> ControllerIt(World);
+		 ControllerIt;
+		 ++ControllerIt)
+	{
+		for (const FBotanicusPendingOrder& Order :
+			 ControllerIt->GetPendingOrders())
+		{
+			if (Order.ItemKey == TEXT("SelfCheckout"))
+			{
+				Count += FMath::Max(1, Order.Quantity);
+			}
+		}
+	}
+	return Count;
+}
+
+bool ABotanicusPlayerController::CanOrderCatalogItem(
+	FName ItemKey) const
+{
+	if (ItemKey != TEXT("SelfCheckout"))
+	{
+		return true;
+	}
+	const int32 Limit = GetSelfCheckoutLimit();
+	return Limit > 0 &&
+		GetSelfCheckoutOwnedOrOrderedCount() < Limit;
+}
+
 bool ABotanicusPlayerController::IsMainShopOpen() const
 {
 	const ABotanicusGameState* GameState = GetSharedGameState(this);
@@ -2059,6 +2390,50 @@ void ABotanicusPlayerController::ToggleMainShopOpen()
 	else
 	{
 		ServerSetMainShopOpen(bNewOpenState);
+	}
+}
+
+float ABotanicusPlayerController::GetDevelopmentTimeScale() const
+{
+	const ABotanicusGameState* GameState = GetSharedGameState(this);
+	return GameState ? GameState->GetDevelopmentTimeScale() : 1.0f;
+}
+
+void ABotanicusPlayerController::CycleDevelopmentTimeScale()
+{
+	const float CurrentScale = GetDevelopmentTimeScale();
+	const float NewScale =
+		CurrentScale < 4.0f
+			? 5.0f
+			: CurrentScale < 10.0f
+				? 15.0f
+				: 1.0f;
+	if (HasAuthority())
+	{
+		ServerSetDevelopmentTimeScale_Implementation(NewScale);
+	}
+	else
+	{
+		ServerSetDevelopmentTimeScale(NewScale);
+	}
+}
+
+void ABotanicusPlayerController::
+	AdjustMainShopLevelForDevelopment(int32 Delta)
+{
+	const int32 Direction = FMath::Clamp(Delta, -1, 1);
+	if (Direction == 0)
+	{
+		return;
+	}
+	if (HasAuthority())
+	{
+		ServerAdjustMainShopLevelForDevelopment_Implementation(
+			Direction);
+	}
+	else
+	{
+		ServerAdjustMainShopLevelForDevelopment(Direction);
 	}
 }
 
@@ -2126,9 +2501,51 @@ void ABotanicusPlayerController::UpgradeMainShop()
 	}
 }
 
-void ABotanicusPlayerController::AddTestCredits()
+int32 ABotanicusPlayerController::
+	GetPreparationWorkbenchLevel() const
+{
+	const ABotanicusPreparationWorkbenchActor* Workbench =
+		FindPrimaryPreparationWorkbench(this);
+	return Workbench ? Workbench->GetWorkbenchLevel() : 1;
+}
+
+int32 ABotanicusPlayerController::
+	GetPreparationWorkbenchUpgradeCost() const
+{
+	const ABotanicusPreparationWorkbenchActor* Workbench =
+		FindPrimaryPreparationWorkbench(this);
+	return Workbench ? Workbench->GetUpgradeCost() : 0;
+}
+
+bool ABotanicusPlayerController::
+	CanUpgradePreparationWorkbench() const
+{
+	const ABotanicusPreparationWorkbenchActor* Workbench =
+		FindPrimaryPreparationWorkbench(this);
+	return Workbench &&
+		Workbench->CanUpgrade() &&
+		GetAvailableFunds() >= Workbench->GetUpgradeCost();
+}
+
+void ABotanicusPlayerController::UpgradePreparationWorkbench()
 {
 	if (IsLocalPlayerController())
+	{
+		ServerUpgradePreparationWorkbench();
+	}
+}
+
+void ABotanicusPlayerController::AddTestCredits()
+{
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+	if (HasAuthority())
+	{
+		ServerAddTestCredits_Implementation();
+	}
+	else
 	{
 		ServerAddTestCredits();
 	}
@@ -2245,7 +2662,7 @@ void ABotanicusPlayerController::CreditPlantSale(
 	AddSharedFunds(this, SalePrice);
 	if (ABotanicusGameState* GameState = GetSharedGameState(this))
 	{
-		GameState->RecordPlantSale();
+		GameState->RecordPlantSale(SalePrice);
 	}
 	OnRep_OrderState();
 	ClientMessage(
@@ -2414,9 +2831,13 @@ void ABotanicusPlayerController::UpdateEquipmentCarryCharge(
 	}
 
 	EquipmentCarryChargeElapsed += DeltaTime;
+	const float RequiredHoldDuration =
+		GetMoveHoldDurationForActor(
+			LocalHeldHeavyEquipment,
+			EquipmentLiftHoldDuration);
 	const float ChargeProgress = FMath::Clamp(
 		EquipmentCarryChargeElapsed /
-			FMath::Max(EquipmentLiftHoldDuration, 0.1f),
+			FMath::Max(RequiredHoldDuration, 0.1f),
 		0.0f,
 		1.0f);
 	if (CarryProgressWidget)
@@ -3166,12 +3587,14 @@ bool ABotanicusPlayerController::ResolveQuickBarItemPlacement(
 			 WorkbenchIt;
 			 ++WorkbenchIt)
 		{
-			if (!WorkbenchIt->IsSalePotSlotAvailable(SalePot))
+			FTransform WorkbenchTransform;
+			if (!WorkbenchIt->FindClosestAvailableSalePotSlot(
+					RequestedLocation,
+					WorkbenchTransform,
+					SalePot))
 			{
 				continue;
 			}
-			const FTransform WorkbenchTransform =
-				WorkbenchIt->GetSalePotPreparationTransform();
 			if (FVector::DistSquared2D(
 					RequestedLocation,
 					WorkbenchTransform.GetLocation()) <=
@@ -3928,9 +4351,13 @@ void ABotanicusPlayerController::UpdatePlaceableItemMoveCharge(
 	}
 
 	PlaceableItemMoveChargeElapsed += DeltaTime;
+	const float RequiredHoldDuration =
+		GetMoveHoldDurationForActor(
+			LocalPlaceableItemMoveCandidate,
+			PlaceableItemMoveHoldDuration);
 	const float ChargeProgress = FMath::Clamp(
 		PlaceableItemMoveChargeElapsed /
-			FMath::Max(0.1f, PlaceableItemMoveHoldDuration),
+			FMath::Max(0.1f, RequiredHoldDuration),
 		0.0f,
 		1.0f);
 	if (CarryProgressWidget)
@@ -4151,6 +4578,44 @@ bool ABotanicusPlayerController::
 	return true;
 }
 
+bool ABotanicusPlayerController::TryCheckoutNearbyRegister()
+{
+	if (!IsLocalPlayerController() || !GetPawn() || !GetWorld())
+	{
+		return false;
+	}
+
+	ABotanicusCashRegisterActor* TargetRegister = nullptr;
+	float BestDistanceSquared = FMath::Square(450.0f);
+	for (TActorIterator<ABotanicusCashRegisterActor> RegisterIt(
+			 GetWorld());
+		 RegisterIt;
+		 ++RegisterIt)
+	{
+		if (!RegisterIt->IsOperational() ||
+			!RegisterIt->GetCheckoutCustomer())
+		{
+			continue;
+		}
+		const float DistanceSquared = FVector::DistSquared(
+			GetPawn()->GetActorLocation(),
+			RegisterIt->GetActorLocation());
+		if (DistanceSquared <= BestDistanceSquared &&
+			IsLookingAtWorldItem(*RegisterIt, 450.0f))
+		{
+			BestDistanceSquared = DistanceSquared;
+			TargetRegister = *RegisterIt;
+		}
+	}
+	if (!TargetRegister)
+	{
+		return false;
+	}
+
+	ServerCheckoutRegister(TargetRegister);
+	return true;
+}
+
 bool ABotanicusPlayerController::IsLookingAtWorldItem(
 	const AActor* Item,
 	float MaximumDistance) const
@@ -4191,6 +4656,17 @@ bool ABotanicusPlayerController::IsLookingAtWorldItem(
 			ECC_Visibility,
 			QueryParams) &&
 		VisibilityHit.GetActor() == Item;
+}
+
+float ABotanicusPlayerController::GetMoveHoldDurationForActor(
+	const AActor* Actor,
+	float DefaultDuration) const
+{
+	return Cast<ABotanicusComputerActor>(Actor) ||
+			Cast<ABotanicusCashRegisterActor>(Actor) ||
+			Cast<ABotanicusPreparationWorkbenchActor>(Actor)
+		? StarterFixtureMoveHoldDuration
+		: DefaultDuration;
 }
 
 void ABotanicusPlayerController::TryDeletePathSegmentAtCursor()
@@ -5571,6 +6047,23 @@ void ABotanicusPlayerController::ServerPlaceCatalogOrder_Implementation(
 		ClientMessage(TEXT("Commande refusee : article indisponible."));
 		return;
 	}
+	if (!CanOrderCatalogItem(ItemKey))
+	{
+		if (ItemKey == TEXT("SelfCheckout") &&
+			GetMainShopLevel() < 3)
+		{
+			ClientMessage(
+				TEXT(
+					"Commande refusee : la caisse automatique se debloque au niveau 3."));
+		}
+		else
+		{
+			ClientMessage(
+				TEXT(
+					"Commande refusee : limite de caisses automatiques atteinte."));
+		}
+		return;
+	}
 
 	const int32 Price = FMath::Max(0, Definition->Price);
 	if (GetAvailableFunds() < Price)
@@ -5672,6 +6165,44 @@ void ABotanicusPlayerController::ServerUpgradeMainShop_Implementation()
 	ScheduleSharedStateAutosave(this);
 }
 
+void ABotanicusPlayerController::
+	ServerUpgradePreparationWorkbench_Implementation()
+{
+	ABotanicusPreparationWorkbenchActor* Workbench =
+		FindPrimaryPreparationWorkbench(this);
+	if (!Workbench || !Workbench->CanUpgrade())
+	{
+		ClientMessage(
+			TEXT(
+				"L'atelier de preparation est deja au niveau maximum."));
+		return;
+	}
+
+	const int32 UpgradeCost = Workbench->GetUpgradeCost();
+	if (UpgradeCost <= 0 ||
+		!TrySpendSharedFunds(this, UpgradeCost))
+	{
+		ClientMessage(
+			TEXT(
+				"Credits communs insuffisants pour ameliorer l'atelier."));
+		return;
+	}
+	if (!Workbench->UpgradeWorkbench())
+	{
+		AddSharedFunds(this, UpgradeCost);
+		return;
+	}
+
+	ClientMessage(
+		*FString::Printf(
+			TEXT(
+				"Atelier niveau %d : %d pots peuvent etre prepares en meme temps."),
+			Workbench->GetWorkbenchLevel(),
+			Workbench->GetSlotCount()));
+	OnRep_OrderState();
+	ScheduleSharedStateAutosave(this);
+}
+
 void ABotanicusPlayerController::ServerSetMainShopOpen_Implementation(
 	bool bOpen)
 {
@@ -5683,10 +6214,6 @@ void ABotanicusPlayerController::ServerSetMainShopOpen_Implementation(
 
 	GameState->SetMainShopOpen(bOpen);
 	OnRep_OrderState();
-	ClientMessage(
-		bOpen
-			? TEXT("Le magasin est ouvert : les visiteurs peuvent arriver.")
-			: TEXT("Le magasin est ferme : tous les visiteurs repartent."));
 	ScheduleSharedStateAutosave(this);
 }
 
@@ -5697,6 +6224,61 @@ void ABotanicusPlayerController::ServerAddTestCredits_Implementation()
 	OnRep_OrderState();
 	ClientMessage(TEXT("Test : +100 crédits ajoutés à la caisse commune."));
 	ScheduleSharedStateAutosave(this);
+}
+
+void ABotanicusPlayerController::
+	ServerSetDevelopmentTimeScale_Implementation(float TimeScale)
+{
+	ABotanicusGameState* GameState = GetSharedGameState(this);
+	if (!GameState)
+	{
+		return;
+	}
+	GameState->SetDevelopmentTimeScale(TimeScale);
+	ClientMessage(
+		*FString::Printf(
+			TEXT("Debug : vitesse de simulation x%.0f."),
+			GameState->GetDevelopmentTimeScale()));
+}
+
+void ABotanicusPlayerController::
+	ServerAdjustMainShopLevelForDevelopment_Implementation(
+		int32 Delta)
+{
+	ABotanicusGameState* GameState = GetSharedGameState(this);
+	if (!GameState)
+	{
+		return;
+	}
+	const int32 NewLevel =
+		FMath::Clamp(
+			GameState->GetMainShopLevel() +
+				FMath::Clamp(Delta, -1, 1),
+			1,
+			99);
+	GameState->SetMainShopLevelForDevelopment(NewLevel);
+	OnRep_OrderState();
+	ClientMessage(
+		*FString::Printf(
+			TEXT("Debug : boutique passee au niveau %d."),
+			NewLevel));
+	ScheduleSharedStateAutosave(this);
+}
+
+void ABotanicusPlayerController::ServerUseComputer_Implementation(
+	ABotanicusComputerActor* Computer)
+{
+	APawn* ControlledPawn = GetPawn();
+	if (!IsValid(Computer) ||
+		!ControlledPawn ||
+		!IsLookingAtWorldItem(Computer, 400.0f))
+	{
+		ClientMessage(
+			TEXT(
+				"Regardez l'ordinateur et rapprochez-vous pour l'utiliser."));
+		return;
+	}
+	Computer->Interact_Implementation(ControlledPawn);
 }
 
 ABotanicusDeliveryZoneActor*
@@ -6625,6 +7207,22 @@ void ABotanicusPlayerController::
 }
 
 void ABotanicusPlayerController::
+	ServerCheckoutRegister_Implementation(
+		ABotanicusCashRegisterActor* CashRegister)
+{
+	APawn* ControlledPawn = GetPawn();
+	if (!ControlledPawn ||
+		!IsValid(CashRegister) ||
+		!CashRegister->IsOperational() ||
+		!CashRegister->GetCheckoutCustomer() ||
+		!IsLookingAtWorldItem(CashRegister, 475.0f))
+	{
+		return;
+	}
+	CashRegister->HandleCheckoutAction(ControlledPawn);
+}
+
+void ABotanicusPlayerController::
 	ServerConfirmCommunicationDoor_Implementation(int32 CandidateIndex)
 {
 	UWorld* World = GetWorld();
@@ -7324,7 +7922,9 @@ void ABotanicusPlayerController::
 		break;
 	case EBotanicusVisitorZoneType::Checkout:
 	default:
-		ZoneExtent = FVector(180.0f, 140.0f, 6.0f);
+		// 10 m x 6 m: enough room for the starter register, several
+		// self-checkouts and a visible customer queue.
+		ZoneExtent = FVector(500.0f, 300.0f, 6.0f);
 		break;
 	}
 

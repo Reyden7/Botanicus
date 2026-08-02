@@ -2,8 +2,13 @@
 
 #include "BotanicusGameState.h"
 
+#include "BotanicusCharacter.h"
+#include "BotanicusGameMode.h"
 #include "Catalog/BotanicusItemCatalog.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
+#include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
 #include "Net/UnrealNetwork.h"
 
@@ -11,6 +16,38 @@ ABotanicusGameState::ABotanicusGameState()
 {
 	bReplicates = true;
 	bAlwaysRelevant = true;
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.TickInterval = 0.1f;
+	SetNetUpdateFrequency(10.0f);
+}
+
+void ABotanicusGameState::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	const float PreviousMinute = DayTimeMinutes;
+	DayTimeMinutes =
+		FMath::Fmod(
+			DayTimeMinutes + FMath::Max(0.0f, DeltaSeconds),
+			1440.0f);
+	if (DidClockCrossMinute(
+			PreviousMinute,
+			DayTimeMinutes,
+			480.0f))
+	{
+		SetMainShopOpen(true);
+	}
+	if (DidClockCrossMinute(
+			PreviousMinute,
+			DayTimeMinutes,
+			1140.0f))
+	{
+		SetMainShopOpen(false);
+	}
 }
 
 void ABotanicusGameState::GetLifetimeReplicatedProps(
@@ -20,6 +57,26 @@ void ABotanicusGameState::GetLifetimeReplicatedProps(
 	DOREPLIFETIME(ABotanicusGameState, SharedFunds);
 	DOREPLIFETIME(ABotanicusGameState, MainShopLevel);
 	DOREPLIFETIME(ABotanicusGameState, bMainShopOpen);
+	DOREPLIFETIME(ABotanicusGameState, CurrentDayNumber);
+	DOREPLIFETIME(ABotanicusGameState, bShopDayActive);
+	DOREPLIFETIME(ABotanicusGameState, DailyPlantsSold);
+	DOREPLIFETIME(ABotanicusGameState, DailyRevenue);
+	DOREPLIFETIME(ABotanicusGameState, DailySatisfactionTotal);
+	DOREPLIFETIME(ABotanicusGameState, DailyReviewCount);
+	DOREPLIFETIME(ABotanicusGameState, DayStartReputation);
+	DOREPLIFETIME(ABotanicusGameState, DaySummaryRevision);
+	DOREPLIFETIME(ABotanicusGameState, LastCompletedDayNumber);
+	DOREPLIFETIME(ABotanicusGameState, LastDayPlantsSold);
+	DOREPLIFETIME(ABotanicusGameState, LastDayRevenue);
+	DOREPLIFETIME(
+		ABotanicusGameState,
+		LastDayAverageSatisfaction);
+	DOREPLIFETIME(ABotanicusGameState, LastDayReviewCount);
+	DOREPLIFETIME(ABotanicusGameState, LastDayReputationDelta);
+	DOREPLIFETIME(ABotanicusGameState, LastDaySalesTarget);
+	DOREPLIFETIME(ABotanicusGameState, LastDayRevenueTarget);
+	DOREPLIFETIME(ABotanicusGameState, DevelopmentTimeScale);
+	DOREPLIFETIME(ABotanicusGameState, DayTimeMinutes);
 	DOREPLIFETIME(ABotanicusGameState, TotalPlantsSold);
 	DOREPLIFETIME(ABotanicusGameState, TotalCatalogOrders);
 	DOREPLIFETIME(ABotanicusGameState, ShopReputationPoints);
@@ -62,6 +119,16 @@ int32 ABotanicusGameState::GetTargetVisitorPopulation() const
 		return 28;
 	}
 	return 45 + (MainShopLevel - 3) * 15;
+}
+
+int32 ABotanicusGameState::GetDailySalesTarget() const
+{
+	return 3 + FMath::Max(0, MainShopLevel - 1) * 3;
+}
+
+int32 ABotanicusGameState::GetDailyRevenueTarget() const
+{
+	return 180 + FMath::Max(0, MainShopLevel - 1) * 320;
 }
 
 int32 ABotanicusGameState::GetMainShopUpgradeCost() const
@@ -163,6 +230,45 @@ void ABotanicusGameState::InitializeMainShopOpen(bool bInOpen)
 	NotifyFundsChanged();
 }
 
+void ABotanicusGameState::InitializeDayCycle(
+	int32 InCurrentDayNumber,
+	bool bInDayActive,
+	int32 InDailyPlantsSold,
+	int32 InDailyRevenue,
+	int32 InDailySatisfactionTotal,
+	int32 InDailyReviewCount,
+	int32 InDayStartReputation,
+	float InDayTimeMinutes)
+{
+	if (!HasAuthority() || bDayCycleInitialized)
+	{
+		return;
+	}
+	bDayCycleInitialized = true;
+	CurrentDayNumber = FMath::Max(1, InCurrentDayNumber);
+	bShopDayActive = bInDayActive && bMainShopOpen;
+	DailyPlantsSold = FMath::Max(0, InDailyPlantsSold);
+	DailyRevenue = FMath::Max(0, InDailyRevenue);
+	DailySatisfactionTotal =
+		FMath::Max(0, InDailySatisfactionTotal);
+	DailyReviewCount = FMath::Max(0, InDailyReviewCount);
+	DayStartReputation =
+		FMath::Clamp(InDayStartReputation, 100, 500);
+	DayTimeMinutes =
+		FMath::Fmod(
+			FMath::Max(0.0f, InDayTimeMinutes),
+			1440.0f);
+	if (!bShopDayActive)
+	{
+		DailyPlantsSold = 0;
+		DailyRevenue = 0;
+		DailySatisfactionTotal = 0;
+		DailyReviewCount = 0;
+		DayStartReputation = ShopReputationPoints;
+	}
+	NotifyFundsChanged();
+}
+
 void ABotanicusGameState::SetMainShopOpen(bool bInOpen)
 {
 	if (!HasAuthority() || bMainShopOpen == bInOpen)
@@ -171,7 +277,162 @@ void ABotanicusGameState::SetMainShopOpen(bool bInOpen)
 	}
 	bShopOpenInitialized = true;
 	bMainShopOpen = bInOpen;
+	if (bMainShopOpen)
+	{
+		if (!bShopDayActive)
+		{
+			BeginShopDay();
+		}
+	}
+	else if (bShopDayActive)
+	{
+		FinishShopDay();
+	}
 	NotifyFundsChanged();
+	if (UWorld* World = GetWorld())
+	{
+		for (FConstPlayerControllerIterator ControllerIt =
+				 World->GetPlayerControllerIterator();
+			 ControllerIt;
+			 ++ControllerIt)
+		{
+			if (APlayerController* Controller = ControllerIt->Get())
+			{
+				const int32 ClockHour =
+					FMath::FloorToInt(DayTimeMinutes / 60.0f) %
+					24;
+				const int32 ClockMinute =
+					FMath::FloorToInt(DayTimeMinutes) % 60;
+				const FString ScheduleMessage =
+					bMainShopOpen
+						? FString::Printf(
+							TEXT(
+								"%02d:%02d - Le magasin ouvre ses portes."),
+							ClockHour,
+							ClockMinute)
+						: FString::Printf(
+							TEXT(
+								"%02d:%02d - Le magasin ferme, les visiteurs repartent."),
+							ClockHour,
+							ClockMinute);
+				Controller->ClientMessage(
+					*ScheduleMessage);
+			}
+		}
+		if (ABotanicusGameMode* GameMode =
+				World->GetAuthGameMode<ABotanicusGameMode>())
+		{
+			GameMode->ScheduleInventoryAutosave();
+		}
+	}
+}
+
+void ABotanicusGameState::SetDevelopmentTimeScale(
+	float InTimeScale)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	DevelopmentTimeScale =
+		FMath::IsNearlyEqual(InTimeScale, 5.0f)
+			? 5.0f
+			: FMath::IsNearlyEqual(InTimeScale, 15.0f)
+				? 15.0f
+				: 1.0f;
+	ApplyDevelopmentTimeScale();
+	ForceNetUpdate();
+}
+
+void ABotanicusGameState::SetMainShopLevelForDevelopment(
+	int32 InLevel)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	MainShopLevel = FMath::Clamp(InLevel, 1, 99);
+	NotifyFundsChanged();
+}
+
+void ABotanicusGameState::ApplyDevelopmentTimeScale()
+{
+	UGameplayStatics::SetGlobalTimeDilation(
+		this,
+		DevelopmentTimeScale);
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	const float PlayerCompensation =
+		1.0f / FMath::Max(1.0f, DevelopmentTimeScale);
+	for (TActorIterator<ABotanicusCharacter> CharacterIt(World);
+		 CharacterIt;
+		 ++CharacterIt)
+	{
+		CharacterIt->CustomTimeDilation = PlayerCompensation;
+	}
+	for (FConstPlayerControllerIterator ControllerIt =
+			 World->GetPlayerControllerIterator();
+		 ControllerIt;
+		 ++ControllerIt)
+	{
+		if (APlayerController* Controller = ControllerIt->Get())
+		{
+			Controller->CustomTimeDilation = PlayerCompensation;
+		}
+	}
+}
+
+bool ABotanicusGameState::DidClockCrossMinute(
+	float PreviousMinute,
+	float CurrentMinute,
+	float TargetMinute) const
+{
+	return CurrentMinute >= PreviousMinute
+		? TargetMinute > PreviousMinute &&
+			TargetMinute <= CurrentMinute
+		: TargetMinute > PreviousMinute ||
+			TargetMinute <= CurrentMinute;
+}
+
+void ABotanicusGameState::BeginShopDay()
+{
+	bDayCycleInitialized = true;
+	bShopDayActive = true;
+	DailyPlantsSold = 0;
+	DailyRevenue = 0;
+	DailySatisfactionTotal = 0;
+	DailyReviewCount = 0;
+	DayStartReputation = ShopReputationPoints;
+	RotateShopTrends();
+}
+
+void ABotanicusGameState::FinishShopDay()
+{
+	LastCompletedDayNumber = CurrentDayNumber;
+	LastDayPlantsSold = DailyPlantsSold;
+	LastDayRevenue = DailyRevenue;
+	LastDayReviewCount = DailyReviewCount;
+	LastDayAverageSatisfaction =
+		DailyReviewCount > 0
+			? FMath::RoundToInt(
+				static_cast<float>(DailySatisfactionTotal) /
+					DailyReviewCount)
+			: 0;
+	LastDayReputationDelta =
+		ShopReputationPoints - DayStartReputation;
+	LastDaySalesTarget = GetDailySalesTarget();
+	LastDayRevenueTarget = GetDailyRevenueTarget();
+	++DaySummaryRevision;
+	++CurrentDayNumber;
+	bShopDayActive = false;
+	DailyPlantsSold = 0;
+	DailyRevenue = 0;
+	DailySatisfactionTotal = 0;
+	DailyReviewCount = 0;
+	DayStartReputation = ShopReputationPoints;
 }
 
 void ABotanicusGameState::InitializeShopReputation(
@@ -306,13 +567,18 @@ void ABotanicusGameState::AddSharedFunds(int32 Amount)
 	NotifyFundsChanged();
 }
 
-void ABotanicusGameState::RecordPlantSale()
+void ABotanicusGameState::RecordPlantSale(int32 SaleRevenue)
 {
 	if (!HasAuthority())
 	{
 		return;
 	}
 	++TotalPlantsSold;
+	if (bShopDayActive)
+	{
+		++DailyPlantsSold;
+		DailyRevenue += FMath::Max(0, SaleRevenue);
+	}
 	NotifyFundsChanged();
 }
 
@@ -345,6 +611,11 @@ void ABotanicusGameState::RecordVisitorSatisfaction(
 		ShopReputationPoints + ReputationDelta,
 		100,
 		500);
+	if (bShopDayActive)
+	{
+		DailySatisfactionTotal += LastVisitorSatisfaction;
+		++DailyReviewCount;
+	}
 	NotifyFundsChanged();
 }
 
@@ -371,6 +642,11 @@ bool ABotanicusGameState::TryUpgradeMainShop()
 void ABotanicusGameState::OnRep_SharedFunds()
 {
 	NotifyFundsChanged();
+}
+
+void ABotanicusGameState::OnRep_DevelopmentTimeScale()
+{
+	ApplyDevelopmentTimeScale();
 }
 
 void ABotanicusGameState::NotifyFundsChanged()

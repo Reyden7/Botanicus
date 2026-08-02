@@ -34,16 +34,34 @@ for required_key in (
     "SalesDisplay",
     "SalePot",
     "PreparationWorkbench",
+    "CommandComputer",
+    "CashRegister",
+    "SelfCheckout",
 ):
     if required_key not in items:
         raise RuntimeError(f"Missing item definition {required_key}")
-    if required_key == "PreparationWorkbench":
+    if required_key in (
+        "PreparationWorkbench",
+        "CommandComputer",
+        "CashRegister",
+        "SelfCheckout",
+    ):
         continue
     item_data = unreal.load_asset(
         f"/Game/Botanicus/Items/DA_{required_key}"
     )
     if item_data is None:
         raise RuntimeError(f"Missing ItemData asset for {required_key}")
+
+for starter_fixture_key in (
+    "PreparationWorkbench",
+    "CommandComputer",
+    "CashRegister",
+):
+    if items[starter_fixture_key].get_editor_property("purchasable"):
+        raise RuntimeError(
+            f"{starter_fixture_key} must be a free starter fixture"
+        )
 
 for base_harvest_key in (
     "Harvest_Basil",
@@ -98,6 +116,7 @@ tab_expectations = {
     "SalePot": 8,
     "SalesDisplay": 8,
     "PreparationWorkbench": 4,
+    "SelfCheckout": 8,
 }
 for item_key, required_tab in tab_expectations.items():
     tabs = items[item_key].get_editor_property("catalog_tabs")
@@ -132,6 +151,28 @@ if (
     raise RuntimeError("SalePot does not resolve to BotanicusSalePotActor")
 if items["SalePot"].get_editor_property("price") != 10:
     raise RuntimeError("SalePot price must be 10 credits")
+
+self_checkout = items["SelfCheckout"]
+self_checkout_class = self_checkout.get_editor_property(
+    "world_actor_class"
+)
+if (
+    self_checkout_class is None
+    or "BotanicusSelfCheckoutActor" not in str(self_checkout_class)
+):
+    raise RuntimeError(
+        "SelfCheckout does not resolve to BotanicusSelfCheckoutActor"
+    )
+if self_checkout.get_editor_property("price") != 1500:
+    raise RuntimeError("SelfCheckout price must be 1500 credits")
+self_checkout_scale = self_checkout.get_editor_property("world_scale")
+if (
+    abs(self_checkout_scale.y - 0.4) > 0.001
+    or abs(self_checkout_scale.z - 2.0) > 0.001
+):
+    raise RuntimeError(
+        "SelfCheckout must be 40 cm wide and 2 metres high"
+    )
 
 workbench_class = items["PreparationWorkbench"].get_editor_property(
     "world_actor_class"
@@ -275,8 +316,14 @@ for runtime_class_name in (
     "BotanicusVisitorManager",
     "BotanicusVisitorZoneActor",
     "BotanicusShopObjectivesWidget",
+    "BotanicusDaySummaryWidget",
+    "BotanicusClockWidget",
     "BotanicusVisitorSpeechBubbleWidget",
     "BotanicusPreparationWorkbenchActor",
+    "BotanicusComputerActor",
+    "BotanicusCashRegisterActor",
+    "BotanicusSelfCheckoutActor",
+    "BotanicusDevelopmentPanelWidget",
 ):
     runtime_class = unreal.load_class(
         None,

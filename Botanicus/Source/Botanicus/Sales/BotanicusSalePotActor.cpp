@@ -20,7 +20,7 @@
 
 namespace
 {
-FLinearColor PlantVisualColor(FName ColorTag)
+FLinearColor SalePotPlantVisualColor(FName ColorTag)
 {
 	if (ColorTag == TEXT("Pink"))
 	{
@@ -33,7 +33,7 @@ FLinearColor PlantVisualColor(FName ColorTag)
 	return FLinearColor(0.08f, 0.48f, 0.12f);
 }
 
-FString PlantQualityLabel(FName QualityTag)
+FString SalePotPlantQualityLabel(FName QualityTag)
 {
 	if (QualityTag == TEXT("Exceptional"))
 	{
@@ -286,10 +286,8 @@ bool ABotanicusSalePotActor::IsOnPreparationWorkbench() const
 		 WorkbenchIt;
 		 ++WorkbenchIt)
 	{
-		if (FVector::DistSquared(
-				GetActorLocation(),
-				WorkbenchIt->GetSalePotPreparationTransform().
-					GetLocation()) <= FMath::Square(45.0f))
+		if (WorkbenchIt->IsLocationOnPreparationSlot(
+				GetActorLocation()))
 		{
 			return true;
 		}
@@ -368,7 +366,8 @@ void ABotanicusSalePotActor::RefreshVisuals()
 			{
 				PlantMaterial->SetVectorParameterValue(
 					TEXT("Color"),
-					PlantVisualColor(Definition->PlantColorTag));
+					SalePotPlantVisualColor(
+						Definition->PlantColorTag));
 			}
 		}
 		PlantVisual->SetRelativeScale3D(PlantScale);
@@ -386,7 +385,7 @@ void ABotanicusSalePotActor::RefreshVisuals()
 			: PlantItemKey.ToString().ToUpper()
 		: TEXT("NON");
 	const FString QualityStatus = Definition
-		? PlantQualityLabel(Definition->PlantQualityTag)
+		? SalePotPlantQualityLabel(Definition->PlantQualityTag)
 		: TEXT("-");
 	const FString Progress =
 		ActiveUser.IsValid()

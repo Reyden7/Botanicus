@@ -23,7 +23,7 @@
 
 namespace
 {
-FLinearColor PlantVisualColor(FName ColorTag)
+FLinearColor SalesDisplayPlantVisualColor(FName ColorTag)
 {
 	if (ColorTag == TEXT("Pink"))
 	{
@@ -36,7 +36,7 @@ FLinearColor PlantVisualColor(FName ColorTag)
 	return FLinearColor(0.08f, 0.48f, 0.12f);
 }
 
-FString PlantQualityLabel(FName QualityTag)
+FString SalesDisplayPlantQualityLabel(FName QualityTag)
 {
 	if (QualityTag == TEXT("Exceptional"))
 	{
@@ -521,7 +521,8 @@ void ABotanicusSalesDisplayActor::RefreshVisuals()
 			{
 				PlantMaterial->SetVectorParameterValue(
 					TEXT("Color"),
-					PlantVisualColor(Definition->PlantColorTag));
+					SalesDisplayPlantVisualColor(
+						Definition->PlantColorTag));
 			}
 		}
 		PlantVisual->SetRelativeScale3D(PlantScale);
@@ -562,7 +563,8 @@ void ABotanicusSalesDisplayActor::RefreshVisuals()
 				TEXT(
 					"PRESENTOIR DE VENTE\n%s\nQUALITE : %s\nTENDANCE : %d/3\nPRIX : %d CREDITS\n%s"),
 				*Definition->DisplayName.ToString().ToUpper(),
-				*PlantQualityLabel(Definition->PlantQualityTag),
+				*SalesDisplayPlantQualityLabel(
+					Definition->PlantQualityTag),
 				TrendMatches,
 				DisplayedPrice,
 				bPlantTakenByVisitor

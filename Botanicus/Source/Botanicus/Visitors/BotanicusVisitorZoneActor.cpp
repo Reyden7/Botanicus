@@ -100,7 +100,7 @@ void ABotanicusVisitorZoneActor::RefreshVisuals()
 				BoxExtent.Z / 50.0f));
 	}
 
-	FLinearColor ZoneColor;
+	FLinearColor ZoneColor = FLinearColor::White;
 	FText Label;
 	switch (ZoneType)
 	{

@@ -110,7 +110,7 @@ void UBotanicusShopObjectivesWidget::BuildLayout()
 	PanelCanvasSlot->SetAnchors(FAnchors(1.0f, 0.0f));
 	PanelCanvasSlot->SetAlignment(FVector2D(1.0f, 0.0f));
 	PanelCanvasSlot->SetPosition(FVector2D(-24.0f, 184.0f));
-	PanelCanvasSlot->SetSize(FVector2D(390.0f, 250.0f));
+	PanelCanvasSlot->SetSize(FVector2D(390.0f, 360.0f));
 
 	UVerticalBox* Column = WidgetTree->ConstructWidget<UVerticalBox>();
 	Panel->SetContent(Column);
@@ -134,6 +134,20 @@ void UBotanicusShopObjectivesWidget::BuildLayout()
 	UVerticalBoxSlot* BodySlot =
 		Column->AddChildToVerticalBox(ObjectivesBody);
 	BodySlot->SetPadding(FMargin(2.0f, 7.0f, 2.0f, 2.0f));
+
+	DayTitleLabel = WidgetTree->ConstructWidget<UTextBlock>();
+	ConfigureObjectiveText(DayTitleLabel);
+	DayTitleLabel->SetColorAndOpacity(
+		FSlateColor(FLinearColor(0.45f, 0.86f, 1.0f, 1.0f)));
+	ObjectivesBody->AddChildToVerticalBox(DayTitleLabel);
+
+	DailySalesLabel = WidgetTree->ConstructWidget<UTextBlock>();
+	ConfigureObjectiveText(DailySalesLabel);
+	ObjectivesBody->AddChildToVerticalBox(DailySalesLabel);
+
+	DailyRevenueLabel = WidgetTree->ConstructWidget<UTextBlock>();
+	ConfigureObjectiveText(DailyRevenueLabel);
+	ObjectivesBody->AddChildToVerticalBox(DailyRevenueLabel);
 
 	PlantSalesLabel = WidgetTree->ConstructWidget<UTextBlock>();
 	ConfigureObjectiveText(PlantSalesLabel);
@@ -171,6 +185,27 @@ void UBotanicusShopObjectivesWidget::RefreshObjectives()
 					GameState->GetMainShopLevel() + 1,
 					bExpanded ? TEXT("[-]") : TEXT("[+]"))));
 	}
+	if (DayTitleLabel)
+	{
+		DayTitleLabel->SetText(
+			FText::FromString(
+				FString::Printf(
+					TEXT("JOUR %d - %s"),
+					GameState->GetCurrentDayNumber(),
+					GameState->IsShopDayActive()
+						? TEXT("MAGASIN OUVERT")
+						: TEXT("PREPARATION"))));
+	}
+	SetObjectiveProgress(
+		DailySalesLabel,
+		TEXT("Ventes du jour"),
+		GameState->GetDailyPlantsSold(),
+		GameState->GetDailySalesTarget());
+	SetObjectiveProgress(
+		DailyRevenueLabel,
+		TEXT("Chiffre du jour"),
+		GameState->GetDailyRevenue(),
+		GameState->GetDailyRevenueTarget());
 	SetObjectiveProgress(
 		PlantSalesLabel,
 		TEXT("Vendre des plantes"),
@@ -205,7 +240,7 @@ void UBotanicusShopObjectivesWidget::HandleToggleClicked()
 	if (PanelCanvasSlot)
 	{
 		PanelCanvasSlot->SetSize(
-			FVector2D(390.0f, bExpanded ? 250.0f : 52.0f));
+			FVector2D(390.0f, bExpanded ? 360.0f : 52.0f));
 	}
 	RefreshObjectives();
 }

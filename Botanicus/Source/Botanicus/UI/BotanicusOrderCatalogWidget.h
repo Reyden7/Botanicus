@@ -59,6 +59,43 @@ private:
 	TObjectPtr<UTextBlock> UpgradeButtonLabel;
 };
 
+/** Blue progression row for the starter preparation workbench. */
+UCLASS()
+class BOTANICUS_API UBotanicusWorkbenchUpgradeRowWidget
+	: public UUserWidget
+{
+	GENERATED_BODY()
+
+public:
+	void InitializeRow(
+		ABotanicusPlayerController* InController);
+	void RefreshProgress();
+
+protected:
+	virtual void NativeOnInitialized() override;
+
+private:
+	void BuildLayout();
+
+	UFUNCTION()
+	void HandleUpgradeClicked();
+
+	UPROPERTY(Transient)
+	TObjectPtr<ABotanicusPlayerController> BotanicusController;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> NameLabel;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> CostLabel;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UButton> UpgradeButton;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> UpgradeButtonLabel;
+};
+
 /** One catalogue entry with its server-authoritative order action. */
 UCLASS()
 class BOTANICUS_API UBotanicusOrderItemRowWidget : public UUserWidget
@@ -142,9 +179,6 @@ private:
 	void HandleBuildingsTabClicked();
 
 	UFUNCTION()
-	void HandleAddTestCreditsClicked();
-
-	UFUNCTION()
 	void HandleShopOpenClicked();
 
 	UPROPERTY(Transient)
@@ -176,6 +210,10 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusMainShopUpgradeRowWidget> MainShopUpgradeRow;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBotanicusWorkbenchUpgradeRowWidget>
+		WorkbenchUpgradeRow;
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UButton>> TabButtons;

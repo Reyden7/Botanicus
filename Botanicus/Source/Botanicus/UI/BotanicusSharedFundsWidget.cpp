@@ -88,7 +88,7 @@ void UBotanicusSharedFundsWidget::BuildLayout()
 	BackgroundSlot->SetAnchors(FAnchors(1.0f, 0.0f));
 	BackgroundSlot->SetAlignment(FVector2D(1.0f, 0.0f));
 	BackgroundSlot->SetPosition(FVector2D(-24.0f, 24.0f));
-	BackgroundSlot->SetSize(FVector2D(540.0f, 146.0f));
+	BackgroundSlot->SetSize(FVector2D(540.0f, 176.0f));
 
 	UVerticalBox* Content =
 		WidgetTree->ConstructWidget<UVerticalBox>();
@@ -99,6 +99,19 @@ void UBotanicusSharedFundsWidget::BuildLayout()
 	FundsLabel->SetFont(FSlateFontInfo(FCoreStyle::GetDefaultFont(), 22));
 	FundsLabel->SetJustification(ETextJustify::Center);
 	Content->AddChildToVerticalBox(FundsLabel);
+
+	ShopLevelLabel = WidgetTree->ConstructWidget<UTextBlock>();
+	ShopLevelLabel->SetColorAndOpacity(
+		FSlateColor(FLinearColor(0.40f, 0.78f, 1.0f, 1.0f)));
+	ShopLevelLabel->SetFont(
+		FSlateFontInfo(FCoreStyle::GetDefaultFont(), 17));
+	ShopLevelLabel->SetJustification(ETextJustify::Center);
+	if (UVerticalBoxSlot* ShopLevelSlot =
+			Content->AddChildToVerticalBox(ShopLevelLabel))
+	{
+		ShopLevelSlot->SetPadding(
+			FMargin(0.0f, 4.0f, 0.0f, 0.0f));
+	}
 
 	ReputationLabel = WidgetTree->ConstructWidget<UTextBlock>();
 	ReputationLabel->SetColorAndOpacity(
@@ -133,12 +146,14 @@ void UBotanicusSharedFundsWidget::RefreshFunds()
 	const UWorld* World = GetWorld();
 	const ABotanicusGameState* GameState =
 		World ? World->GetGameState<ABotanicusGameState>() : nullptr;
-	if (!FundsLabel || !ReputationLabel || !TrendsLabel || !GameState)
+	if (!FundsLabel || !ShopLevelLabel ||
+		!ReputationLabel || !TrendsLabel || !GameState)
 	{
 		return;
 	}
 
 	const int32 Funds = GameState->GetSharedFunds();
+	const int32 ShopLevel = GameState->GetMainShopLevel();
 	const int32 Reputation = GameState->GetShopReputationPoints();
 	const int32 Satisfaction =
 		GameState->GetLastVisitorSatisfaction();
@@ -149,6 +164,7 @@ void UBotanicusSharedFundsWidget::RefreshFunds()
 	const FName TrendType = GameState->GetTrendTypeTag();
 	const FName TrendQuality = GameState->GetTrendQualityTag();
 	if (Funds == LastDisplayedFunds &&
+		ShopLevel == LastDisplayedShopLevel &&
 		Reputation == LastDisplayedReputation &&
 		Satisfaction == LastDisplayedSatisfaction &&
 		Reviews == LastDisplayedReviews &&
@@ -160,6 +176,7 @@ void UBotanicusSharedFundsWidget::RefreshFunds()
 		return;
 	}
 	LastDisplayedFunds = Funds;
+	LastDisplayedShopLevel = ShopLevel;
 	LastDisplayedReputation = Reputation;
 	LastDisplayedSatisfaction = Satisfaction;
 	LastDisplayedReviews = Reviews;
@@ -172,6 +189,11 @@ void UBotanicusSharedFundsWidget::RefreshFunds()
 			FString::Printf(
 				TEXT("CAISSE COMMUNE  •  %d CRÉDITS"),
 				Funds)));
+	ShopLevelLabel->SetText(
+		FText::FromString(
+			FString::Printf(
+				TEXT("BOUTIQUE  -  NIVEAU %d"),
+				ShopLevel)));
 
 	const int32 FilledStars =
 		FMath::Clamp(

@@ -17,6 +17,7 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
 #include "Sales/BotanicusSalesDisplayActor.h"
+#include "Sales/BotanicusSelfCheckoutActor.h"
 #include "UI/BotanicusVisitorSpeechBubbleWidget.h"
 #include "Visitors/BotanicusVisitorZoneActor.h"
 #include "UObject/ConstructorHelpers.h"
@@ -61,7 +62,7 @@ FString VisitorTypeLabel(FName TypeTag)
 	return TEXT("une plante aromatique");
 }
 
-FLinearColor PlantVisualColor(FName ColorTag)
+FLinearColor VisitorPlantVisualColor(FName ColorTag)
 {
 	if (ColorTag == TEXT("Pink"))
 	{
@@ -265,6 +266,114 @@ void ABotanicusVisitorCharacter::AdmitFromQueue()
 	ForceNetUpdate();
 }
 
+void ABotanicusVisitorCharacter::ConfigureCheckoutQueue(
+	const FVector& InQueueDestination,
+	bool bIsFront)
+{
+	if (!HasAuthority() || !IsInCheckoutQueue())
+	{
+		return;
+	}
+
+	CheckoutQueueDestination = InQueueDestination;
+	const float DistanceSquared = FVector::DistSquared2D(
+		GetActorLocation(),
+		CheckoutQueueDestination);
+	if (bIsFront &&
+		DistanceSquared <= FMath::Square(AcceptanceRadius))
+	{
+		if (VisitorState != EBotanicusVisitorState::Paying)
+		{
+			VisitorState = EBotanicusVisitorState::Paying;
+			CheckoutStage = 0;
+			GetCharacterMovement()->StopMovementImmediately();
+			SetSpeechLine(TEXT("Bonjour, je voudrais cette plante."));
+			RefreshStatusText();
+			ForceNetUpdate();
+		}
+	}
+	else if (VisitorState == EBotanicusVisitorState::Paying)
+	{
+		VisitorState = EBotanicusVisitorState::CheckoutQueue;
+		CheckoutStage = 0;
+		SetSpeechLine(TEXT("J'attends mon tour pour payer."));
+		RefreshStatusText();
+		ForceNetUpdate();
+	}
+}
+
+int32 ABotanicusVisitorCharacter::GetCheckoutPrice() const
+{
+	const UGameInstance* GameInstance = GetGameInstance();
+	const UBotanicusItemCatalogSubsystem* Catalog =
+		GameInstance
+			? GameInstance->GetSubsystem<
+				UBotanicusItemCatalogSubsystem>()
+			: nullptr;
+	const FBotanicusItemDefinition* Definition =
+		Catalog ? Catalog->FindItem(CarriedPlantItemKey) : nullptr;
+	const ABotanicusGameState* GameState =
+		GetWorld()
+			? GetWorld()->GetGameState<ABotanicusGameState>()
+			: nullptr;
+	return Definition
+		? GameState
+			? GameState->GetTrendAdjustedSalePrice(*Definition)
+			: FMath::Max(0, Definition->SalePrice)
+		: 0;
+}
+
+void ABotanicusVisitorCharacter::HandlePlayerCheckoutAction()
+{
+	if (!HasAuthority() || !CanUsePlayerCheckout())
+	{
+		return;
+	}
+
+	if (CheckoutStage == 0)
+	{
+		CheckoutStage = 1;
+		SetSpeechLine(
+			FString::Printf(
+				TEXT("Plante scannee : %d credits."),
+				GetCheckoutPrice()));
+		RefreshStatusText();
+		ForceNetUpdate();
+		return;
+	}
+
+	if (TargetDisplay &&
+		TargetDisplay->CompleteVisitorPurchase(this))
+	{
+		return;
+	}
+	SetSpeechLine(TEXT("Il y a un probleme avec cette vente."));
+}
+
+bool ABotanicusVisitorCharacter::AssignSelfCheckout(
+	ABotanicusSelfCheckoutActor* InSelfCheckout)
+{
+	if (!HasAuthority() ||
+		!IsWaitingForCheckoutAssignment() ||
+		!IsValid(InSelfCheckout) ||
+		!InSelfCheckout->IsOperational() ||
+		InSelfCheckout->GetAssignedVisitor())
+	{
+		return false;
+	}
+
+	AssignedSelfCheckout = InSelfCheckout;
+	VisitorState = EBotanicusVisitorState::SelfCheckout;
+	CheckoutStage = 0;
+	SelfCheckoutElapsed = 0.0f;
+	CheckoutQueueDestination =
+		InSelfCheckout->GetCustomerStandLocation();
+	SetSpeechLine(TEXT("Une caisse automatique est libre."));
+	RefreshStatusText();
+	ForceNetUpdate();
+	return true;
+}
+
 void ABotanicusVisitorCharacter::GetLifetimeReplicatedProps(
 	TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
@@ -281,6 +390,12 @@ void ABotanicusVisitorCharacter::GetLifetimeReplicatedProps(
 	DOREPLIFETIME(
 		ABotanicusVisitorCharacter,
 		CarriedPlantItemKey);
+	DOREPLIFETIME(
+		ABotanicusVisitorCharacter,
+		CheckoutStage);
+	DOREPLIFETIME(
+		ABotanicusVisitorCharacter,
+		AssignedSelfCheckout);
 }
 
 void ABotanicusVisitorCharacter::Tick(float DeltaSeconds)
@@ -339,18 +454,76 @@ void ABotanicusVisitorCharacter::Tick(float DeltaSeconds)
 		}
 		break;
 
+	case EBotanicusVisitorState::CheckoutQueue:
+		CheckoutWaitDuration += DeltaSeconds;
+		MoveTowards(CheckoutQueueDestination, DeltaSeconds);
+		if (FVector::DistSquared2D(
+				GetActorLocation(),
+				CheckoutQueueDestination) <=
+			FMath::Square(AcceptanceRadius * 0.65f))
+		{
+			GetCharacterMovement()->StopMovementImmediately();
+		}
+		break;
+
 	case EBotanicusVisitorState::Paying:
 		GetCharacterMovement()->StopMovementImmediately();
-		PaymentRemaining -= DeltaSeconds;
-		if (PaymentRemaining <= 0.0f)
+		CheckoutWaitDuration += DeltaSeconds;
+		break;
+
+	case EBotanicusVisitorState::SelfCheckout:
+		CheckoutWaitDuration += DeltaSeconds;
+		if (!IsValid(AssignedSelfCheckout) ||
+			!AssignedSelfCheckout->IsOperational())
 		{
-			SetSpeechLine(FString());
-			if (TargetDisplay &&
-				TargetDisplay->CompleteVisitorPurchase(this))
+			AssignedSelfCheckout = nullptr;
+			VisitorState = EBotanicusVisitorState::CheckoutQueue;
+			CheckoutStage = 0;
+			SelfCheckoutElapsed = 0.0f;
+			SetSpeechLine(TEXT("Je vais attendre une autre caisse."));
+			RefreshStatusText();
+			ForceNetUpdate();
+			break;
+		}
+		CheckoutQueueDestination =
+			AssignedSelfCheckout->GetCustomerStandLocation();
+		MoveTowards(CheckoutQueueDestination, DeltaSeconds);
+		if (FVector::DistSquared2D(
+				GetActorLocation(),
+				CheckoutQueueDestination) <=
+			FMath::Square(AcceptanceRadius * 0.65f))
+		{
+			GetCharacterMovement()->StopMovementImmediately();
+			SelfCheckoutElapsed += DeltaSeconds;
+			if (CheckoutStage == 0 &&
+				SelfCheckoutElapsed >= 1.0f)
 			{
-				break;
+				CheckoutStage = 1;
+				SetSpeechLine(
+					FString::Printf(
+						TEXT("Je scanne ma plante : %d credits."),
+						GetCheckoutPrice()));
+				RefreshStatusText();
+				ForceNetUpdate();
 			}
-			BeginDeparture();
+			if (SelfCheckoutElapsed >= 2.5f)
+			{
+				ABotanicusSalesDisplayActor* Display =
+					TargetDisplay;
+				AssignedSelfCheckout = nullptr;
+				if (!Display ||
+					!Display->CompleteVisitorPurchase(this))
+				{
+					VisitorState =
+						EBotanicusVisitorState::CheckoutQueue;
+					CheckoutStage = 0;
+					SelfCheckoutElapsed = 0.0f;
+					SetSpeechLine(
+						TEXT("La caisse n'a pas valide mon achat."));
+					RefreshStatusText();
+					ForceNetUpdate();
+				}
+			}
 		}
 		break;
 
@@ -699,6 +872,9 @@ void ABotanicusVisitorCharacter::ResetBrowsingState()
 	AcceptanceRadius = FMath::FRandRange(112.0f, 142.0f);
 	QueueLongitudinalOffset = FMath::FRandRange(-18.0f, 18.0f);
 	QueueLateralOffset = FMath::FRandRange(-32.0f, 32.0f);
+	CheckoutQueueArrivalTime = 0.0f;
+	CheckoutWaitDuration = 0.0f;
+	CheckoutStage = 0;
 	if (UCharacterMovementComponent* Movement =
 			GetCharacterMovement())
 	{
@@ -770,6 +946,18 @@ void ABotanicusVisitorCharacter::RecordVisitOutcome(
 					GameState->CountMatchingTrends(*Definition) * 5;
 			}
 		}
+	}
+	if (bPurchasedPlant)
+	{
+		const int32 WaitingPenalty =
+			FMath::Clamp(
+				FMath::FloorToInt(
+					FMath::Max(0.0f, CheckoutWaitDuration - 15.0f) /
+					10.0f) *
+					2,
+				0,
+				12);
+		Satisfaction -= WaitingPenalty;
 	}
 	Satisfaction = FMath::Clamp(Satisfaction, 0, 100);
 	if (ABotanicusGameState* GameState =
@@ -911,7 +1099,8 @@ void ABotanicusVisitorCharacter::RefreshCarriedPlantVisuals()
 			{
 				CarriedPlantMaterial->SetVectorParameterValue(
 					TEXT("Color"),
-					PlantVisualColor(Definition->PlantColorTag));
+					VisitorPlantVisualColor(
+						Definition->PlantColorTag));
 			}
 		}
 		CarriedPlantVisual->SetRelativeScale3D(PlantScale);
@@ -971,10 +1160,15 @@ void ABotanicusVisitorCharacter::FollowRoute(float DeltaSeconds)
 		if (DestinationWaypointIndex == CheckoutWaypointIndex &&
 			bPlantSelected)
 		{
-			VisitorState = EBotanicusVisitorState::Paying;
-			PaymentRemaining = 1.8f;
+			VisitorState = EBotanicusVisitorState::CheckoutQueue;
+			CheckoutQueueDestination =
+				RoutePoints[DestinationWaypointIndex];
+			CheckoutQueueArrivalTime =
+				GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+			CheckoutWaitDuration = 0.0f;
+			CheckoutStage = 0;
 			GetCharacterMovement()->StopMovementImmediately();
-			SetSpeechLine(TEXT("Parfait, je prends celle-ci !"));
+			SetSpeechLine(TEXT("Je vais faire la queue pour payer."));
 			RefreshStatusText();
 			ForceNetUpdate();
 		}
@@ -985,7 +1179,9 @@ void ABotanicusVisitorCharacter::UpdateStuckDetection(
 	float DeltaSeconds)
 {
 	if (VisitorState == EBotanicusVisitorState::Inspecting ||
+		VisitorState == EBotanicusVisitorState::CheckoutQueue ||
 		VisitorState == EBotanicusVisitorState::Paying ||
+		VisitorState == EBotanicusVisitorState::SelfCheckout ||
 		VisitorState == EBotanicusVisitorState::Queued)
 	{
 		LastMovementLocation = GetActorLocation();
@@ -1020,6 +1216,8 @@ void ABotanicusVisitorCharacter::BeginDeparture(
 		TargetDisplay->NotifyVisitorEnded(this);
 		TargetDisplay = nullptr;
 	}
+	AssignedSelfCheckout = nullptr;
+	SelfCheckoutElapsed = 0.0f;
 	SetSpeechLine(FString());
 	if (!bKeepPurchasedPlant)
 	{
@@ -1046,7 +1244,9 @@ void ABotanicusVisitorCharacter::BeginShopClosureDeparture()
 		IsInsideSalesArea() ||
 		PreviousState == EBotanicusVisitorState::Approaching ||
 		PreviousState == EBotanicusVisitorState::Inspecting ||
-		PreviousState == EBotanicusVisitorState::Paying;
+		PreviousState == EBotanicusVisitorState::CheckoutQueue ||
+		PreviousState == EBotanicusVisitorState::Paying ||
+		PreviousState == EBotanicusVisitorState::SelfCheckout;
 	const bool bMustTurnAround =
 		PreviousState == EBotanicusVisitorState::Queued ||
 		(!bWasInsideShop &&
@@ -1067,6 +1267,9 @@ void ABotanicusVisitorCharacter::BeginShopClosureDeparture()
 	bReturningToRoute = false;
 	bCarryingPlant = false;
 	CarriedPlantItemKey = NAME_None;
+	CheckoutStage = 0;
+	AssignedSelfCheckout = nullptr;
+	SelfCheckoutElapsed = 0.0f;
 	RefreshCarriedPlantVisuals();
 
 	if (bMustTurnAround && RoutePoints.Num() > 0)
@@ -1158,9 +1361,23 @@ void ABotanicusVisitorCharacter::RefreshStatusText()
 	case EBotanicusVisitorState::Inspecting:
 		StatusText->SetText(FText::FromString(TEXT("VISITEUR\nREGARDE LA PLANTE")));
 		break;
+	case EBotanicusVisitorState::CheckoutQueue:
+		StatusText->SetText(
+			FText::FromString(TEXT("VISITEUR\nFILE DE LA CAISSE")));
+		break;
 	case EBotanicusVisitorState::Paying:
 		StatusText->SetText(
-			FText::FromString(TEXT("VISITEUR\nPAIE A LA CAISSE")));
+			FText::FromString(
+				CheckoutStage == 0
+					? TEXT("VISITEUR\nATTEND LE SCAN")
+					: TEXT("VISITEUR\nATTEND LE PAIEMENT")));
+		break;
+	case EBotanicusVisitorState::SelfCheckout:
+		StatusText->SetText(
+			FText::FromString(
+				CheckoutStage == 0
+					? TEXT("VISITEUR\nCAISSE AUTO : SCAN")
+					: TEXT("VISITEUR\nCAISSE AUTO : PAIEMENT")));
 		break;
 	case EBotanicusVisitorState::Leaving:
 		StatusText->SetText(

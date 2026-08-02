@@ -7,7 +7,9 @@
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "Path/BotanicusPathActor.h"
+#include "Sales/BotanicusCashRegisterActor.h"
 #include "Sales/BotanicusSalesDisplayActor.h"
+#include "Sales/BotanicusSelfCheckoutActor.h"
 #include "Visitors/BotanicusVisitorCharacter.h"
 #include "Visitors/BotanicusVisitorZoneActor.h"
 
@@ -85,6 +87,9 @@ void ABotanicusVisitorManager::Tick(float DeltaSeconds)
 		}
 	}
 	RefreshQueuePositions(VisitorCircuit);
+	RefreshCheckoutQueue(
+		VisitorCircuit,
+		CheckoutWaypointIndex);
 
 	if (SpawnRemaining <= 0.0f &&
 		TotalVisitorCount < GetTargetVisitorPopulation())
@@ -249,6 +254,19 @@ bool ABotanicusVisitorManager::BuildVisitorCircuit(
 			 ++IgnoredPathIt)
 		{
 			QueryParams.AddIgnoredActor(*IgnoredPathIt);
+		}
+		for (TActorIterator<ABotanicusVisitorCharacter> VisitorIt(World);
+			 VisitorIt;
+			 ++VisitorIt)
+		{
+			QueryParams.AddIgnoredActor(*VisitorIt);
+		}
+		for (TActorIterator<ABotanicusCashRegisterActor> RegisterIt(
+				 World);
+			 RegisterIt;
+			 ++RegisterIt)
+		{
+			QueryParams.AddIgnoredActor(*RegisterIt);
 		}
 		bool bRouteBlocked = false;
 		for (int32 PointIndex = 1;
@@ -466,6 +484,135 @@ void ABotanicusVisitorManager::RefreshQueuePositions(
 						Destination,
 						QueueDirection));
 		}
+	}
+}
+
+void ABotanicusVisitorManager::RefreshCheckoutQueue(
+	const TArray<FVector>& VisitorCircuit,
+	int32 CheckoutWaypointIndex)
+{
+	if (!GetWorld() ||
+		!VisitorCircuit.IsValidIndex(CheckoutWaypointIndex) ||
+		CheckoutWaypointIndex <= 0)
+	{
+		return;
+	}
+
+	TArray<ABotanicusVisitorCharacter*> WaitingForCheckout;
+	for (TActorIterator<ABotanicusVisitorCharacter> VisitorIt(
+			 GetWorld());
+		 VisitorIt;
+		 ++VisitorIt)
+	{
+		if (VisitorIt->IsWaitingForCheckoutAssignment())
+		{
+			WaitingForCheckout.Add(*VisitorIt);
+		}
+	}
+	WaitingForCheckout.Sort(
+		[](const ABotanicusVisitorCharacter& Left,
+		   const ABotanicusVisitorCharacter& Right)
+		{
+			return Left.GetCheckoutQueueArrivalTime() <
+				Right.GetCheckoutQueueArrivalTime();
+		});
+
+	for (TActorIterator<ABotanicusSelfCheckoutActor> CheckoutIt(
+			 GetWorld());
+		 CheckoutIt && WaitingForCheckout.Num() > 0;
+		 ++CheckoutIt)
+	{
+		if (!CheckoutIt->IsOperational() ||
+			CheckoutIt->GetAssignedVisitor())
+		{
+			continue;
+		}
+		for (int32 VisitorIndex = 0;
+			 VisitorIndex < WaitingForCheckout.Num();
+			 ++VisitorIndex)
+		{
+			if (WaitingForCheckout[VisitorIndex]->
+					AssignSelfCheckout(*CheckoutIt))
+			{
+				WaitingForCheckout.RemoveAt(VisitorIndex);
+				break;
+			}
+		}
+	}
+
+	TArray<ABotanicusVisitorCharacter*> CheckoutVisitors;
+	for (TActorIterator<ABotanicusVisitorCharacter> VisitorIt(
+			 GetWorld());
+		 VisitorIt;
+		 ++VisitorIt)
+	{
+		if (VisitorIt->IsInCheckoutQueue())
+		{
+			CheckoutVisitors.Add(*VisitorIt);
+		}
+	}
+	CheckoutVisitors.Sort(
+		[](const ABotanicusVisitorCharacter& Left,
+		   const ABotanicusVisitorCharacter& Right)
+		{
+			return Left.GetCheckoutQueueArrivalTime() <
+				Right.GetCheckoutQueueArrivalTime();
+		});
+
+	FVector QueueDirection =
+		VisitorCircuit[CheckoutWaypointIndex - 1] -
+		VisitorCircuit[CheckoutWaypointIndex];
+	QueueDirection.Z = 0.0f;
+	QueueDirection = QueueDirection.GetSafeNormal();
+	if (QueueDirection.IsNearlyZero())
+	{
+		QueueDirection = FVector::BackwardVector;
+	}
+
+	FVector CheckoutLocation =
+		VisitorCircuit[CheckoutWaypointIndex];
+	float BestRegisterDistanceSquared = TNumericLimits<float>::Max();
+	for (TActorIterator<ABotanicusCashRegisterActor> RegisterIt(
+			 GetWorld());
+		 RegisterIt;
+		 ++RegisterIt)
+	{
+		if (RegisterIt->ActorHasTag(TEXT("BotanicusPlacementPreview")))
+		{
+			continue;
+		}
+		if (!RegisterIt->IsOperational())
+		{
+			continue;
+		}
+		const FVector CandidateLocation =
+			RegisterIt->GetCustomerStandLocation();
+		const float DistanceSquared = FVector::DistSquared2D(
+			CandidateLocation,
+			VisitorCircuit[CheckoutWaypointIndex]);
+		if (DistanceSquared < BestRegisterDistanceSquared)
+		{
+			BestRegisterDistanceSquared = DistanceSquared;
+			CheckoutLocation = CandidateLocation;
+		}
+	}
+	for (int32 QueueIndex = 0;
+		 QueueIndex < CheckoutVisitors.Num();
+		 ++QueueIndex)
+	{
+		const float SideOffset =
+			QueueIndex > 0
+				? (QueueIndex % 2 == 0 ? -12.0f : 12.0f)
+				: 0.0f;
+		const FVector QueueRight(
+			-QueueDirection.Y,
+			QueueDirection.X,
+			0.0f);
+		CheckoutVisitors[QueueIndex]->ConfigureCheckoutQueue(
+			CheckoutLocation +
+				QueueDirection * (QueueIndex * 125.0f) +
+				QueueRight * SideOffset,
+			QueueIndex == 0);
 	}
 }
 

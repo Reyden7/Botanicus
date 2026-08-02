@@ -185,20 +185,11 @@ void UBotanicusTopDownToolbarWidget::BuildLayout()
 	UTextBlock* PathLabel = nullptr;
 	UTextBlock* ConfirmLabel = nullptr;
 	UTextBlock* DeletePathLabel = nullptr;
-	UTextBlock* OrderCatalogLabel = nullptr;
 	UTextBlock* CancelLabel = nullptr;
 	UTextBlock* VisitorRouteLabel = nullptr;
 	UTextBlock* VisitorParkingLabel = nullptr;
 	UTextBlock* VisitorSalesAreaLabel = nullptr;
 	UTextBlock* VisitorCheckoutLabel = nullptr;
-	OrderCatalogButton = AddToolbarButton(
-		WidgetTree,
-		Row,
-		NSLOCTEXT(
-			"Botanicus",
-			"OrderCatalogButton",
-			"PANNEAU DE COMMANDE"),
-		OrderCatalogLabel);
 	PathButton = AddToolbarButton(
 		WidgetTree,
 		Row,
@@ -257,9 +248,6 @@ void UBotanicusTopDownToolbarWidget::BuildLayout()
 	VisitorCheckoutButton->OnClicked.AddDynamic(
 		this,
 		&UBotanicusTopDownToolbarWidget::HandleVisitorCheckoutClicked);
-	OrderCatalogButton->OnClicked.AddDynamic(
-		this,
-		&UBotanicusTopDownToolbarWidget::HandleOrderCatalogClicked);
 	ConfirmButton->OnClicked.AddDynamic(
 		this,
 		&UBotanicusTopDownToolbarWidget::HandleConfirmClicked);
@@ -325,14 +313,6 @@ void UBotanicusTopDownToolbarWidget::HandleDeletePathClicked()
 	if (BotanicusController)
 	{
 		BotanicusController->BeginPathDeletion();
-	}
-}
-
-void UBotanicusTopDownToolbarWidget::HandleOrderCatalogClicked()
-{
-	if (BotanicusController)
-	{
-		BotanicusController->ToggleOrderCatalog();
 	}
 }
 

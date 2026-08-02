@@ -135,10 +135,10 @@ comic-style reaction bubble about the plant or its colour. Rejected plants are
 released for another visitor.
 
 After making a choice, the visitor physically carries a sale pot and plant
-from the display to the checkout. The visitor pauses at the checkout for 1.8
-seconds, pays, then continues to the parking while still visibly carrying the
-purchase. The display is cleared and the shared wallet is credited only after
-this checkout pause.
+from the display to the physical cash register. The visitor waits until a
+player scans and collects the sale, then continues to the parking while still
+visibly carrying the purchase. The display is cleared and the shared wallet is
+credited only after the second checkout action.
 
 Each visitor now has a preferred colour, preferred plant family, maximum
 budget and personal minimum quality score. Displayed plants expose matching
@@ -195,6 +195,32 @@ negative review. Reopening the shop restarts the randomized visitor flow. The
 server owns and replicates this state, and autosave version 17 restores it
 after a restart.
 
+## Shop day loop
+
+The nursery uses a persistent shared clock displayed in the top-left HUD. One
+real second advances one in-game minute at debug speed x1. The shop opens
+automatically at 08:00 and closes automatically at 19:00. Manual opening and
+closing remain available between those scheduled transitions.
+
+The nursery starts each new day in preparation mode with the shop closed.
+Opening the shop starts the day's shared sales and revenue counters, generates
+new plant trends and activates the visitor flow. The orange objectives HUD
+shows daily sales and revenue goals in addition to the long-term shop upgrade
+goals.
+
+Closing the shop finalizes the day while visitors leave naturally. A shared
+summary reports plants sold, revenue, average satisfaction, review count,
+reputation change and whether both daily goals were reached. The next numbered
+day remains closed until a player chooses to open it. Autosave version 18
+persists an active day and its counters.
+
+For development testing, the command panel includes a purple simulation-speed
+button cycling through x1, x5 and x15. It affects the clock, visitors, plant
+growth, deliveries and trend timers for the whole server. Player characters
+and their controllers receive inverse custom time dilation, so their movement
+and interaction timing stay at normal speed. This debug multiplier is not
+saved and always returns to x1 after restarting.
+
 An upgrade requires both the displayed amount of shared money and all listed
 tasks. The prototype tasks track cumulative plants sold and catalogue orders
 placed. They are displayed in a collapsible orange list on the right side of
@@ -243,6 +269,27 @@ top-right HUD displays filled stars, the exact decimal rating and the last
 visitor's satisfaction. Reputation is also an orange shop-upgrade objective:
 3.20 stars for level 2, 3.80 for level 3, then progressively up to 4.80.
 
+## Player-operated checkout
+
+A visitor who selected a plant no longer pays automatically. On reaching the
+checkout waypoint, visitors join a first-in, first-out line with 125-unit
+spacing. Only the visitor at the front can be served; the shop capacity remains
+occupied while customers are waiting.
+
+The checkout line is anchored to the customer side of the physical register.
+When the player is within 450 units and looks directly at the register, its
+action turns green. The first left click scans the front customer's plant and
+displays its trend-adjusted price. A second left click collects the shared
+credits, records the sale and lets the visitor follow the authored route back
+to the parking while still carrying the purchased plant. Clicking a visitor
+directly or using a register outside the checkout zone has no effect.
+
+Checkout state and scan stage are server-authoritative and replicated. Waiting
+longer than 15 seconds gradually reduces final satisfaction by two points per
+additional ten seconds, capped at a 12-point penalty. Closing the shop releases
+the reserved display and sends every checkout customer home through the normal
+closure route without recording a failed visit.
+
 ## Customer trends
 
 Three shared demands rotate every ten minutes: one available colour, one plant
@@ -286,6 +333,79 @@ and `E` releases its contents; a full hotbar leaves the contents safely inside.
 Cut coverage and opened state are authoritative, replicated and persisted.
 Cartons from older saves migrate as already open so an existing delivery is
 never made inaccessible retroactively.
+
+## Starter shop fixtures
+
+Every shop starts with exactly the three essential workstations it needs:
+
+- the command computer;
+- the sale-pot preparation workbench;
+- the physical cash register.
+
+They are not displayed in the order catalogue and cost no credits. A new game
+creates them automatically. When an older save is loaded, each missing
+workstation is added once without replacing an existing one. The cash register
+is placed beside the authored checkout zone when that zone already exists.
+Their transforms are then handled by the normal world-item autosave.
+
+Looking at the computer and tapping `E` opens the complete order panel.
+Holding `E` for two seconds moves it instead. The workbench and cash register
+also require a full two-second `E` hold before movement begins, preventing an
+accidental relocation during normal use. Left mouse confirms the new position.
+`Escape` or the Close button returns input to the player. `T` remains dedicated
+to the top-down construction view and no longer opens or closes the order
+catalogue. Buying a building from the computer closes the panel and switches
+into the top-down placement view before starting construction.
+
+## Preparation workbench progression
+
+The blue workbench row appears first in the command computer's Preparation
+tab. It displays the current level, simultaneous pot capacity, next upgrade
+cost and a shared-credit upgrade button:
+
+- level 1: one pot, starter level;
+- level 2: two pots, 500 credits;
+- level 3: three pots, 900 credits;
+- level 4: four pots, 1,400 credits;
+- level 5: five pots, 2,000 credits.
+
+Each level adds a real independent snap point. Placement selects the nearest
+free point to the player's preview, and soil or planting actions recognize all
+active points. The prototype workbench grows lengthwise and displays every
+active slot. Its native actor also exposes one optional mesh per level so final
+art can replace the debug geometry without changing gameplay code.
+
+The server authoritatively spends shared credits, replicates the new level and
+autosaves it immediately. Save version 20 stores the workbench level; older
+saves start at level 1 without changing any prepared sale pots.
+
+## Automatic checkouts
+
+The Sales tab contains a purchasable `SelfCheckout` for 1,500 credits once the
+main shop reaches level 3. Each order contains exactly one station. Level 3
+allows two stations, then the limit increases by one for every additional shop
+level. Placed stations, unopened delivery cartons and pending orders all count
+toward the server-authoritative shared limit.
+
+The debug station is 2 metres high, 40 centimetres wide and 60 centimetres
+deep. It only operates inside the checkout zone. A waiting customer
+automatically reserves a free station, walks to it with the selected plant,
+scans after one second, pays after 2.5 seconds and then follows the normal
+return route to the parking area. Several stations can process different
+customers concurrently; the remaining customers continue to use the manual
+cash-register queue.
+
+New checkout zones are 10 by 6 metres. Existing saved checkout zones are
+expanded to at least that size when loaded so they can hold the starter
+register, automatic stations and their queues.
+
+## Development panel
+
+Development commands no longer appear in the physical computer's order panel.
+`Tab` opens a separate orange development panel with shared `+100 credits`,
+simulation speed and main-shop level `-1` / `+1` controls. `Tab`, `Escape` or
+the Close button closes it. Debug level changes are replicated and autosaved,
+which makes level-gated catalogue entries and their limits directly testable.
 
 ## Generated assets
 

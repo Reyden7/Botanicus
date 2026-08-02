@@ -9,6 +9,7 @@
 #include "InputActionValue.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Botanicus.h"
+#include "BotanicusGameState.h"
 #include "InputCoreTypes.h"
 #include "Interaction/BotanicusInteractionComponent.h"
 #include "Net/UnrealNetwork.h"
@@ -67,6 +68,17 @@ void ABotanicusCharacter::BeginPlay()
 	Super::BeginPlay();
 
 	DefaultMaxWalkSpeed = GetCharacterMovement()->MaxWalkSpeed;
+	if (const ABotanicusGameState* GameState =
+			GetWorld()
+				? GetWorld()->GetGameState<ABotanicusGameState>()
+				: nullptr)
+	{
+		CustomTimeDilation =
+			1.0f /
+			FMath::Max(
+				1.0f,
+				GameState->GetDevelopmentTimeScale());
+	}
 	ApplyCarryMovementMultiplier();
 	ConfigureTrueFirstPersonLocalView();
 

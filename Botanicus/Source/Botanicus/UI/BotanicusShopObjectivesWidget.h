@@ -37,6 +37,15 @@ private:
 	TObjectPtr<UVerticalBox> ObjectivesBody;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> DayTitleLabel;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> DailySalesLabel;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> DailyRevenueLabel;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> PlantSalesLabel;
 
 	UPROPERTY(Transient)

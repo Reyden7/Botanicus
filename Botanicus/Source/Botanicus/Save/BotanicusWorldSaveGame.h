@@ -168,6 +168,9 @@ struct BOTANICUS_API FBotanicusSavedWorldItem
 
 	UPROPERTY()
 	FName SalePotPlantItemKey = NAME_None;
+
+	UPROPERTY()
+	int32 PreparationWorkbenchLevel = 1;
 };
 
 /** Server-owned persistent state for one Botanicus map. */
@@ -178,7 +181,7 @@ class BOTANICUS_API UBotanicusWorldSaveGame : public USaveGame
 
 public:
 	UPROPERTY()
-	int32 SaveVersion = 17;
+	int32 SaveVersion = 20;
 
 	UPROPERTY()
 	FString MapName;
@@ -191,7 +194,31 @@ public:
 	int32 MainShopLevel = 1;
 
 	UPROPERTY()
-	bool bMainShopOpen = true;
+	bool bMainShopOpen = false;
+
+	UPROPERTY()
+	int32 CurrentDayNumber = 1;
+
+	UPROPERTY()
+	bool bShopDayActive = false;
+
+	UPROPERTY()
+	int32 DailyPlantsSold = 0;
+
+	UPROPERTY()
+	int32 DailyRevenue = 0;
+
+	UPROPERTY()
+	int32 DailySatisfactionTotal = 0;
+
+	UPROPERTY()
+	int32 DailyReviewCount = 0;
+
+	UPROPERTY()
+	int32 DayStartReputation = 300;
+
+	UPROPERTY()
+	float DayTimeMinutes = 420.0f;
 
 	UPROPERTY()
 	int32 TotalPlantsSold = 0;

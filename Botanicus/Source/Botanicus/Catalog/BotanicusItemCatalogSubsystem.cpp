@@ -6,8 +6,11 @@
 #include "Growing/BotanicusWateringCanActor.h"
 #include "Growing/BotanicusWaterReserveActor.h"
 #include "Preparation/BotanicusPreparationWorkbenchActor.h"
+#include "Preparation/BotanicusComputerActor.h"
 #include "Sales/BotanicusSalesDisplayActor.h"
 #include "Sales/BotanicusSalePotActor.h"
+#include "Sales/BotanicusCashRegisterActor.h"
+#include "Sales/BotanicusSelfCheckoutActor.h"
 
 void UBotanicusItemCatalogSubsystem::Initialize(
 	FSubsystemCollectionBase& Collection)
@@ -441,6 +444,84 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	PreparationWorkbench.Price = 350;
 	PreparationWorkbench.DeliveryQuantity = 1;
 	PreparationWorkbench.DeliveryDelaySeconds = 4.0f;
+	PreparationWorkbench.bPurchasable = false;
+
+	FBotanicusItemDefinition& Computer =
+		NativeFallbackItems.AddDefaulted_GetRef();
+	Computer.ItemKey = TEXT("CommandComputer");
+	Computer.DisplayName =
+		NSLOCTEXT(
+			"BotanicusCatalog",
+			"CommandComputer",
+			"Ordinateur de commande");
+	Computer.Category = EBotanicusItemCategory::Equipment;
+	Computer.CatalogTabs =
+		static_cast<int32>(EBotanicusCatalogTab::Preparation);
+	Computer.WorldMesh = TSoftObjectPtr<UStaticMesh>(
+		FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube.Cube")));
+	Computer.WorldScale = FVector(0.5f, 0.12f, 0.34f);
+	Computer.WorldActorClass =
+		ABotanicusComputerActor::StaticClass();
+	Computer.MaximumStack = 1;
+	Computer.WeightClass = EBotanicusItemWeightClass::Handheld;
+	Computer.Price = 250;
+	Computer.DeliveryQuantity = 1;
+	Computer.DeliveryDelaySeconds = 3.0f;
+	Computer.CollisionHalfExtentOverride =
+		FVector(55.0f, 32.0f, 42.0f);
+	Computer.bPurchasable = false;
+
+	FBotanicusItemDefinition& CashRegister =
+		NativeFallbackItems.AddDefaulted_GetRef();
+	CashRegister.ItemKey = TEXT("CashRegister");
+	CashRegister.DisplayName =
+		NSLOCTEXT(
+			"BotanicusCatalog",
+			"CashRegister",
+			"Caisse");
+	CashRegister.Category = EBotanicusItemCategory::Equipment;
+	CashRegister.CatalogTabs =
+		static_cast<int32>(EBotanicusCatalogTab::Sales);
+	CashRegister.WorldMesh = TSoftObjectPtr<UStaticMesh>(
+		FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube.Cube")));
+	CashRegister.WorldScale = FVector(0.75f, 0.42f, 0.55f);
+	CashRegister.WorldActorClass =
+		ABotanicusCashRegisterActor::StaticClass();
+	CashRegister.MaximumStack = 1;
+	CashRegister.WeightClass =
+		EBotanicusItemWeightClass::Handheld;
+	CashRegister.Price = 0;
+	CashRegister.bPurchasable = false;
+	CashRegister.DeliveryQuantity = 1;
+	CashRegister.DeliveryDelaySeconds = 3.0f;
+	CashRegister.CollisionHalfExtentOverride =
+		FVector(75.0f, 45.0f, 60.0f);
+
+	FBotanicusItemDefinition& SelfCheckout =
+		NativeFallbackItems.AddDefaulted_GetRef();
+	SelfCheckout.ItemKey = TEXT("SelfCheckout");
+	SelfCheckout.DisplayName =
+		NSLOCTEXT(
+			"BotanicusCatalog",
+			"SelfCheckout",
+			"Caisse automatique");
+	SelfCheckout.Category = EBotanicusItemCategory::Equipment;
+	SelfCheckout.CatalogTabs =
+		static_cast<int32>(EBotanicusCatalogTab::Sales);
+	SelfCheckout.WorldMesh = TSoftObjectPtr<UStaticMesh>(
+		FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube.Cube")));
+	// Engine cube = 100 cm: 60 cm deep, 40 cm wide, 200 cm high.
+	SelfCheckout.WorldScale = FVector(0.6f, 0.4f, 2.0f);
+	SelfCheckout.WorldActorClass =
+		ABotanicusSelfCheckoutActor::StaticClass();
+	SelfCheckout.MaximumStack = 1;
+	SelfCheckout.WeightClass =
+		EBotanicusItemWeightClass::Handheld;
+	SelfCheckout.Price = 1500;
+	SelfCheckout.DeliveryQuantity = 1;
+	SelfCheckout.DeliveryDelaySeconds = 5.0f;
+	SelfCheckout.CollisionHalfExtentOverride =
+		FVector(30.0f, 20.0f, 100.0f);
 }
 
 const FBotanicusItemDefinition*

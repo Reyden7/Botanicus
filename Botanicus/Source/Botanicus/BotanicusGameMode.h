@@ -49,6 +49,7 @@ private:
 	void RestorePlayerInventory(AController* Controller);
 	void CapturePlayerEconomy(const AController* Controller);
 	void RestorePlayerEconomy(AController* Controller);
+	void EnsureStarterFixtures(AController* Controller);
 	void FlushScheduledInventoryAutosave();
 
 	UPROPERTY(Transient)

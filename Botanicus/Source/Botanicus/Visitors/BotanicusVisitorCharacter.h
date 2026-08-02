@@ -7,6 +7,7 @@
 #include "BotanicusVisitorCharacter.generated.h"
 
 class ABotanicusSalesDisplayActor;
+class ABotanicusSelfCheckoutActor;
 class UStaticMeshComponent;
 class UTextRenderComponent;
 class UWidgetComponent;
@@ -19,7 +20,9 @@ enum class EBotanicusVisitorState : uint8
 	FollowingRoute,
 	Approaching,
 	Inspecting,
+	CheckoutQueue,
 	Paying,
+	SelfCheckout,
 	Leaving
 };
 
@@ -59,7 +62,45 @@ public:
 		return VisitorState == EBotanicusVisitorState::FollowingRoute ||
 			VisitorState == EBotanicusVisitorState::Approaching ||
 			VisitorState == EBotanicusVisitorState::Inspecting ||
+			VisitorState == EBotanicusVisitorState::CheckoutQueue ||
+			VisitorState == EBotanicusVisitorState::Paying ||
+			VisitorState == EBotanicusVisitorState::SelfCheckout;
+	}
+	bool IsInCheckoutQueue() const
+	{
+		return VisitorState == EBotanicusVisitorState::CheckoutQueue ||
 			VisitorState == EBotanicusVisitorState::Paying;
+	}
+	float GetCheckoutQueueArrivalTime() const
+	{
+		return CheckoutQueueArrivalTime;
+	}
+	void ConfigureCheckoutQueue(
+		const FVector& InQueueDestination,
+		bool bIsFront);
+	bool CanUsePlayerCheckout() const
+	{
+		return VisitorState == EBotanicusVisitorState::Paying &&
+			bCarryingPlant;
+	}
+	void HandlePlayerCheckoutAction();
+	bool AssignSelfCheckout(
+		ABotanicusSelfCheckoutActor* InSelfCheckout);
+	ABotanicusSelfCheckoutActor* GetAssignedSelfCheckout() const
+	{
+		return AssignedSelfCheckout;
+	}
+	bool IsWaitingForCheckoutAssignment() const
+	{
+		return VisitorState ==
+				EBotanicusVisitorState::CheckoutQueue ||
+			(VisitorState == EBotanicusVisitorState::Paying &&
+			 CheckoutStage == 0);
+	}
+	int32 GetCheckoutPrice() const;
+	bool IsCheckoutPlantScanned() const
+	{
+		return CheckoutStage > 0;
 	}
 	void BeginDeparture(bool bKeepPurchasedPlant = false);
 	void BeginShopClosureDeparture();
@@ -133,8 +174,11 @@ private:
 	int32 BestMatchingScore = TNumericLimits<int32>::Lowest();
 	FVector RouteResumeLocation = FVector::ZeroVector;
 	FVector QueueDestination = FVector::ZeroVector;
+	FVector CheckoutQueueDestination = FVector::ZeroVector;
 	float QueueLongitudinalOffset = 0.0f;
 	float QueueLateralOffset = 0.0f;
+	float CheckoutQueueArrivalTime = 0.0f;
+	float CheckoutWaitDuration = 0.0f;
 	UPROPERTY(ReplicatedUsing=OnRep_VisitorState)
 	EBotanicusVisitorState VisitorState =
 		EBotanicusVisitorState::FollowingRoute;
@@ -144,8 +188,12 @@ private:
 	bool bCarryingPlant = false;
 	UPROPERTY(ReplicatedUsing=OnRep_CarriedPlant)
 	FName CarriedPlantItemKey = NAME_None;
+	UPROPERTY(ReplicatedUsing=OnRep_VisitorState)
+	uint8 CheckoutStage = 0;
+	UPROPERTY(ReplicatedUsing=OnRep_VisitorState)
+	TObjectPtr<ABotanicusSelfCheckoutActor> AssignedSelfCheckout;
+	float SelfCheckoutElapsed = 0.0f;
 	float InspectionRemaining = 0.0f;
-	float PaymentRemaining = 0.0f;
 	float DisplaySearchRemaining = 0.0f;
 	FVector LastMovementLocation = FVector::ZeroVector;
 	float StuckDuration = 0.0f;

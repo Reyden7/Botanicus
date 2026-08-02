@@ -15,6 +15,7 @@
 #include "Growing/BotanicusWateringCanActor.h"
 #include "Sales/BotanicusSalesDisplayActor.h"
 #include "Sales/BotanicusSalePotActor.h"
+#include "Sales/BotanicusCashRegisterActor.h"
 #include "Engine/LocalPlayer.h"
 #include "EngineUtils.h"
 #include "GameFramework/GameStateBase.h"
@@ -27,6 +28,8 @@
 #include "TimerManager.h"
 #include "Visitors/BotanicusVisitorManager.h"
 #include "Visitors/BotanicusVisitorZoneActor.h"
+#include "Preparation/BotanicusComputerActor.h"
+#include "Preparation/BotanicusPreparationWorkbenchActor.h"
 
 namespace
 {
@@ -95,6 +98,7 @@ void ABotanicusGameMode::BeginPlay()
 				// inventory/transform restoration now that data is ready.
 				RestorePlayerInventory(ControllerIt->Get());
 				RestorePlayerEconomy(ControllerIt->Get());
+				EnsureStarterFixtures(ControllerIt->Get());
 			}
 		}
 		bAutosaveReady = true;
@@ -135,6 +139,10 @@ void ABotanicusGameMode::RestartPlayer(AController* NewPlayer)
 		{
 			BotanicusController->ClientHideRemovedBuildingActors(
 				RemovedBuildingActorNames.Array());
+		}
+		if (bAutosaveReady)
+		{
+			EnsureStarterFixtures(NewPlayer);
 		}
 	}
 }
@@ -217,7 +225,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 
 	CurrentSaveGame->MapName =
 		UGameplayStatics::GetCurrentLevelName(this, true);
-	CurrentSaveGame->SaveVersion = 17;
+	CurrentSaveGame->SaveVersion = 20;
 	if (const ABotanicusGameState* BotanicusGameState =
 		World->GetGameState<ABotanicusGameState>())
 	{
@@ -227,6 +235,22 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 			BotanicusGameState->GetMainShopLevel();
 		CurrentSaveGame->bMainShopOpen =
 			BotanicusGameState->IsMainShopOpen();
+		CurrentSaveGame->CurrentDayNumber =
+			BotanicusGameState->GetCurrentDayNumber();
+		CurrentSaveGame->bShopDayActive =
+			BotanicusGameState->IsShopDayActive();
+		CurrentSaveGame->DailyPlantsSold =
+			BotanicusGameState->GetDailyPlantsSold();
+		CurrentSaveGame->DailyRevenue =
+			BotanicusGameState->GetDailyRevenue();
+		CurrentSaveGame->DailySatisfactionTotal =
+			BotanicusGameState->GetDailySatisfactionTotal();
+		CurrentSaveGame->DailyReviewCount =
+			BotanicusGameState->GetDailyReviewCount();
+		CurrentSaveGame->DayStartReputation =
+			BotanicusGameState->GetDayStartReputation();
+		CurrentSaveGame->DayTimeMinutes =
+			BotanicusGameState->GetDayTimeMinutes();
 		CurrentSaveGame->TotalPlantsSold =
 			BotanicusGameState->GetTotalPlantsSold();
 		CurrentSaveGame->TotalCatalogOrders =
@@ -362,6 +386,13 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		SavedItem.Transform = EquipmentIt->GetActorTransform();
 		SavedItem.ItemKey = EquipmentIt->GetItemKey();
 		SavedItem.Quantity = 1;
+		if (const ABotanicusPreparationWorkbenchActor* Workbench =
+				Cast<ABotanicusPreparationWorkbenchActor>(
+					*EquipmentIt))
+		{
+			SavedItem.PreparationWorkbenchLevel =
+				Workbench->GetWorkbenchLevel();
+		}
 	}
 
 	for (TActorIterator<ABotanicusPlaceableItemActor> ItemIt(World);
@@ -642,6 +673,31 @@ void ABotanicusGameMode::InitializeSharedEconomy()
 		CurrentSaveGame->SaveVersion >= 15
 			? CurrentSaveGame->TrendRemainingSeconds
 			: 600.0f);
+	BotanicusGameState->InitializeDayCycle(
+		CurrentSaveGame->SaveVersion >= 18
+			? CurrentSaveGame->CurrentDayNumber
+			: 1,
+		CurrentSaveGame->SaveVersion >= 18
+			? CurrentSaveGame->bShopDayActive
+			: BotanicusGameState->IsMainShopOpen(),
+		CurrentSaveGame->SaveVersion >= 18
+			? CurrentSaveGame->DailyPlantsSold
+			: 0,
+		CurrentSaveGame->SaveVersion >= 18
+			? CurrentSaveGame->DailyRevenue
+			: 0,
+		CurrentSaveGame->SaveVersion >= 18
+			? CurrentSaveGame->DailySatisfactionTotal
+			: 0,
+		CurrentSaveGame->SaveVersion >= 18
+			? CurrentSaveGame->DailyReviewCount
+			: 0,
+		CurrentSaveGame->SaveVersion >= 18
+			? CurrentSaveGame->DayStartReputation
+			: BotanicusGameState->GetShopReputationPoints(),
+		CurrentSaveGame->SaveVersion >= 19
+			? CurrentSaveGame->DayTimeMinutes
+			: 420.0f);
 	UE_LOG(
 		LogBotanicus,
 		Display,
@@ -847,9 +903,20 @@ void ABotanicusGameMode::RestoreWorldState()
 							SavedZone.ZoneType,
 							0,
 							2));
+				FVector RestoredExtent = SavedZone.BoxExtent;
+				if (ZoneType ==
+					EBotanicusVisitorZoneType::Checkout)
+				{
+					// Migrate old saves whose checkout planning surface
+					// only had room for the starter manual register.
+					RestoredExtent.X =
+						FMath::Max(RestoredExtent.X, 500.0f);
+					RestoredExtent.Y =
+						FMath::Max(RestoredExtent.Y, 300.0f);
+				}
 				Zone->InitializeZone(
 					ZoneType,
-					SavedZone.BoxExtent);
+					RestoredExtent);
 			}
 		}
 	}
@@ -969,6 +1036,14 @@ void ABotanicusGameMode::RestoreWorldState()
 			Cast<ABotanicusLargeEquipmentActor>(RestoredItem))
 		{
 			Equipment->InitializeEquipment(SavedItem.ItemKey);
+			if (ABotanicusPreparationWorkbenchActor* Workbench =
+					Cast<
+						ABotanicusPreparationWorkbenchActor>(
+						Equipment))
+			{
+				Workbench->RestoreWorkbenchLevel(
+					SavedItem.PreparationWorkbenchLevel);
+			}
 		}
 
 		RestoredItem->SetOwner(nullptr);
@@ -984,6 +1059,162 @@ void ABotanicusGameMode::RestoreWorldState()
 		TEXT("Restored %d/%d saved world items."),
 		RestoredWorldItemCount,
 		CurrentSaveGame->WorldItems.Num());
+}
+
+void ABotanicusGameMode::EnsureStarterFixtures(
+	AController* Controller)
+{
+	UWorld* World = GetWorld();
+	APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
+	if (!HasAuthority() || !World || !Pawn)
+	{
+		return;
+	}
+
+	FVector Forward = Pawn->GetActorForwardVector();
+	Forward.Z = 0.0f;
+	Forward.Normalize();
+	const FVector Right(-Forward.Y, Forward.X, 0.0f);
+	const auto ResolveFloorLocation =
+		[World, Pawn](
+			FVector Candidate,
+			float RootHeight)
+		{
+			FCollisionQueryParams FloorQuery(
+				SCENE_QUERY_STAT(BotanicusStarterFixtureFloor),
+				false,
+				Pawn);
+			FHitResult FloorHit;
+			if (World->LineTraceSingleByChannel(
+					FloorHit,
+					Candidate + FVector(0.0f, 0.0f, 220.0f),
+					Candidate - FVector(0.0f, 0.0f, 500.0f),
+					ECC_Visibility,
+					FloorQuery))
+			{
+				Candidate.Z = FloorHit.ImpactPoint.Z + RootHeight;
+			}
+			return Candidate;
+		};
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::
+			AdjustIfPossibleButAlwaysSpawn;
+	bool bCreatedFixture = false;
+
+	bool bHasComputer = false;
+	for (TActorIterator<ABotanicusComputerActor> It(World); It; ++It)
+	{
+		bHasComputer |= !It->ActorHasTag(
+			TEXT("BotanicusPlacementPreview"));
+	}
+	if (!bHasComputer)
+	{
+		const FVector Location = ResolveFloorLocation(
+			Pawn->GetActorLocation() +
+				Forward * 190.0f +
+				Right * 110.0f,
+			42.0f);
+		if (ABotanicusComputerActor* Computer =
+				World->SpawnActor<ABotanicusComputerActor>(
+					ABotanicusComputerActor::StaticClass(),
+					Location,
+					Pawn->GetActorRotation(),
+					SpawnParameters))
+		{
+			Computer->InitializePlacedItem(
+				TEXT("CommandComputer"),
+				1);
+			Computer->ForceNetUpdate();
+			bCreatedFixture = true;
+		}
+	}
+
+	bool bHasWorkbench = false;
+	for (TActorIterator<ABotanicusPreparationWorkbenchActor> It(World);
+		 It;
+		 ++It)
+	{
+		bHasWorkbench |= !It->ActorHasTag(
+			TEXT("BotanicusPlacementPreview"));
+	}
+	if (!bHasWorkbench)
+	{
+		const FVector Location = ResolveFloorLocation(
+			Pawn->GetActorLocation() +
+				Forward * 320.0f -
+				Right * 170.0f,
+			0.0f);
+		if (ABotanicusPreparationWorkbenchActor* Workbench =
+				World->SpawnActor<
+					ABotanicusPreparationWorkbenchActor>(
+					ABotanicusPreparationWorkbenchActor::
+						StaticClass(),
+					Location,
+					Pawn->GetActorRotation(),
+					SpawnParameters))
+		{
+			Workbench->InitializeEquipment(
+				TEXT("PreparationWorkbench"));
+			Workbench->ForceNetUpdate();
+			bCreatedFixture = true;
+		}
+	}
+
+	bool bHasCashRegister = false;
+	for (TActorIterator<ABotanicusCashRegisterActor> It(World);
+		 It;
+		 ++It)
+	{
+		bHasCashRegister |= !It->ActorHasTag(
+			TEXT("BotanicusPlacementPreview"));
+	}
+	if (!bHasCashRegister)
+	{
+		FVector RegisterLocation =
+			Pawn->GetActorLocation() +
+			Forward * 320.0f +
+			Right * 210.0f;
+		FRotator RegisterRotation = Pawn->GetActorRotation();
+		for (TActorIterator<ABotanicusVisitorZoneActor> ZoneIt(World);
+			 ZoneIt;
+			 ++ZoneIt)
+		{
+			if (ZoneIt->GetZoneType() ==
+				EBotanicusVisitorZoneType::Checkout)
+			{
+				RegisterRotation = ZoneIt->GetActorRotation();
+				RegisterLocation =
+					ZoneIt->GetActorLocation() -
+					ZoneIt->GetActorForwardVector() * 155.0f;
+				break;
+			}
+		}
+		RegisterLocation =
+			ResolveFloorLocation(RegisterLocation, 0.0f);
+		if (ABotanicusCashRegisterActor* CashRegister =
+				World->SpawnActor<ABotanicusCashRegisterActor>(
+					ABotanicusCashRegisterActor::StaticClass(),
+					RegisterLocation,
+					RegisterRotation,
+					SpawnParameters))
+		{
+			CashRegister->InitializePlacedItem(
+				TEXT("CashRegister"),
+				1);
+			CashRegister->ForceNetUpdate();
+			bCreatedFixture = true;
+		}
+	}
+
+	if (bCreatedFixture)
+	{
+		UE_LOG(
+			LogBotanicus,
+			Display,
+			TEXT("Created missing starter shop fixtures."));
+		ScheduleInventoryAutosave();
+	}
 }
 
 void ABotanicusGameMode::CapturePlayerInventory(

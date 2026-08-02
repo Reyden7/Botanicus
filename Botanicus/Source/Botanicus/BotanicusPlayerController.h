@@ -14,9 +14,12 @@ class UBotanicusQuickBarWidget;
 class UBotanicusTopDownToolbarWidget;
 class UBotanicusCarryProgressWidget;
 class UBotanicusOrderCatalogWidget;
+class UBotanicusDevelopmentPanelWidget;
 class UBotanicusBuildingCatalogWidget;
 class UBotanicusSharedFundsWidget;
 class UBotanicusShopObjectivesWidget;
+class UBotanicusDaySummaryWidget;
+class UBotanicusClockWidget;
 class ABotanicusGameState;
 class ACameraActor;
 class AActor;
@@ -29,8 +32,10 @@ class ABotanicusPlaceableItemActor;
 class ABotanicusPlantPotActor;
 class ABotanicusSalesDisplayActor;
 class ABotanicusSalePotActor;
+class ABotanicusCashRegisterActor;
 class ABotanicusWateringCanActor;
 class ABotanicusWaterReserveActor;
+class ABotanicusComputerActor;
 class UActorComponent;
 class UMaterialInterface;
 class UPrimitiveComponent;
@@ -156,6 +161,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Delivery")
 	void ToggleOrderCatalog();
 
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Development")
+	void ToggleDevelopmentPanel();
+
+	UFUNCTION(Client, Reliable)
+	void ClientOpenOrderCatalogFromComputer();
+
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Delivery")
 	void PlaceCatalogOrder(FName ItemKey);
 
@@ -164,6 +175,15 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="Botanicus|Shop")
 	int32 GetMainShopLevel() const;
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Shop")
+	int32 GetSelfCheckoutLimit() const;
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Shop")
+	int32 GetSelfCheckoutOwnedOrOrderedCount() const;
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Delivery")
+	bool CanOrderCatalogItem(FName ItemKey) const;
 
 	UFUNCTION(BlueprintPure, Category="Botanicus|Shop")
 	bool IsMainShopOpen() const;
@@ -198,9 +218,30 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Shop")
 	void UpgradeMainShop();
 
+	UFUNCTION(BlueprintPure, Category="Botanicus|Preparation")
+	int32 GetPreparationWorkbenchLevel() const;
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Preparation")
+	int32 GetPreparationWorkbenchUpgradeCost() const;
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Preparation")
+	bool CanUpgradePreparationWorkbench() const;
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Preparation")
+	void UpgradePreparationWorkbench();
+
 	/** Development helper exposed by the command panel. */
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Development")
 	void AddTestCredits();
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Development")
+	float GetDevelopmentTimeScale() const;
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Development")
+	void CycleDevelopmentTimeScale();
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Development")
+	void AdjustMainShopLevelForDevelopment(int32 Delta);
 
 	UFUNCTION(BlueprintPure, Category="Botanicus|Building")
 	int32 GetBuildingProgressionLevel() const
@@ -298,8 +339,11 @@ protected:
 	void InitializeQuickBarWidget();
 	void InitializeSharedFundsWidget();
 	void InitializeShopObjectivesWidget();
+	void InitializeDaySummaryWidget();
+	void InitializeClockWidget();
 	void InitializeTopDownToolbarWidget();
 	void InitializeOrderCatalogWidget();
+	void InitializeDevelopmentPanelWidget();
 	void InitializeBuildingCatalogWidget();
 	void BeginPathPlacementInternal(EBotanicusPathType PathType);
 	void BeginVisitorZonePlacement(int32 ZoneType);
@@ -362,6 +406,7 @@ protected:
 	bool TryBeginNearbyParcelCut();
 	void EndParcelCut();
 	bool TryPlacePlantOnNearbySalesDisplay();
+	bool TryCheckoutNearbyRegister();
 	void EndPlantPotAction();
 	bool TryHandleNearbyLargeEquipment();
 	void BeginEquipmentCarryCharge(
@@ -399,6 +444,9 @@ protected:
 	bool IsLookingAtWorldItem(
 		const AActor* Item,
 		float MaximumDistance) const;
+	float GetMoveHoldDurationForActor(
+		const AActor* Actor,
+		float DefaultDuration) const;
 	ABotanicusDeliveryZoneActor* FindOrCreateDeliveryZone();
 	bool DeliverCatalogItem(
 		FName ItemKey,
@@ -493,16 +541,32 @@ protected:
 		ABotanicusSalesDisplayActor* SalesDisplay);
 
 	UFUNCTION(Server, Reliable)
+	void ServerCheckoutRegister(
+		ABotanicusCashRegisterActor* CashRegister);
+
+	UFUNCTION(Server, Reliable)
 	void ServerPlaceCatalogOrder(FName ItemKey);
 
 	UFUNCTION(Server, Reliable)
 	void ServerUpgradeMainShop();
 
 	UFUNCTION(Server, Reliable)
+	void ServerUpgradePreparationWorkbench();
+
+	UFUNCTION(Server, Reliable)
 	void ServerSetMainShopOpen(bool bOpen);
 
 	UFUNCTION(Server, Reliable)
 	void ServerAddTestCredits();
+
+	UFUNCTION(Server, Reliable)
+	void ServerSetDevelopmentTimeScale(float TimeScale);
+
+	UFUNCTION(Server, Reliable)
+	void ServerAdjustMainShopLevelForDevelopment(int32 Delta);
+
+	UFUNCTION(Server, Reliable)
+	void ServerUseComputer(ABotanicusComputerActor* Computer);
 
 	/** Legacy implementations kept binary-local while old test entry points are retired. */
 	void ServerOrderTestDelivery_Implementation();
@@ -654,6 +718,10 @@ protected:
 	TObjectPtr<UBotanicusOrderCatalogWidget> OrderCatalogWidget;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UBotanicusDevelopmentPanelWidget>
+		DevelopmentPanelWidget;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusBuildingCatalogWidget> BuildingCatalogWidget;
 
 	UPROPERTY(Transient)
@@ -733,6 +801,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Interaction", meta=(ClampMin="0.1", ClampMax="5.0"))
 	float PlaceableItemMoveHoldDuration = 0.75f;
 
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Interaction", meta=(ClampMin="0.1", ClampMax="5.0"))
+	float StarterFixtureMoveHoldDuration = 2.0f;
+
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Equipment Placement", meta=(ClampMin="50.0"))
 	float EquipmentPlacementDistance = 300.0f;
 
@@ -797,6 +868,14 @@ protected:
 	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusShopObjectivesWidget>
 		ShopObjectivesWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBotanicusDaySummaryWidget>
+		DaySummaryWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBotanicusClockWidget>
+		ClockWidget;
 
 	UPROPERTY(Transient)
 	TObjectPtr<ABotanicusPlaceableItemActor>
@@ -878,6 +957,7 @@ protected:
 	bool bPlantPotActionHeld = false;
 	bool bParcelCutActionHeld = false;
 	bool bCatalogOrderStateRestored = false;
+	bool bOrderCatalogOpenedFromComputer = false;
 	int32 LocalQuickBarItemSlotIndex = INDEX_NONE;
 	FGuid LocalQuickBarItemInstanceId;
 	FName LocalQuickBarItemKey = NAME_None;

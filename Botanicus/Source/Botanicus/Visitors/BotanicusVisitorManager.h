@@ -26,6 +26,9 @@ private:
 		int32 CheckoutWaypointIndex);
 	void RefreshQueuePositions(
 		const TArray<FVector>& VisitorCircuit);
+	void RefreshCheckoutQueue(
+		const TArray<FVector>& VisitorCircuit,
+		int32 CheckoutWaypointIndex);
 	int32 GetShopVisitorCapacity() const;
 	int32 GetTargetVisitorPopulation() const;
 	float GetReputationSpawnMultiplier() const;

@@ -475,6 +475,84 @@ preparation_workbench = make_definition(
     4.0,
     world_actor_class=preparation_workbench_class,
     catalog_tabs=4,
+    purchasable=False,
+)
+computer_class = unreal.load_class(
+    None,
+    "/Script/Botanicus.BotanicusComputerActor",
+)
+if computer_class is None:
+    raise RuntimeError("Could not load BotanicusComputerActor")
+command_computer = make_definition(
+    "CommandComputer",
+    "Ordinateur de commande",
+    unreal.BotanicusItemCategory.EQUIPMENT,
+    unreal.BotanicusItemWeightClass.HANDHELD,
+    unreal.Vector(0.5, 0.12, 0.34),
+    1,
+    1,
+    1.0,
+    250,
+    3.0,
+    world_mesh="/Engine/BasicShapes/Cube",
+    world_actor_class=computer_class,
+    catalog_tabs=4,
+    purchasable=False,
+)
+command_computer.set_editor_property(
+    "collision_half_extent_override",
+    unreal.Vector(55.0, 32.0, 42.0),
+)
+cash_register_class = unreal.load_class(
+    None,
+    "/Script/Botanicus.BotanicusCashRegisterActor",
+)
+if cash_register_class is None:
+    raise RuntimeError("Could not load BotanicusCashRegisterActor")
+cash_register = make_definition(
+    "CashRegister",
+    "Caisse",
+    unreal.BotanicusItemCategory.EQUIPMENT,
+    unreal.BotanicusItemWeightClass.HANDHELD,
+    unreal.Vector(0.75, 0.42, 0.55),
+    1,
+    1,
+    1.0,
+    0,
+    3.0,
+    world_mesh="/Engine/BasicShapes/Cube",
+    world_actor_class=cash_register_class,
+    catalog_tabs=8,
+    purchasable=False,
+)
+cash_register.set_editor_property(
+    "collision_half_extent_override",
+    unreal.Vector(75.0, 45.0, 60.0),
+)
+self_checkout_class = unreal.load_class(
+    None,
+    "/Script/Botanicus.BotanicusSelfCheckoutActor",
+)
+if self_checkout_class is None:
+    raise RuntimeError("Could not load BotanicusSelfCheckoutActor")
+self_checkout = make_definition(
+    "SelfCheckout",
+    "Caisse automatique",
+    unreal.BotanicusItemCategory.EQUIPMENT,
+    unreal.BotanicusItemWeightClass.HANDHELD,
+    unreal.Vector(0.6, 0.4, 2.0),
+    1,
+    1,
+    1.0,
+    1500,
+    5.0,
+    world_mesh="/Engine/BasicShapes/Cube",
+    world_actor_class=self_checkout_class,
+    catalog_tabs=8,
+)
+self_checkout.set_editor_property(
+    "collision_half_extent_override",
+    unreal.Vector(30.0, 20.0, 100.0),
 )
 asset.set_editor_property(
     "items",
@@ -499,9 +577,19 @@ asset.set_editor_property(
         sales_display,
         sale_pot,
         preparation_workbench,
+        command_computer,
+        cash_register,
+        self_checkout,
     ],
 )
-unreal.EditorAssetLibrary.save_loaded_asset(asset, only_if_is_dirty=False)
+if not unreal.EditorAssetLibrary.save_loaded_asset(
+    asset,
+    only_if_is_dirty=False,
+):
+    raise RuntimeError(
+        "Could not save item catalog. Check that the asset is not read-only: "
+        + ASSET_PATH
+    )
 
 test_seed_asset = "/Game/Botanicus/Items/DA_SeedPacket_Test"
 if unreal.EditorAssetLibrary.does_asset_exist(test_seed_asset):

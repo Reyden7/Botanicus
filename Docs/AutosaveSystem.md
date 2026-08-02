@@ -13,6 +13,8 @@ Easy Building System demonstration save buttons.
 - the nursery's shared credit balance;
 - the shared main-shop level, plants sold and catalogue-order counters;
 - whether the main shop is currently open or closed;
+- the current day number and its in-progress sales, revenue and reviews;
+- the shared time of day used by automatic shop hours;
 - visitor routes and the parking, sales-area and checkout zones;
 - each player's building development level;
 - pending catalogue orders, charged price, quantity and remaining delay;
@@ -37,7 +39,13 @@ deliberately ignores both its synthetic Unique Net ID and `PlayerId`, because
 Unreal regenerates the former and keeps incrementing the latter across Play
 sessions.
 
-Save format version 17 adds the persistent shared open/closed shop state.
+Save format version 20 adds the persistent preparation-workbench level and its
+one-to-five simultaneous pot capacity. Save format version 19 adds the
+persistent shared clock and automatic opening
+hours. Version 18 adds the persistent day cycle and its current daily
+statistics. The development time multiplier is deliberately excluded and
+always resets to x1 when the world starts. Version 17 adds the persistent
+shared open/closed shop state.
 Version 16 adds each delivery carton's cut-tape coverage and open
 state, plus the one-time starter-cutter migration. Version 15 adds the three
 shared customer trends and their

@@ -54,9 +54,6 @@ private:
 	void HandleDeletePathClicked();
 
 	UFUNCTION()
-	void HandleOrderCatalogClicked();
-
-	UFUNCTION()
 	void HandleCancelClicked();
 
 	UPROPERTY(Transient)
@@ -82,9 +79,6 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UButton> DeletePathButton;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UButton> OrderCatalogButton;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UButton> CancelButton;

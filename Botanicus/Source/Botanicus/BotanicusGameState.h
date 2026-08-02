@@ -17,6 +17,7 @@ class BOTANICUS_API ABotanicusGameState : public AGameStateBase
 public:
 	ABotanicusGameState();
 
+	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
@@ -28,6 +29,64 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="Botanicus|Shop")
 	bool IsMainShopOpen() const { return bMainShopOpen; }
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Day")
+	int32 GetCurrentDayNumber() const { return CurrentDayNumber; }
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Day")
+	bool IsShopDayActive() const { return bShopDayActive; }
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Day")
+	int32 GetDailyPlantsSold() const { return DailyPlantsSold; }
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Day")
+	int32 GetDailyRevenue() const { return DailyRevenue; }
+	int32 GetDailySatisfactionTotal() const
+	{
+		return DailySatisfactionTotal;
+	}
+	int32 GetDailyReviewCount() const { return DailyReviewCount; }
+	int32 GetDayStartReputation() const
+	{
+		return DayStartReputation;
+	}
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Day")
+	int32 GetDailySalesTarget() const;
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Day")
+	int32 GetDailyRevenueTarget() const;
+
+	int32 GetDaySummaryRevision() const { return DaySummaryRevision; }
+	int32 GetLastCompletedDayNumber() const
+	{
+		return LastCompletedDayNumber;
+	}
+	int32 GetLastDayPlantsSold() const { return LastDayPlantsSold; }
+	int32 GetLastDayRevenue() const { return LastDayRevenue; }
+	int32 GetLastDayAverageSatisfaction() const
+	{
+		return LastDayAverageSatisfaction;
+	}
+	int32 GetLastDayReviewCount() const { return LastDayReviewCount; }
+	int32 GetLastDayReputationDelta() const
+	{
+		return LastDayReputationDelta;
+	}
+	int32 GetLastDaySalesTarget() const { return LastDaySalesTarget; }
+	int32 GetLastDayRevenueTarget() const
+	{
+		return LastDayRevenueTarget;
+	}
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Development")
+	float GetDevelopmentTimeScale() const
+	{
+		return DevelopmentTimeScale;
+	}
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Day")
+	float GetDayTimeMinutes() const { return DayTimeMinutes; }
 
 	UFUNCTION(BlueprintPure, Category="Botanicus|Shop")
 	int32 GetTotalPlantsSold() const { return TotalPlantsSold; }
@@ -87,7 +146,18 @@ public:
 		int32 InTotalCatalogOrders);
 
 	void InitializeMainShopOpen(bool bInOpen);
+	void InitializeDayCycle(
+		int32 InCurrentDayNumber,
+		bool bInDayActive,
+		int32 InDailyPlantsSold,
+		int32 InDailyRevenue,
+		int32 InDailySatisfactionTotal,
+		int32 InDailyReviewCount,
+		int32 InDayStartReputation,
+		float InDayTimeMinutes);
 	void SetMainShopOpen(bool bInOpen);
+	void SetDevelopmentTimeScale(float InTimeScale);
+	void SetMainShopLevelForDevelopment(int32 InLevel);
 
 	void InitializeShopReputation(
 		int32 InReputationPoints,
@@ -111,7 +181,7 @@ public:
 	/** Server-only credit used by sales, rewards and refunds. */
 	void AddSharedFunds(int32 Amount);
 
-	void RecordPlantSale();
+	void RecordPlantSale(int32 SaleRevenue);
 	void RecordCatalogOrder();
 	void RecordVisitorSatisfaction(int32 Satisfaction);
 	bool TryUpgradeMainShop();
@@ -120,8 +190,18 @@ private:
 	UFUNCTION()
 	void OnRep_SharedFunds();
 
+	UFUNCTION()
+	void OnRep_DevelopmentTimeScale();
+
 	void NotifyFundsChanged();
 	void RotateShopTrends();
+	void BeginShopDay();
+	void FinishShopDay();
+	void ApplyDevelopmentTimeScale();
+	bool DidClockCrossMinute(
+		float PreviousMinute,
+		float CurrentMinute,
+		float TargetMinute) const;
 
 	UPROPERTY(ReplicatedUsing=OnRep_SharedFunds)
 	int32 SharedFunds = 0;
@@ -130,7 +210,61 @@ private:
 	int32 MainShopLevel = 1;
 
 	UPROPERTY(ReplicatedUsing=OnRep_SharedFunds)
-	bool bMainShopOpen = true;
+	bool bMainShopOpen = false;
+
+	UPROPERTY(ReplicatedUsing=OnRep_SharedFunds)
+	int32 CurrentDayNumber = 1;
+
+	UPROPERTY(ReplicatedUsing=OnRep_SharedFunds)
+	bool bShopDayActive = false;
+
+	UPROPERTY(ReplicatedUsing=OnRep_SharedFunds)
+	int32 DailyPlantsSold = 0;
+
+	UPROPERTY(ReplicatedUsing=OnRep_SharedFunds)
+	int32 DailyRevenue = 0;
+
+	UPROPERTY(ReplicatedUsing=OnRep_SharedFunds)
+	int32 DailySatisfactionTotal = 0;
+
+	UPROPERTY(ReplicatedUsing=OnRep_SharedFunds)
+	int32 DailyReviewCount = 0;
+
+	UPROPERTY(ReplicatedUsing=OnRep_SharedFunds)
+	int32 DayStartReputation = 300;
+
+	UPROPERTY(ReplicatedUsing=OnRep_SharedFunds)
+	int32 DaySummaryRevision = 0;
+
+	UPROPERTY(ReplicatedUsing=OnRep_SharedFunds)
+	int32 LastCompletedDayNumber = 0;
+
+	UPROPERTY(ReplicatedUsing=OnRep_SharedFunds)
+	int32 LastDayPlantsSold = 0;
+
+	UPROPERTY(ReplicatedUsing=OnRep_SharedFunds)
+	int32 LastDayRevenue = 0;
+
+	UPROPERTY(ReplicatedUsing=OnRep_SharedFunds)
+	int32 LastDayAverageSatisfaction = 0;
+
+	UPROPERTY(ReplicatedUsing=OnRep_SharedFunds)
+	int32 LastDayReviewCount = 0;
+
+	UPROPERTY(ReplicatedUsing=OnRep_SharedFunds)
+	int32 LastDayReputationDelta = 0;
+
+	UPROPERTY(ReplicatedUsing=OnRep_SharedFunds)
+	int32 LastDaySalesTarget = 0;
+
+	UPROPERTY(ReplicatedUsing=OnRep_SharedFunds)
+	int32 LastDayRevenueTarget = 0;
+
+	UPROPERTY(ReplicatedUsing=OnRep_DevelopmentTimeScale)
+	float DevelopmentTimeScale = 1.0f;
+
+	UPROPERTY(ReplicatedUsing=OnRep_SharedFunds)
+	float DayTimeMinutes = 420.0f;
 
 	UPROPERTY(ReplicatedUsing=OnRep_SharedFunds)
 	int32 TotalPlantsSold = 0;
@@ -162,6 +296,7 @@ private:
 	bool bSharedFundsInitialized = false;
 	bool bShopProgressionInitialized = false;
 	bool bShopOpenInitialized = false;
+	bool bDayCycleInitialized = false;
 	bool bShopReputationInitialized = false;
 	bool bShopTrendsInitialized = false;
 	FTimerHandle TrendRotationTimer;

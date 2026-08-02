@@ -177,6 +177,130 @@ void UBotanicusMainShopUpgradeRowWidget::HandleUpgradeClicked()
 	}
 }
 
+void UBotanicusWorkbenchUpgradeRowWidget::InitializeRow(
+	ABotanicusPlayerController* InController)
+{
+	BotanicusController = InController;
+	RefreshProgress();
+}
+
+void UBotanicusWorkbenchUpgradeRowWidget::NativeOnInitialized()
+{
+	Super::NativeOnInitialized();
+	BuildLayout();
+}
+
+void UBotanicusWorkbenchUpgradeRowWidget::BuildLayout()
+{
+	UBorder* Root = WidgetTree->ConstructWidget<UBorder>();
+	Root->SetBrushColor(FLinearColor(0.04f, 0.20f, 0.34f, 0.99f));
+	Root->SetPadding(FMargin(16.0f, 13.0f));
+	WidgetTree->RootWidget = Root;
+
+	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
+	Root->AddChild(Row);
+
+	UVerticalBox* Details = WidgetTree->ConstructWidget<UVerticalBox>();
+	UHorizontalBoxSlot* DetailsSlot =
+		Row->AddChildToHorizontalBox(Details);
+	DetailsSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+	DetailsSlot->SetVerticalAlignment(VAlign_Center);
+
+	NameLabel = WidgetTree->ConstructWidget<UTextBlock>();
+	NameLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+	SetTextSize(NameLabel, 20);
+	Details->AddChildToVerticalBox(NameLabel);
+
+	CostLabel = WidgetTree->ConstructWidget<UTextBlock>();
+	CostLabel->SetColorAndOpacity(
+		FSlateColor(FLinearColor(0.96f, 0.82f, 0.28f, 1.0f)));
+	CostLabel->SetMargin(FMargin(14.0f));
+	SetTextSize(CostLabel, 16);
+	UHorizontalBoxSlot* CostSlot =
+		Row->AddChildToHorizontalBox(CostLabel);
+	CostSlot->SetVerticalAlignment(VAlign_Center);
+
+	UpgradeButton = WidgetTree->ConstructWidget<UButton>();
+	UpgradeButton->SetBackgroundColor(
+		FLinearColor(0.08f, 0.42f, 0.88f, 1.0f));
+	UpgradeButtonLabel = WidgetTree->ConstructWidget<UTextBlock>();
+	UpgradeButtonLabel->SetColorAndOpacity(
+		FSlateColor(FLinearColor::White));
+	UpgradeButtonLabel->SetMargin(FMargin(14.0f, 9.0f));
+	SetTextSize(UpgradeButtonLabel, 13);
+	UpgradeButton->AddChild(UpgradeButtonLabel);
+	UHorizontalBoxSlot* ButtonSlot =
+		Row->AddChildToHorizontalBox(UpgradeButton);
+	ButtonSlot->SetVerticalAlignment(VAlign_Center);
+	ButtonSlot->SetPadding(FMargin(8.0f, 0.0f, 0.0f, 0.0f));
+	UpgradeButton->OnClicked.AddDynamic(
+		this,
+		&UBotanicusWorkbenchUpgradeRowWidget::HandleUpgradeClicked);
+}
+
+void UBotanicusWorkbenchUpgradeRowWidget::RefreshProgress()
+{
+	if (!BotanicusController)
+	{
+		return;
+	}
+	const int32 Level =
+		BotanicusController->GetPreparationWorkbenchLevel();
+	const int32 Cost =
+		BotanicusController->GetPreparationWorkbenchUpgradeCost();
+	const bool bMaximumLevel = Level >= 5;
+
+	if (NameLabel)
+	{
+		NameLabel->SetText(
+			FText::FromString(
+				FString::Printf(
+					TEXT(
+						"ATELIER DE PREPARATION - NIVEAU %d\n%d EMPLACEMENT%s POUR POT DE VENTE"),
+					Level,
+					Level,
+					Level > 1 ? TEXT("S") : TEXT(""))));
+	}
+	if (CostLabel)
+	{
+		CostLabel->SetText(
+			bMaximumLevel
+				? FText::FromString(TEXT("NIVEAU MAXIMUM"))
+				: FText::Format(
+					NSLOCTEXT(
+						"BotanicusOrders",
+						"WorkbenchUpgradeCost",
+						"{0} credits"),
+					FText::AsNumber(Cost)));
+	}
+	if (UpgradeButtonLabel)
+	{
+		UpgradeButtonLabel->SetText(
+			bMaximumLevel
+				? FText::FromString(TEXT("MAXIMUM"))
+				: FText::Format(
+					NSLOCTEXT(
+						"BotanicusOrders",
+						"WorkbenchUpgradeButton",
+						"PASSER AU NIVEAU {0}"),
+					FText::AsNumber(Level + 1)));
+	}
+	if (UpgradeButton)
+	{
+		UpgradeButton->SetIsEnabled(
+			BotanicusController->
+				CanUpgradePreparationWorkbench());
+	}
+}
+
+void UBotanicusWorkbenchUpgradeRowWidget::HandleUpgradeClicked()
+{
+	if (BotanicusController)
+	{
+		BotanicusController->UpgradePreparationWorkbench();
+	}
+}
+
 void UBotanicusOrderItemRowWidget::InitializeRow(
 	ABotanicusPlayerController* InController,
 	const FBotanicusItemDefinition& InDefinition)
@@ -195,7 +319,12 @@ void UBotanicusOrderItemRowWidget::InitializeRow(
 	if (DetailsLabel)
 	{
 		DetailsLabel->SetText(
-			FText::Format(
+			ItemKey == TEXT("SelfCheckout")
+				? NSLOCTEXT(
+					"BotanicusOrders",
+					"SelfCheckoutDetails",
+					"1 par commande - boutique niveau 3 - livraison 5 s")
+				: FText::Format(
 				NSLOCTEXT(
 					"BotanicusOrders",
 					"ItemDetails",
@@ -221,12 +350,37 @@ void UBotanicusOrderItemRowWidget::InitializeRow(
 void UBotanicusOrderItemRowWidget::RefreshAvailability(
 	int32 AvailableFunds)
 {
+	if (DetailsLabel &&
+		ItemKey == TEXT("SelfCheckout") &&
+		BotanicusController)
+	{
+		const int32 Level =
+			BotanicusController->GetMainShopLevel();
+		const int32 Limit =
+			BotanicusController->GetSelfCheckoutLimit();
+		const int32 Count =
+			BotanicusController->
+				GetSelfCheckoutOwnedOrOrderedCount();
+		DetailsLabel->SetText(
+			Level < 3
+				? FText::FromString(
+					TEXT(
+						"VERROUILLEE - boutique niveau 3 - 1 par commande"))
+				: FText::FromString(
+					FString::Printf(
+						TEXT(
+							"1 par commande - limite %d/%d - livraison 5 s"),
+						Count,
+						Limit)));
+	}
 	if (OrderButton)
 	{
 		OrderButton->SetIsEnabled(
 			BotanicusController &&
 			!ItemKey.IsNone() &&
-			AvailableFunds >= Price);
+			AvailableFunds >= Price &&
+			BotanicusController->
+				CanOrderCatalogItem(ItemKey));
 	}
 }
 
@@ -382,28 +536,6 @@ void UBotanicusOrderCatalogWidget::BuildLayout()
 	SetTextSize(FundsLabel, 20);
 	FundsColumn->AddChildToVerticalBox(FundsLabel);
 
-	UButton* AddTestCreditsButton =
-		WidgetTree->ConstructWidget<UButton>();
-	AddTestCreditsButton->SetBackgroundColor(
-		FLinearColor(0.82f, 0.36f, 0.06f, 1.0f));
-	UTextBlock* AddTestCreditsText =
-		WidgetTree->ConstructWidget<UTextBlock>();
-	AddTestCreditsText->SetText(
-		NSLOCTEXT(
-			"BotanicusOrders",
-			"AddTestCredits",
-			"TEST +100 CREDITS"));
-	AddTestCreditsText->SetColorAndOpacity(
-		FSlateColor(FLinearColor::White));
-	AddTestCreditsText->SetMargin(FMargin(9.0f, 4.0f));
-	AddTestCreditsText->SetJustification(ETextJustify::Center);
-	SetTextSize(AddTestCreditsText, 11);
-	AddTestCreditsButton->AddChild(AddTestCreditsText);
-	FundsColumn->AddChildToVerticalBox(AddTestCreditsButton);
-	AddTestCreditsButton->OnClicked.AddDynamic(
-		this,
-		&UBotanicusOrderCatalogWidget::HandleAddTestCreditsClicked);
-
 	ShopOpenButton = WidgetTree->ConstructWidget<UButton>();
 	ShopOpenButtonLabel = WidgetTree->ConstructWidget<UTextBlock>();
 	ShopOpenButtonLabel->SetColorAndOpacity(
@@ -539,6 +671,7 @@ void UBotanicusOrderCatalogWidget::RebuildItemRows()
 	ItemRows.Reset();
 	BuildingRows.Reset();
 	MainShopUpgradeRow = nullptr;
+	WorkbenchUpgradeRow = nullptr;
 	const UGameInstance* GameInstance =
 		BotanicusController->GetGameInstance();
 	if (ActiveTab == EBotanicusCommandPanelTab::Buildings)
@@ -599,6 +732,24 @@ void UBotanicusOrderCatalogWidget::RebuildItemRows()
 			BuildingRows.Add(Row);
 		}
 		return;
+	}
+
+	if (ActiveTab == EBotanicusCommandPanelTab::Preparation)
+	{
+		WorkbenchUpgradeRow =
+			CreateWidget<UBotanicusWorkbenchUpgradeRowWidget>(
+				GetOwningPlayer(),
+				UBotanicusWorkbenchUpgradeRowWidget::StaticClass());
+		if (WorkbenchUpgradeRow)
+		{
+			WorkbenchUpgradeRow->InitializeRow(
+				BotanicusController);
+			UVerticalBoxSlot* WorkbenchRowSlot =
+				ItemsBox->AddChildToVerticalBox(
+					WorkbenchUpgradeRow);
+			WorkbenchRowSlot->SetPadding(
+				FMargin(0.0f, 0.0f, 0.0f, 12.0f));
+		}
 	}
 
 	const UBotanicusItemCatalogSubsystem* Catalog =
@@ -714,6 +865,10 @@ void UBotanicusOrderCatalogWidget::Refresh()
 	{
 		MainShopUpgradeRow->RefreshProgress();
 	}
+	if (WorkbenchUpgradeRow)
+	{
+		WorkbenchUpgradeRow->RefreshProgress();
+	}
 	if (LevelLabel)
 	{
 		LevelLabel->SetText(
@@ -824,14 +979,6 @@ void UBotanicusOrderCatalogWidget::
 	HandleBuildingsTabClicked()
 {
 	SelectTab(EBotanicusCommandPanelTab::Buildings);
-}
-
-void UBotanicusOrderCatalogWidget::HandleAddTestCreditsClicked()
-{
-	if (BotanicusController)
-	{
-		BotanicusController->AddTestCredits();
-	}
 }
 
 void UBotanicusOrderCatalogWidget::HandleShopOpenClicked()
