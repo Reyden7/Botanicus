@@ -33,7 +33,7 @@ public:
 	ABotanicusCharacter* GetCarrier() const { return Carrier; }
 	ABotanicusCharacter* GetHelper() const { return Helper; }
 	FName GetItemKey() const { return ItemKey; }
-	void InitializeEquipment(FName InItemKey);
+	virtual void InitializeEquipment(FName InItemKey);
 	bool RequiresTwoPlayers() const { return bCooperativeCarry; }
 	bool IsWaitingForHelper() const
 	{
@@ -46,17 +46,20 @@ public:
 	void EndCooperativeHold(ABotanicusCharacter* Character);
 	bool IsInPlacementMode() const { return bPlacementMode; }
 	bool IsPlacementValid() const { return bPlacementValid; }
-	FVector GetPlacementBoxExtent() const;
+	virtual FVector GetPlacementBoxExtent() const;
 
-	void BeginPlacement(ABotanicusCharacter* Character);
-	void UpdatePlacement(
+	virtual void BeginPlacement(ABotanicusCharacter* Character);
+	virtual void UpdatePlacement(
 		const FTransform& PlacementTransform,
 		bool bIsValid);
-	void ConfirmPlacement();
-	void CancelPlacement();
-	void SetLocalPlacementPreview(
+	virtual void ConfirmPlacement();
+	virtual void CancelPlacement();
+	virtual void SetLocalPlacementPreview(
 		const FTransform& PlacementTransform,
 		bool bIsValid);
+
+protected:
+	virtual void OnEquipmentDefinitionApplied() {}
 
 private:
 	void PickUp(ABotanicusCharacter* Character);

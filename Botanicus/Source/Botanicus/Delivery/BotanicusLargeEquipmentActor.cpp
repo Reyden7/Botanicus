@@ -106,6 +106,7 @@ void ABotanicusLargeEquipmentActor::Tick(float DeltaSeconds)
 		LocalPawn != Carrier;
 	const bool bShowIndicator =
 		(!IsValid(Carrier) || bCanJoinHeavyCarry) &&
+		CanInteract_Implementation(LocalPawn) &&
 		FVector::DistSquared(
 			LocalPawn->GetActorLocation(),
 			GetActorLocation()) <= FMath::Square(500.0f) &&
@@ -364,12 +365,14 @@ void ABotanicusLargeEquipmentActor::InitializeEquipment(
 		ItemKey = InItemKey;
 	}
 	ApplyItemDefinition();
+	OnEquipmentDefinitionApplied();
 	ForceNetUpdate();
 }
 
 void ABotanicusLargeEquipmentActor::OnRep_ItemKey()
 {
 	ApplyItemDefinition();
+	OnEquipmentDefinitionApplied();
 }
 
 void ABotanicusLargeEquipmentActor::ApplyItemDefinition()

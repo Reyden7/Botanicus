@@ -23,6 +23,7 @@ for required_key in (
     "SeedPacket_Orchid",
     "SeedPacket_Monstera",
     "SeedPacket_Lavender",
+    "SeedPacket_Violet",
     "WateringCan",
     "WaterReserve",
     "GardenTrowel",
@@ -31,9 +32,14 @@ for required_key in (
     "Harvest_Orchid",
     "Harvest_Monstera",
     "Harvest_Lavender",
+    "Harvest_Violet",
     "SalesDisplay",
     "SalePot",
     "PreparationWorkbench",
+    "StorageShelfFloorSmall",
+    "StorageShelfFloorLarge",
+    "StorageShelfWallSmall",
+    "StorageShelfWallLarge",
     "CommandComputer",
     "CashRegister",
     "SelfCheckout",
@@ -42,6 +48,10 @@ for required_key in (
         raise RuntimeError(f"Missing item definition {required_key}")
     if required_key in (
         "PreparationWorkbench",
+        "StorageShelfFloorSmall",
+        "StorageShelfFloorLarge",
+        "StorageShelfWallSmall",
+        "StorageShelfWallLarge",
         "CommandComputer",
         "CashRegister",
         "SelfCheckout",
@@ -63,11 +73,38 @@ for starter_fixture_key in (
             f"{starter_fixture_key} must be a free starter fixture"
         )
 
+for storage_shelf_key in (
+    "StorageShelfFloorSmall",
+    "StorageShelfFloorLarge",
+    "StorageShelfWallSmall",
+    "StorageShelfWallLarge",
+):
+    shelf = items[storage_shelf_key]
+    if (
+        shelf.get_editor_property("weight_class")
+        != unreal.BotanicusItemWeightClass.ONE_PLAYER_CARRY
+    ):
+        raise RuntimeError(
+            f"{storage_shelf_key} must be movable by one player"
+        )
+    expected_surface = (
+        4 if "Wall" in storage_shelf_key else 1
+    )
+    if (
+        shelf.get_editor_property("allowed_placement_surfaces")
+        & expected_surface
+        == 0
+    ):
+        raise RuntimeError(
+            f"{storage_shelf_key} has an invalid placement surface"
+        )
+
 for base_harvest_key in (
     "Harvest_Basil",
     "Harvest_Orchid",
     "Harvest_Monstera",
     "Harvest_Lavender",
+    "Harvest_Violet",
 ):
     for quality_suffix in ("Beautiful", "Exceptional"):
         quality_key = f"{base_harvest_key}_{quality_suffix}"
@@ -103,12 +140,19 @@ if (
     raise RuntimeError("WateringCan must be a physical handheld tool")
 if not items["PottingSoil"].get_editor_property("sale_soil"):
     raise RuntimeError("PottingSoil must be compatible with sale pots")
+if int(
+    items["PottingSoil"].get_editor_property(
+        "allowed_placement_surfaces"
+    )
+) != 1:
+    raise RuntimeError("PottingSoil must only be placeable on the floor")
 
 tab_expectations = {
     "SeedPacket_Basil": 1,
     "SeedPacket_Orchid": 1,
     "SeedPacket_Monstera": 1,
     "SeedPacket_Lavender": 1,
+    "SeedPacket_Violet": 1,
     "WateringCan": 2,
     "GardenTrowel": 2,
     "BoxCutter": 2,
@@ -116,6 +160,10 @@ tab_expectations = {
     "SalePot": 8,
     "SalesDisplay": 8,
     "PreparationWorkbench": 4,
+    "StorageShelfFloorSmall": 4,
+    "StorageShelfFloorLarge": 4,
+    "StorageShelfWallSmall": 4,
+    "StorageShelfWallLarge": 4,
     "SelfCheckout": 8,
 }
 for item_key, required_tab in tab_expectations.items():
@@ -187,8 +235,8 @@ if (
     )
 
 plants = plant_catalog.get_editor_property("plants")
-if len(plants) != 4:
-    raise RuntimeError("Expected four playable plant varieties")
+if len(plants) != 5:
+    raise RuntimeError("Expected five playable plant varieties")
 plants_by_key = {
     str(plant.get_editor_property("plant_key")): plant
     for plant in plants
@@ -233,6 +281,16 @@ expected_plants = {
         "colour": "Purple",
         "type": "Aromatic",
         "appeal": 74,
+    },
+    "Violet": {
+        "seed": "SeedPacket_Violet",
+        "harvest": "Harvest_Violet",
+        "growth": 210.0,
+        "water": (0.35, 0.70),
+        "sale": 85,
+        "colour": "Purple",
+        "type": "Flowering",
+        "appeal": 78,
     },
 }
 for plant_key, expected in expected_plants.items():
@@ -315,11 +373,13 @@ for runtime_class_name in (
     "BotanicusVisitorCharacter",
     "BotanicusVisitorManager",
     "BotanicusVisitorZoneActor",
+    "BotanicusRefundZoneActor",
     "BotanicusShopObjectivesWidget",
     "BotanicusDaySummaryWidget",
     "BotanicusClockWidget",
     "BotanicusVisitorSpeechBubbleWidget",
     "BotanicusPreparationWorkbenchActor",
+    "BotanicusStorageShelfActor",
     "BotanicusComputerActor",
     "BotanicusCashRegisterActor",
     "BotanicusSelfCheckoutActor",

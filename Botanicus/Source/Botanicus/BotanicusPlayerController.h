@@ -20,6 +20,7 @@ class UBotanicusSharedFundsWidget;
 class UBotanicusShopObjectivesWidget;
 class UBotanicusDaySummaryWidget;
 class UBotanicusClockWidget;
+class UBotanicusStorageQuantityWidget;
 class ABotanicusGameState;
 class ACameraActor;
 class AActor;
@@ -36,8 +37,10 @@ class ABotanicusCashRegisterActor;
 class ABotanicusWateringCanActor;
 class ABotanicusWaterReserveActor;
 class ABotanicusComputerActor;
+class ABotanicusStorageShelfActor;
 class UActorComponent;
 class UMaterialInterface;
+class UMaterialInstanceDynamic;
 class UPrimitiveComponent;
 struct FInputKeyEventArgs;
 
@@ -124,6 +127,12 @@ public:
 	UFUNCTION(BlueprintPure, Category="Botanicus|Building")
 	bool IsBuildingTopDownViewActive() const { return bBuildingTopDownViewActive; }
 
+	UFUNCTION(BlueprintPure, Category="Botanicus|Furniture")
+	bool IsFurnitureMoveModeActive() const
+	{
+		return bFurnitureMoveModeActive;
+	}
+
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Path")
 	void BeginPathPlacement();
 
@@ -138,6 +147,12 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Visitors")
 	void BeginVisitorCheckoutPlacement();
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Economy")
+	void BeginRefundZonePlacement();
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Delivery")
+	void BeginDeliveryZonePlacement();
 
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Path")
 	void ConfirmPathPlacement();
@@ -341,6 +356,7 @@ protected:
 	void InitializeShopObjectivesWidget();
 	void InitializeDaySummaryWidget();
 	void InitializeClockWidget();
+	void InitializeStorageQuantityWidget();
 	void InitializeTopDownToolbarWidget();
 	void InitializeOrderCatalogWidget();
 	void InitializeDevelopmentPanelWidget();
@@ -396,6 +412,7 @@ protected:
 		FTransform& OutTransform) const;
 	bool TryHandleNearbyWateringCan();
 	bool TryRefillHeldWateringCan();
+	bool TryUseNearbyComputer();
 	bool TryMoveNearbyPlaceableItem();
 	void BeginPlaceableItemMoveCharge(
 		ABotanicusPlaceableItemActor* WorldItem);
@@ -413,6 +430,16 @@ protected:
 		ABotanicusLargeEquipmentActor* Equipment);
 	void UpdateEquipmentCarryCharge(float DeltaTime);
 	void CancelEquipmentCarryCharge(bool bNotifyServer);
+	void ToggleFurnitureMoveMode();
+	void RefreshFurnitureHighlights();
+	bool IsFurnitureActor(const AActor* Actor) const;
+	void SetFurnitureActorHighlighted(
+		AActor* Actor,
+		bool bHighlighted) const;
+	void RefreshInteractionTargetHighlight();
+	void SetInteractionTargetHighlighted(
+		AActor* Actor,
+		bool bHighlighted) const;
 	void BeginLargeEquipmentPlacement(
 		ABotanicusLargeEquipmentActor* Equipment);
 	void UpdateLargeEquipmentPlacement(float DeltaTime);
@@ -431,14 +458,42 @@ protected:
 		ABotanicusPlaceableItemActor* WorldItem);
 	void UpdateQuickBarItemPlacement(float DeltaTime);
 	void RotateQuickBarItemPlacement(float Direction);
+	void AdjustQuickBarPlacementQuantity(int32 Direction);
+	int32 GetMaximumQuickBarPlacementQuantity(
+		ABotanicusStorageShelfActor* Shelf,
+		int32 SlotIndex) const;
 	void ConfirmQuickBarItemPlacement();
 	void CancelQuickBarItemPlacement();
+	void BeginStorageCollectionQuantitySelection(
+		ABotanicusPlaceableItemActor* WorldItem);
+	void AdjustStorageCollectionQuantity(int32 Direction);
+	void ConfirmStorageCollectionQuantitySelection();
+	void CancelStorageCollectionQuantitySelection(
+		bool bNotifyServer);
+	void RefreshStorageQuantityWidget(
+		bool bStoring,
+		FName ItemKey,
+		int32 Quantity,
+		int32 MaximumQuantity);
 	bool ResolveQuickBarItemPlacement(
 		FName ItemKey,
 		const FVector& RequestedLocation,
 		float RequestedYaw,
 		FTransform& OutTransform,
-		const AActor* IgnoredWorldItem = nullptr) const;
+		const AActor* IgnoredWorldItem = nullptr,
+		int32 RequestedQuantity = 1) const;
+	bool FindAimedStorageSlot(
+		ABotanicusStorageShelfActor*& OutShelf,
+		int32& OutSlotIndex) const;
+	bool FindStorageDestinationAtLocation(
+		FName ItemKey,
+		int32 ItemQuantity,
+		const FVector& ItemExtent,
+		const FVector& WorldLocation,
+		const AActor* IgnoredWorldItem,
+		ABotanicusStorageShelfActor*& OutShelf,
+		int32& OutSlotIndex,
+		ABotanicusPlaceableItemActor*& OutExistingStack) const;
 	void DrawQuickBarItemAlignmentGuides(
 		const FTransform& PlacementTransform) const;
 	bool IsLookingAtWorldItem(
@@ -581,6 +636,9 @@ protected:
 		ABotanicusLargeEquipmentActor* Equipment);
 
 	UFUNCTION(Server, Reliable)
+	void ServerSetFurnitureMoveMode(bool bEnabled);
+
+	UFUNCTION(Server, Reliable)
 	void ServerSetHeavyEquipmentHold(
 		ABotanicusLargeEquipmentActor* Equipment,
 		bool bHeld);
@@ -617,11 +675,17 @@ protected:
 		FGuid InstanceId,
 		FName ItemKey,
 		FVector_NetQuantize10 RequestedLocation,
-		float RequestedYaw);
+		float RequestedYaw,
+		int32 Quantity);
 
 	UFUNCTION(Server, Reliable)
 	void ServerBeginPlaceableItemMove(
 		ABotanicusPlaceableItemActor* WorldItem);
+
+	UFUNCTION(Server, Reliable)
+	void ServerCollectStorageItem(
+		ABotanicusPlaceableItemActor* WorldItem,
+		int32 Quantity);
 
 	UFUNCTION(Server, Reliable)
 	void ServerConfirmPlaceableItemMove(
@@ -684,6 +748,14 @@ protected:
 	void ServerCreateVisitorZone(
 		FVector_NetQuantize10 RequestedLocation,
 		uint8 RequestedZoneType);
+
+	UFUNCTION(Server, Reliable)
+	void ServerCreateRefundZone(
+		FVector_NetQuantize10 RequestedLocation);
+
+	UFUNCTION(Server, Reliable)
+	void ServerCreateDeliveryZone(
+		FVector_NetQuantize10 RequestedLocation);
 
 	UFUNCTION(Server, Reliable)
 	void ServerDeletePathSegment(
@@ -844,6 +916,12 @@ protected:
 	TObjectPtr<UMaterialInterface> InvalidBuildingPlacementMaterial;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> FurnitureHighlightMaterial;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> InteractionHighlightMaterial;
+
+	UPROPERTY(Transient)
 	TArray<TObjectPtr<AActor>> LocalBuildingGroup;
 
 	UPROPERTY(Transient)
@@ -878,8 +956,16 @@ protected:
 		ClockWidget;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UBotanicusStorageQuantityWidget>
+		StorageQuantityWidget;
+
+	UPROPERTY(Transient)
 	TObjectPtr<ABotanicusPlaceableItemActor>
 		LocalQuickBarItemPreview;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ABotanicusPlaceableItemActor>
+		LocalStorageCollectionItem;
 
 	UPROPERTY(Transient)
 	TObjectPtr<ABotanicusPlaceableItemActor>
@@ -958,7 +1044,16 @@ protected:
 	bool bParcelCutActionHeld = false;
 	bool bCatalogOrderStateRestored = false;
 	bool bOrderCatalogOpenedFromComputer = false;
+	bool bFurnitureMoveModeActive = false;
+	bool bServerFurnitureMoveModeActive = false;
+	float FurnitureHighlightRefreshAccumulator = 0.0f;
+	float InteractionHighlightRefreshAccumulator = 0.0f;
+	TSet<TWeakObjectPtr<AActor>> LocalHighlightedFurniture;
+	TWeakObjectPtr<AActor> LocalInteractionHighlightActor;
 	int32 LocalQuickBarItemSlotIndex = INDEX_NONE;
+	int32 LocalQuickBarPlacementQuantity = 1;
+	int32 LocalStorageCollectionQuantity = 1;
+	int32 LocalStorageCollectionMaximum = 1;
 	FGuid LocalQuickBarItemInstanceId;
 	FName LocalQuickBarItemKey = NAME_None;
 	double LastServerPingTime = -1000.0;

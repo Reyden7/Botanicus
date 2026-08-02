@@ -139,7 +139,7 @@ potting_soil = make_definition(
     1.0,
     25,
     2.0,
-    allowed_surfaces=0,
+    allowed_surfaces=1,
     catalog_tabs=4 | 8,
 )
 potting_soil.set_editor_property("sale_soil", True)
@@ -195,6 +195,20 @@ lavender_seeds = make_definition(
     5,
     1.0,
     35,
+    2.0,
+    allowed_surfaces=0,
+    catalog_tabs=1,
+)
+violet_seeds = make_definition(
+    "SeedPacket_Violet",
+    "Graines de violette",
+    unreal.BotanicusItemCategory.SUPPLY,
+    unreal.BotanicusItemWeightClass.HOTBAR,
+    unreal.Vector(0.18, 0.08, 0.24),
+    20,
+    5,
+    1.0,
+    38,
     2.0,
     allowed_surfaces=0,
     catalog_tabs=1,
@@ -349,6 +363,26 @@ lavender_harvest = make_definition(
     visitor_appeal=74,
     catalog_tabs=8,
 )
+violet_harvest = make_definition(
+    "Harvest_Violet",
+    "Violette",
+    unreal.BotanicusItemCategory.SUPPLY,
+    unreal.BotanicusItemWeightClass.HOTBAR,
+    unreal.Vector(0.16, 0.16, 0.16),
+    1,
+    1,
+    1.0,
+    0,
+    0.1,
+    allowed_surfaces=0,
+    purchasable=False,
+    whole_plant=True,
+    sale_price=85,
+    plant_color_tag="Purple",
+    plant_type_tag="Flowering",
+    visitor_appeal=78,
+    catalog_tabs=8,
+)
 
 
 def make_quality_harvest(
@@ -392,6 +426,7 @@ for plant in (
     ("Harvest_Orchid", "Orchidee rose", 110, "Pink", "Flowering", 82),
     ("Harvest_Monstera", "Monstera", 95, "Green", "Foliage", 72),
     ("Harvest_Lavender", "Lavande violette", 75, "Purple", "Aromatic", 74),
+    ("Harvest_Violet", "Violette", 85, "Purple", "Flowering", 78),
 ):
     quality_harvests.append(
         make_quality_harvest(
@@ -477,6 +512,67 @@ preparation_workbench = make_definition(
     catalog_tabs=4,
     purchasable=False,
 )
+storage_shelf_class = unreal.load_class(
+    None,
+    "/Script/Botanicus.BotanicusStorageShelfActor",
+)
+if storage_shelf_class is None:
+    raise RuntimeError("Could not load BotanicusStorageShelfActor")
+
+
+def make_storage_shelf(key, name, scale, extent, price, wall=False):
+    shelf = make_definition(
+        key,
+        name,
+        unreal.BotanicusItemCategory.EQUIPMENT,
+        unreal.BotanicusItemWeightClass.ONE_PLAYER_CARRY,
+        scale,
+        1,
+        1,
+        0.75,
+        price,
+        3.0,
+        allowed_surfaces=4 if wall else 1,
+        world_mesh="/Engine/BasicShapes/Cube",
+        world_actor_class=storage_shelf_class,
+        catalog_tabs=4,
+    )
+    shelf.set_editor_property("collision_half_extent_override", extent)
+    return shelf
+
+
+storage_shelves = [
+    make_storage_shelf(
+        "StorageShelfFloorSmall",
+        "Etagere au sol - 4 places",
+        unreal.Vector(0.6, 1.7, 1.5),
+        unreal.Vector(30.0, 85.0, 75.0),
+        180,
+    ),
+    make_storage_shelf(
+        "StorageShelfFloorLarge",
+        "Etagere au sol - 8 places",
+        unreal.Vector(0.7, 2.5, 1.8),
+        unreal.Vector(35.0, 125.0, 90.0),
+        320,
+    ),
+    make_storage_shelf(
+        "StorageShelfWallSmall",
+        "Etagere murale - 3 places",
+        unreal.Vector(0.32, 1.3, 0.5),
+        unreal.Vector(16.0, 65.0, 25.0),
+        120,
+        wall=True,
+    ),
+    make_storage_shelf(
+        "StorageShelfWallLarge",
+        "Etagere murale - 6 places",
+        unreal.Vector(0.36, 1.9, 0.96),
+        unreal.Vector(18.0, 95.0, 48.0),
+        220,
+        wall=True,
+    ),
+]
 computer_class = unreal.load_class(
     None,
     "/Script/Botanicus.BotanicusComputerActor",
@@ -565,6 +661,7 @@ asset.set_editor_property(
         orchid_seeds,
         monstera_seeds,
         lavender_seeds,
+        violet_seeds,
         watering_can,
         water_reserve,
         garden_trowel,
@@ -573,10 +670,12 @@ asset.set_editor_property(
         orchid_harvest,
         monstera_harvest,
         lavender_harvest,
+        violet_harvest,
         *quality_harvests,
         sales_display,
         sale_pot,
         preparation_workbench,
+        *storage_shelves,
         command_computer,
         cash_register,
         self_checkout,

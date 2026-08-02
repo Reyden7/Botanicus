@@ -29,4 +29,7 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> ScheduleLabel;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> FurnitureModeLabel;
 };

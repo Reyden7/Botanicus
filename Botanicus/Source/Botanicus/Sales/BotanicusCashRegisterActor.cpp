@@ -8,6 +8,8 @@
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "BotanicusGameState.h"
+#include "Sales/BotanicusSelfCheckoutActor.h"
 #include "Visitors/BotanicusVisitorCharacter.h"
 #include "Visitors/BotanicusVisitorZoneActor.h"
 #include "UObject/ConstructorHelpers.h"
@@ -78,6 +80,56 @@ ABotanicusCashRegisterActor::ABotanicusCashRegisterActor()
 	ContextActionText->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	ContextActionText->SetVisibility(false);
 
+	for (int32 SlotIndex = 0;
+		 SlotIndex < SelfCheckoutSlotCount;
+		 ++SlotIndex)
+	{
+		UStaticMeshComponent* SlotVisual =
+			CreateDefaultSubobject<UStaticMeshComponent>(
+				*FString::Printf(
+					TEXT("Self Checkout Slot %d"),
+					SlotIndex + 1));
+		SlotVisual->SetupAttachment(SceneRoot);
+		SlotVisual->SetStaticMesh(Cube);
+		const FTransform SlotTransform =
+			GetSelfCheckoutSlotTransform(SlotIndex);
+		SlotVisual->SetRelativeLocation(
+			GetActorTransform().InverseTransformPosition(
+				SlotTransform.GetLocation()) +
+			FVector(0.0f, 0.0f, 2.0f));
+		SlotVisual->SetRelativeRotation(FRotator::ZeroRotator);
+		SlotVisual->SetRelativeScale3D(
+			FVector(0.60f, 0.40f, 0.04f));
+		SlotVisual->SetCollisionEnabled(
+			ECollisionEnabled::NoCollision);
+		if (UMaterialInstanceDynamic* SlotMaterial =
+				SlotVisual->
+					CreateAndSetMaterialInstanceDynamic(0))
+		{
+			SlotMaterial->SetVectorParameterValue(
+				TEXT("Color"),
+				FLinearColor(0.08f, 0.42f, 0.95f, 1.0f));
+		}
+		SelfCheckoutSlotVisuals.Add(SlotVisual);
+	}
+	SelfCheckoutZoneLabel =
+		CreateDefaultSubobject<UTextRenderComponent>(
+			TEXT("Self Checkout Zone Label"));
+	SelfCheckoutZoneLabel->SetupAttachment(SceneRoot);
+	SelfCheckoutZoneLabel->SetRelativeLocation(
+		FVector(0.0f, 0.0f, 215.0f));
+	SelfCheckoutZoneLabel->SetHorizontalAlignment(EHTA_Center);
+	SelfCheckoutZoneLabel->SetVerticalAlignment(EVRTA_TextCenter);
+	SelfCheckoutZoneLabel->SetWorldSize(15.0f);
+	SelfCheckoutZoneLabel->SetTextRenderColor(
+		FColor(70, 160, 255));
+	SelfCheckoutZoneLabel->SetText(
+		FText::FromString(
+			TEXT("ZONE CAISSES AUTOMATIQUES\n6 EMPLACEMENTS")));
+	SelfCheckoutZoneLabel->SetCollisionEnabled(
+		ECollisionEnabled::NoCollision);
+	SelfCheckoutZoneLabel->SetVisibility(false);
+
 	RefreshVisuals();
 }
 
@@ -98,6 +150,18 @@ void ABotanicusCashRegisterActor::ConfigureAsLocalPreview(bool bIsValid)
 	{
 		ContextActionText->SetVisibility(false);
 	}
+	for (UStaticMeshComponent* SlotVisual :
+		 SelfCheckoutSlotVisuals)
+	{
+		if (SlotVisual)
+		{
+			SlotVisual->SetVisibility(false);
+		}
+	}
+	if (SelfCheckoutZoneLabel)
+	{
+		SelfCheckoutZoneLabel->SetVisibility(false);
+	}
 }
 
 FVector ABotanicusCashRegisterActor::GetCustomerStandLocation() const
@@ -105,6 +169,110 @@ FVector ABotanicusCashRegisterActor::GetCustomerStandLocation() const
 	return GetActorLocation() +
 		GetActorForwardVector() * 155.0f +
 		FVector(0.0f, 0.0f, 84.0f);
+}
+
+FTransform ABotanicusCashRegisterActor::
+	GetSelfCheckoutSlotTransform(int32 SlotIndex) const
+{
+	const int32 ClampedIndex =
+		FMath::Clamp(
+			SlotIndex,
+			0,
+			SelfCheckoutSlotCount - 1);
+	const int32 Side = ClampedIndex < 3 ? -1 : 1;
+	const int32 SideIndex =
+		ClampedIndex < 3 ? 2 - ClampedIndex : ClampedIndex - 3;
+	const float LateralDistance =
+		95.0f + SideIndex * 80.0f;
+	return FTransform(
+		GetActorRotation(),
+		GetActorLocation() +
+			GetActorRightVector() *
+				(Side * LateralDistance));
+}
+
+int32 ABotanicusCashRegisterActor::FindSelfCheckoutSlotIndex(
+	const FVector& WorldLocation,
+	float Tolerance) const
+{
+	for (int32 SlotIndex = 0;
+		 SlotIndex < SelfCheckoutSlotCount;
+		 ++SlotIndex)
+	{
+		if (FVector::DistSquared2D(
+				WorldLocation,
+				GetSelfCheckoutSlotTransform(SlotIndex).
+					GetLocation()) <=
+			FMath::Square(FMath::Max(1.0f, Tolerance)))
+		{
+			return SlotIndex;
+		}
+	}
+	return INDEX_NONE;
+}
+
+bool ABotanicusCashRegisterActor::
+	FindClosestAvailableSelfCheckoutSlot(
+		const FVector& RequestedLocation,
+		FTransform& OutTransform,
+		const AActor* IgnoredSelfCheckout) const
+{
+	const UWorld* World = GetWorld();
+	const ABotanicusGameState* GameState =
+		World
+			? World->GetGameState<ABotanicusGameState>()
+			: nullptr;
+	if (!World || !GameState ||
+		GameState->GetMainShopLevel() < 3)
+	{
+		return false;
+	}
+
+	float BestDistanceSquared = TNumericLimits<float>::Max();
+	bool bFound = false;
+	for (int32 SlotIndex = 0;
+		 SlotIndex < SelfCheckoutSlotCount;
+		 ++SlotIndex)
+	{
+		const FTransform SlotTransform =
+			GetSelfCheckoutSlotTransform(SlotIndex);
+		bool bOccupied = false;
+		for (TActorIterator<ABotanicusSelfCheckoutActor>
+				 CheckoutIt(World);
+			 CheckoutIt;
+			 ++CheckoutIt)
+		{
+			if (*CheckoutIt == IgnoredSelfCheckout ||
+				CheckoutIt->ActorHasTag(
+					TEXT("BotanicusPlacementPreview")))
+			{
+				continue;
+			}
+			if (FVector::DistSquared2D(
+					CheckoutIt->GetActorLocation(),
+					SlotTransform.GetLocation()) <=
+				FMath::Square(35.0f))
+			{
+				bOccupied = true;
+				break;
+			}
+		}
+		if (bOccupied)
+		{
+			continue;
+		}
+		const float DistanceSquared =
+			FVector::DistSquared2D(
+				RequestedLocation,
+				SlotTransform.GetLocation());
+		if (DistanceSquared < BestDistanceSquared)
+		{
+			BestDistanceSquared = DistanceSquared;
+			OutTransform = SlotTransform;
+			bFound = true;
+		}
+	}
+	return bFound;
 }
 
 ABotanicusVisitorCharacter*
@@ -226,6 +394,26 @@ void ABotanicusCashRegisterActor::RefreshVisuals()
 		ActorHasTag(TEXT("BotanicusPlacementPreview")))
 	{
 		return;
+	}
+
+	const ABotanicusGameState* GameState =
+		GetWorld()
+			? GetWorld()->GetGameState<ABotanicusGameState>()
+			: nullptr;
+	const bool bShowSelfCheckoutSlots =
+		GameState && GameState->GetMainShopLevel() >= 3;
+	for (UStaticMeshComponent* SlotVisual :
+		 SelfCheckoutSlotVisuals)
+	{
+		if (SlotVisual)
+		{
+			SlotVisual->SetVisibility(bShowSelfCheckoutSlots);
+		}
+	}
+	if (SelfCheckoutZoneLabel)
+	{
+		SelfCheckoutZoneLabel->SetVisibility(
+			bShowSelfCheckoutSlots);
 	}
 
 	if (!IsInsideCheckoutZone())

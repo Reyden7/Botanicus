@@ -27,6 +27,15 @@ public:
 	ABotanicusVisitorCharacter* GetCheckoutCustomer() const;
 	void HandleCheckoutAction(AActor* Interactor);
 	bool IsOperational() const { return IsInsideCheckoutZone(); }
+	FTransform GetSelfCheckoutSlotTransform(int32 SlotIndex) const;
+	bool FindClosestAvailableSelfCheckoutSlot(
+		const FVector& RequestedLocation,
+		FTransform& OutTransform,
+		const AActor* IgnoredSelfCheckout = nullptr) const;
+	int32 FindSelfCheckoutSlotIndex(
+		const FVector& WorldLocation,
+		float Tolerance = 35.0f) const;
+	static constexpr int32 SelfCheckoutSlotCount = 6;
 
 private:
 	bool IsInsideCheckoutZone() const;
@@ -47,4 +56,11 @@ private:
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UTextRenderComponent> ContextActionText;
+
+	UPROPERTY(VisibleAnywhere)
+	TArray<TObjectPtr<UStaticMeshComponent>>
+		SelfCheckoutSlotVisuals;
+
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UTextRenderComponent> SelfCheckoutZoneLabel;
 };

@@ -24,6 +24,17 @@ public:
 	virtual void BeginPlay() override;
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+	virtual bool CanInteract_Implementation(
+		AActor* Interactor) const override;
+	virtual void BeginPlacement(ABotanicusCharacter* Character) override;
+	virtual void UpdatePlacement(
+		const FTransform& PlacementTransform,
+		bool bIsValid) override;
+	virtual void ConfirmPlacement() override;
+	virtual void CancelPlacement() override;
+	virtual void SetLocalPlacementPreview(
+		const FTransform& PlacementTransform,
+		bool bIsValid) override;
 
 	FTransform GetSalePotPreparationTransform(
 		int32 SlotIndex = 0) const;
@@ -42,12 +53,19 @@ public:
 	bool CanUpgrade() const { return WorkbenchLevel < 5; }
 	bool UpgradeWorkbench();
 	void RestoreWorkbenchLevel(int32 InLevel);
+	bool HasPreparedPots() const;
+	void GetPreparedPots(
+		TArray<ABotanicusSalePotActor*>& OutPots) const;
+	void SetMoveContentsWithFurniture(bool bEnabled);
 
 private:
 	bool IsSlotOccupied(
 		int32 SlotIndex,
 		const ABotanicusSalePotActor* IgnoredPot) const;
 	void RefreshLevelVisuals();
+	void CapturePreparedPotTransforms();
+	void ApplyPreparedPotTransforms();
+	void ClearPreparedPotTransforms();
 
 	UFUNCTION()
 	void OnRep_WorkbenchLevel();
@@ -69,4 +87,7 @@ private:
 	int32 WorkbenchLevel = 1;
 
 	float SlotSpacing = 75.0f;
+	TArray<TWeakObjectPtr<ABotanicusSalePotActor>> MovingPreparedPots;
+	TArray<FTransform> MovingPreparedPotRelativeTransforms;
+	bool bMoveContentsWithFurniture = false;
 };

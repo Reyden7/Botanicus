@@ -117,6 +117,18 @@ struct BOTANICUS_API FBotanicusSavedVisitorZone
 };
 
 USTRUCT()
+struct BOTANICUS_API FBotanicusSavedRefundZone
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	FTransform Transform = FTransform::Identity;
+
+	UPROPERTY()
+	FVector BoxExtent = FVector(220.0f, 150.0f, 6.0f);
+};
+
+USTRUCT()
 struct BOTANICUS_API FBotanicusSavedWorldItem
 {
 	GENERATED_BODY()
@@ -181,7 +193,7 @@ class BOTANICUS_API UBotanicusWorldSaveGame : public USaveGame
 
 public:
 	UPROPERTY()
-	int32 SaveVersion = 20;
+	int32 SaveVersion = 22;
 
 	UPROPERTY()
 	FString MapName;
@@ -267,6 +279,15 @@ public:
 
 	UPROPERTY()
 	TArray<FBotanicusSavedVisitorZone> VisitorZones;
+
+	UPROPERTY()
+	TArray<FBotanicusSavedRefundZone> RefundZones;
+
+	UPROPERTY()
+	bool bHasDeliveryZone = false;
+
+	UPROPERTY()
+	FTransform DeliveryZoneTransform = FTransform::Identity;
 
 	UPROPERTY()
 	TArray<FBotanicusSavedWorldItem> WorldItems;

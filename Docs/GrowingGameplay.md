@@ -238,7 +238,7 @@ version 11. Pending occupied displays attract a new visitor after a restart
 once a complete valid circuit exists.
 
 Each harvest is one complete plant, occupies its own hotbar slot and remains
-unavailable from the order catalogue. The first four varieties are:
+unavailable from the order catalogue. The first five varieties are:
 
 - basil: 120 seconds, healthy water from 25% to 90%, sale price 60 credits,
   green aromatic profile;
@@ -248,6 +248,8 @@ unavailable from the order catalogue. The first four varieties are:
   slow decorative green foliage profile;
 - purple lavender: 180 seconds, healthy water from 18% to 62%, sale price
   75 credits, low-consumption purple aromatic profile.
+- violet: 210 seconds, healthy water from 35% to 70%, sale price 85 credits,
+  compact purple flowering profile.
 
 Their color and silhouette are retained in growing pots, prepared sale pots,
 sales displays and while carried by visitors. Visitor preference scoring uses
@@ -379,13 +381,49 @@ The server authoritatively spends shared credits, replicates the new level and
 autosaves it immediately. Save version 20 stores the workbench level; older
 saves start at level 1 without changing any prepared sale pots.
 
+Save version 21 stores the object-refund surface. Players place it from the
+top-down planning toolbar. Once an eligible object is fully deposited on the
+surface, it disappears and 80% of its catalogue price is credited to the shared
+wallet. Tools, the manual register, preparation workbench and command computer
+cannot be refunded.
+
+## Physical storage shelves
+
+The Preparation catalogue contains four physical storage fixtures: floor
+shelves with four or eight slots and wall shelves with three or six slots.
+Floor models are placed on the ground; wall models snap to the vertical surface
+the carrying player is looking at. A shelf must be empty before it can be
+moved.
+
+Selecting a compatible supply, pot or small decoration while approaching a
+shelf reveals its available placeholders in green. Items that cannot normally
+be placed on the floor, such as seed packets and soil doses, can be placed
+directly into these slots. Tools, finished plants and large equipment remain
+incompatible. Stored actors, occupied slots and shelf transforms use the normal
+replicated world-item save path.
+
+Pressing `B` toggles furniture-move mode. Every supported fixture receives the
+project's yellow selection outline. A player can then hold `E` on a highlighted
+storage shelf or preparation workbench and move it normally; stored items or
+prepared pots retain their exact relative transforms throughout the preview,
+server confirmation or cancellation. Outside this mode, occupied furniture
+must be emptied before it can be lifted.
+
 ## Automatic checkouts
 
 The Sales tab contains a purchasable `SelfCheckout` for 1,500 credits once the
 main shop reaches level 3. Each order contains exactly one station. Level 3
 allows two stations, then the limit increases by one for every additional shop
-level. Placed stations, unopened delivery cartons and pending orders all count
-toward the server-authoritative shared limit.
+level, up to the six physical positions. Placed stations, unopened delivery
+cartons and pending orders all count toward the server-authoritative shared
+limit.
+
+At level 3 the starter cash register reveals six blue self-checkout
+placeholders, three on each side. A self-checkout placement preview only turns
+valid near a free placeholder and snaps to its exact transform. Client and
+server both reject every position outside those six slots, as well as an
+already occupied slot. Moving the starter cash register also carries every
+mounted self-checkout along while preserving its slot.
 
 The debug station is 2 metres high, 40 centimetres wide and 60 centimetres
 deep. It only operates inside the checkout zone. A waiting customer
@@ -413,5 +451,5 @@ which makes level-gated catalogue entries and their limits directly testable.
 - `Tools/CreatePlantVarietyItemData.py` creates the new seed and harvest Item
   Data assets.
 - `Tools/CreatePlantCatalog.py` creates the plant catalogue.
-- `Tools/ValidateGrowingAssets.py` checks all four varieties, prices, visitor
+- `Tools/ValidateGrowingAssets.py` checks all five varieties, prices, visitor
   attributes, class mappings and water bounds.

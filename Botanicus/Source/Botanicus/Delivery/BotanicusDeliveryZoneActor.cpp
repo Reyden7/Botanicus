@@ -4,6 +4,7 @@
 
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/TextRenderComponent.h"
 #include "Engine/StaticMesh.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -28,6 +29,21 @@ ABotanicusDeliveryZoneActor::ABotanicusDeliveryZoneActor()
 	{
 		Pad->SetStaticMesh(CubeFinder.Object);
 	}
+
+	ZoneLabel = CreateDefaultSubobject<UTextRenderComponent>(
+		TEXT("DeliveryZoneLabel"));
+	ZoneLabel->SetupAttachment(Root);
+	ZoneLabel->SetRelativeLocation(FVector(0.0f, 0.0f, 45.0f));
+	ZoneLabel->SetHorizontalAlignment(EHTA_Center);
+	ZoneLabel->SetVerticalAlignment(EVRTA_TextCenter);
+	ZoneLabel->SetWorldSize(24.0f);
+	ZoneLabel->SetText(
+		NSLOCTEXT(
+			"BotanicusDelivery",
+			"DeliveryZoneLabel",
+			"ZONE DE LIVRAISON"));
+	ZoneLabel->SetTextRenderColor(FColor(255, 210, 45));
+	ZoneLabel->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
 
 FVector ABotanicusDeliveryZoneActor::GetParcelSpawnLocation(

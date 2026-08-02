@@ -3,6 +3,7 @@
 #include "UI/BotanicusClockWidget.h"
 
 #include "Blueprint/WidgetTree.h"
+#include "BotanicusPlayerController.h"
 #include "BotanicusGameState.h"
 #include "Components/Border.h"
 #include "Components/CanvasPanel.h"
@@ -41,7 +42,7 @@ void UBotanicusClockWidget::BuildLayout()
 	UCanvasPanelSlot* PanelSlot = Root->AddChildToCanvas(Panel);
 	PanelSlot->SetAnchors(FAnchors(0.0f, 0.0f));
 	PanelSlot->SetPosition(FVector2D(24.0f, 24.0f));
-	PanelSlot->SetSize(FVector2D(300.0f, 82.0f));
+	PanelSlot->SetSize(FVector2D(300.0f, 108.0f));
 
 	UVerticalBox* Column = WidgetTree->ConstructWidget<UVerticalBox>();
 	Panel->SetContent(Column);
@@ -59,6 +60,16 @@ void UBotanicusClockWidget::BuildLayout()
 	ScheduleLabel->SetColorAndOpacity(
 		FSlateColor(FLinearColor(0.70f, 0.86f, 0.74f, 1.0f)));
 	Column->AddChildToVerticalBox(ScheduleLabel);
+
+	FurnitureModeLabel = WidgetTree->ConstructWidget<UTextBlock>();
+	FurnitureModeLabel->SetFont(
+		FSlateFontInfo(FCoreStyle::GetDefaultFont(), 14));
+	FurnitureModeLabel->SetColorAndOpacity(
+		FSlateColor(FLinearColor(1.0f, 0.82f, 0.12f, 1.0f)));
+	FurnitureModeLabel->SetText(
+		FText::FromString(TEXT("MODE MEUBLES [B] : ACTIF")));
+	FurnitureModeLabel->SetVisibility(ESlateVisibility::Collapsed);
+	Column->AddChildToVerticalBox(FurnitureModeLabel);
 }
 
 void UBotanicusClockWidget::RefreshClock()
@@ -100,5 +111,14 @@ void UBotanicusClockWidget::RefreshClock()
 				GameState->IsMainShopOpen()
 					? FLinearColor(0.30f, 1.0f, 0.45f, 1.0f)
 					: FLinearColor(1.0f, 0.48f, 0.28f, 1.0f)));
+	}
+	if (FurnitureModeLabel)
+	{
+		const ABotanicusPlayerController* Controller =
+			Cast<ABotanicusPlayerController>(GetOwningPlayer());
+		FurnitureModeLabel->SetVisibility(
+			Controller && Controller->IsFurnitureMoveModeActive()
+				? ESlateVisibility::HitTestInvisible
+				: ESlateVisibility::Collapsed);
 	}
 }

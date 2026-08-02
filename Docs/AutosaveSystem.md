@@ -39,7 +39,11 @@ deliberately ignores both its synthetic Unique Net ID and `PlayerId`, because
 Unreal regenerates the former and keeps incrementing the latter across Play
 sessions.
 
-Save format version 20 adds the persistent preparation-workbench level and its
+Save format version 21 adds the persistent player-only object-refund surface.
+Eligible objects deposited entirely on it return 80% of their catalogue price
+to the shared wallet. Tools, the manual register, preparation workbench and
+command computer are protected. Save format version 20 adds the persistent
+preparation-workbench level and its
 one-to-five simultaneous pot capacity. Save format version 19 adds the
 persistent shared clock and automatic opening
 hours. Version 18 adds the persistent day cycle and its current daily

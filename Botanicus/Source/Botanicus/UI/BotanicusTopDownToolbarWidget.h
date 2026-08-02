@@ -48,6 +48,12 @@ private:
 	void HandleVisitorCheckoutClicked();
 
 	UFUNCTION()
+	void HandleRefundZoneClicked();
+
+	UFUNCTION()
+	void HandleDeliveryZoneClicked();
+
+	UFUNCTION()
 	void HandleConfirmClicked();
 
 	UFUNCTION()
@@ -73,6 +79,12 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UButton> VisitorCheckoutButton;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UButton> RefundZoneButton;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UButton> DeliveryZoneButton;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UButton> ConfirmButton;

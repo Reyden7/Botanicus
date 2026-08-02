@@ -114,10 +114,22 @@ lavender = make_plant(
     0.0015,
     unreal.LinearColor(0.48, 0.20, 0.78, 1.0),
 )
+violet = make_plant(
+    "Violet",
+    "SeedPacket_Violet",
+    "Violette",
+    "Harvest_Violet",
+    210.0,
+    0.35,
+    0.70,
+    0.25,
+    0.0025,
+    unreal.LinearColor(0.38, 0.12, 0.72, 1.0),
+)
 
 asset.set_editor_property(
     "plants",
-    [basil, orchid, monstera, lavender],
+    [basil, orchid, monstera, lavender, violet],
 )
 unreal.EditorAssetLibrary.save_loaded_asset(
     asset,

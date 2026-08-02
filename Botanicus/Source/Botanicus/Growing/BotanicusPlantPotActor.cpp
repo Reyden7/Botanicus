@@ -920,6 +920,11 @@ void ABotanicusPlantPotActor::RefreshVisuals()
 		HeightMultiplier = 1.3f;
 		FoliageShape = FVector(0.62f, 0.62f, 1.5f);
 	}
+	else if (PlantKey == TEXT("Violet"))
+	{
+		HeightMultiplier = 0.62f;
+		FoliageShape = FVector(1.35f, 1.35f, 0.58f);
+	}
 	const float VisualGrowth =
 		FMath::Clamp(GrowthProgress, 0.02f, 1.0f);
 	const float StemHeight =

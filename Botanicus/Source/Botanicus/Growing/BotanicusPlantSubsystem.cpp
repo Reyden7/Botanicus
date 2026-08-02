@@ -94,6 +94,17 @@ void UBotanicusPlantSubsystem::Initialize(
 		0.25f,
 		0.0015f,
 		FLinearColor(0.48f, 0.20f, 0.78f, 1.0f));
+	AddPlant(
+		TEXT("Violet"),
+		TEXT("SeedPacket_Violet"),
+		NSLOCTEXT("BotanicusGrowing", "VioletName", "Violette"),
+		TEXT("Harvest_Violet"),
+		210.0f,
+		0.35f,
+		0.70f,
+		0.25f,
+		0.0025f,
+		FLinearColor(0.38f, 0.12f, 0.72f, 1.0f));
 }
 
 const FBotanicusPlantDefinition*

@@ -8,8 +8,9 @@
 
 class USceneComponent;
 class UStaticMeshComponent;
+class UTextRenderComponent;
 
-/** Temporary replicated delivery pad used by the equipment-order prototype. */
+/** Replicated, persistent starter delivery area for catalogue orders. */
 UCLASS()
 class BOTANICUS_API ABotanicusDeliveryZoneActor : public AActor
 {
@@ -26,4 +27,7 @@ private:
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UStaticMeshComponent> Pad;
+
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UTextRenderComponent> ZoneLabel;
 };

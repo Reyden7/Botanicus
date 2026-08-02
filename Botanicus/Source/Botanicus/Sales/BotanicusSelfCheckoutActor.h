@@ -29,6 +29,7 @@ public:
 
 private:
 	bool IsInsideCheckoutZone() const;
+	bool IsMountedInSelfCheckoutSlot() const;
 	void RefreshVisuals();
 
 	UPROPERTY(VisibleAnywhere)

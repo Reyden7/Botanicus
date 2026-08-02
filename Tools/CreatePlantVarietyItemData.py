@@ -48,6 +48,18 @@ ITEMS = (
         "Une lavande entiere recoltee, prete a etre rempotee.",
         25,
     ),
+    (
+        "SeedPacket_Violet",
+        "Graines de violette",
+        "Cinq graines pour une petite plante fleurie aux besoins en eau moderes.",
+        26,
+    ),
+    (
+        "Harvest_Violet",
+        "Violette",
+        "Une violette entiere recoltee, prete a etre rempotee.",
+        27,
+    ),
 )
 
 QUALITY_ITEMS = []
@@ -57,6 +69,7 @@ for harvest_key, plant_name in (
     ("Harvest_Orchid", "Orchidee rose"),
     ("Harvest_Monstera", "Monstera"),
     ("Harvest_Lavender", "Lavande violette"),
+    ("Harvest_Violet", "Violette"),
 ):
     QUALITY_ITEMS.append(
         (

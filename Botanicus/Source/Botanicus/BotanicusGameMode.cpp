@@ -9,8 +9,10 @@
 #include "Building/BotanicusCatalogBuildingActor.h"
 #include "Building/BotanicusCommunicationDoorActor.h"
 #include "Delivery/BotanicusDeliveryParcelActor.h"
+#include "Delivery/BotanicusDeliveryZoneActor.h"
 #include "Delivery/BotanicusLargeEquipmentActor.h"
 #include "Delivery/BotanicusPlaceableItemActor.h"
+#include "Economy/BotanicusRefundZoneActor.h"
 #include "Growing/BotanicusPlantPotActor.h"
 #include "Growing/BotanicusWateringCanActor.h"
 #include "Sales/BotanicusSalesDisplayActor.h"
@@ -225,7 +227,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 
 	CurrentSaveGame->MapName =
 		UGameplayStatics::GetCurrentLevelName(this, true);
-	CurrentSaveGame->SaveVersion = 20;
+	CurrentSaveGame->SaveVersion = 22;
 	if (const ABotanicusGameState* BotanicusGameState =
 		World->GetGameState<ABotanicusGameState>())
 	{
@@ -273,6 +275,9 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 	CurrentSaveGame->BuildingActors.Reset();
 	CurrentSaveGame->Paths.Reset();
 	CurrentSaveGame->VisitorZones.Reset();
+	CurrentSaveGame->RefundZones.Reset();
+	CurrentSaveGame->bHasDeliveryZone = false;
+	CurrentSaveGame->DeliveryZoneTransform = FTransform::Identity;
 	CurrentSaveGame->WorldItems.Reset();
 	CurrentSaveGame->RemovedBuildingActorNames =
 		RemovedBuildingActorNames.Array();
@@ -340,6 +345,26 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		SavedZone.ZoneType =
 			static_cast<uint8>(ZoneIt->GetZoneType());
 		SavedZone.BoxExtent = ZoneIt->GetZoneExtent();
+	}
+
+	for (TActorIterator<ABotanicusRefundZoneActor> ZoneIt(World);
+		 ZoneIt;
+		 ++ZoneIt)
+	{
+		FBotanicusSavedRefundZone& SavedZone =
+			CurrentSaveGame->RefundZones.AddDefaulted_GetRef();
+		SavedZone.Transform = ZoneIt->GetActorTransform();
+		SavedZone.BoxExtent = ZoneIt->GetZoneExtent();
+	}
+
+	for (TActorIterator<ABotanicusDeliveryZoneActor> ZoneIt(World);
+		 ZoneIt;
+		 ++ZoneIt)
+	{
+		CurrentSaveGame->bHasDeliveryZone = true;
+		CurrentSaveGame->DeliveryZoneTransform =
+			ZoneIt->GetActorTransform();
+		break;
 	}
 
 	for (TActorIterator<ABotanicusCommunicationDoorActor> DoorIt(World);
@@ -921,6 +946,91 @@ void ABotanicusGameMode::RestoreWorldState()
 		}
 	}
 
+	for (TActorIterator<ABotanicusRefundZoneActor> ZoneIt(World);
+		 ZoneIt;
+		 ++ZoneIt)
+	{
+		ZoneIt->Destroy();
+	}
+	if (CurrentSaveGame->SaveVersion >= 21)
+	{
+		for (const FBotanicusSavedRefundZone& SavedZone :
+			 CurrentSaveGame->RefundZones)
+		{
+			FActorSpawnParameters SpawnParameters;
+			SpawnParameters.SpawnCollisionHandlingOverride =
+				ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			ABotanicusRefundZoneActor* Zone =
+				World->SpawnActor<ABotanicusRefundZoneActor>(
+					ABotanicusRefundZoneActor::StaticClass(),
+					SavedZone.Transform,
+					SpawnParameters);
+			if (Zone)
+			{
+				Zone->InitializeZone(SavedZone.BoxExtent);
+			}
+		}
+	}
+
+	TArray<ABotanicusDeliveryZoneActor*> ExistingDeliveryZones;
+	for (TActorIterator<ABotanicusDeliveryZoneActor> ZoneIt(World);
+		 ZoneIt;
+		 ++ZoneIt)
+	{
+		ExistingDeliveryZones.Add(*ZoneIt);
+	}
+	if (CurrentSaveGame->SaveVersion >= 22 &&
+		CurrentSaveGame->bHasDeliveryZone)
+	{
+		ABotanicusDeliveryZoneActor* DeliveryZone =
+			ExistingDeliveryZones.IsEmpty()
+				? nullptr
+				: ExistingDeliveryZones[0];
+		if (!DeliveryZone)
+		{
+			FActorSpawnParameters SpawnParameters;
+			SpawnParameters.SpawnCollisionHandlingOverride =
+				ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			DeliveryZone =
+				World->SpawnActor<ABotanicusDeliveryZoneActor>(
+					ABotanicusDeliveryZoneActor::StaticClass(),
+					CurrentSaveGame->DeliveryZoneTransform,
+					SpawnParameters);
+		}
+		else
+		{
+			DeliveryZone->SetActorTransform(
+				CurrentSaveGame->DeliveryZoneTransform,
+				false,
+				nullptr,
+				ETeleportType::TeleportPhysics);
+		}
+
+		for (int32 Index = 1;
+			 Index < ExistingDeliveryZones.Num();
+			 ++Index)
+		{
+			if (IsValid(ExistingDeliveryZones[Index]))
+			{
+				ExistingDeliveryZones[Index]->Destroy();
+			}
+		}
+	}
+	else
+	{
+		// A delivery zone placed directly in the level is already a valid
+		// starter zone. Only remove accidental duplicates.
+		for (int32 Index = 1;
+			 Index < ExistingDeliveryZones.Num();
+			 ++Index)
+		{
+			if (IsValid(ExistingDeliveryZones[Index]))
+			{
+				ExistingDeliveryZones[Index]->Destroy();
+			}
+		}
+	}
+
 	TArray<AActor*> ExistingWorldItems;
 	for (TActorIterator<ABotanicusDeliveryParcelActor> ParcelIt(World);
 		 ParcelIt;
@@ -1101,6 +1211,25 @@ void ABotanicusGameMode::EnsureStarterFixtures(
 		ESpawnActorCollisionHandlingMethod::
 			AdjustIfPossibleButAlwaysSpawn;
 	bool bCreatedFixture = false;
+
+	TActorIterator<ABotanicusDeliveryZoneActor> DeliveryZoneIt(World);
+	const bool bHasDeliveryZone = !!DeliveryZoneIt;
+	if (!bHasDeliveryZone)
+	{
+		const FVector Location = ResolveFloorLocation(
+			Pawn->GetActorLocation() -
+				Forward * 650.0f +
+				Right * 500.0f,
+			0.0f);
+		if (World->SpawnActor<ABotanicusDeliveryZoneActor>(
+				ABotanicusDeliveryZoneActor::StaticClass(),
+				Location,
+				Pawn->GetActorRotation(),
+				SpawnParameters))
+		{
+			bCreatedFixture = true;
+		}
+	}
 
 	bool bHasComputer = false;
 	for (TActorIterator<ABotanicusComputerActor> It(World); It; ++It)

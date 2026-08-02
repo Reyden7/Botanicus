@@ -11,6 +11,7 @@
 #include "Sales/BotanicusSalePotActor.h"
 #include "Sales/BotanicusCashRegisterActor.h"
 #include "Sales/BotanicusSelfCheckoutActor.h"
+#include "Storage/BotanicusStorageShelfActor.h"
 
 void UBotanicusItemCatalogSubsystem::Initialize(
 	FSubsystemCollectionBase& Collection)
@@ -22,6 +23,24 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	if (Settings && !Settings->Catalog.IsNull())
 	{
 		LoadedCatalog = Settings->Catalog.LoadSynchronous();
+	}
+	if (LoadedCatalog)
+	{
+		if (FBotanicusItemDefinition* PottingSoil =
+				LoadedCatalog->Items.FindByPredicate(
+					[](const FBotanicusItemDefinition& Definition)
+					{
+						return Definition.ItemKey ==
+							TEXT("PottingSoil");
+					}))
+		{
+			// Runtime migration for catalogues generated before soil was
+			// allowed on the floor. The asset generator writes this value
+			// permanently the next time the catalogue is regenerated.
+			PottingSoil->AllowedPlacementSurfaces =
+				static_cast<int32>(
+					EBotanicusPlacementSurface::Floor);
+		}
 	}
 
 	FBotanicusItemDefinition& LargeTest =
@@ -95,7 +114,9 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	PottingSoil.Price = 25;
 	PottingSoil.DeliveryQuantity = 5;
 	PottingSoil.DeliveryDelaySeconds = 2.0f;
-	PottingSoil.AllowedPlacementSurfaces = 0;
+	PottingSoil.AllowedPlacementSurfaces =
+		static_cast<int32>(
+			EBotanicusPlacementSurface::Floor);
 
 	FBotanicusItemDefinition& BasilSeeds =
 		NativeFallbackItems.AddDefaulted_GetRef();
@@ -163,6 +184,14 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 			"LavenderSeeds",
 			"Graines de lavande"),
 		35,
+		5);
+	AddSeedDefinition(
+		TEXT("SeedPacket_Violet"),
+		NSLOCTEXT(
+			"BotanicusCatalog",
+			"VioletSeeds",
+			"Graines de violette"),
+		38,
 		5);
 
 	FBotanicusItemDefinition& WateringCan =
@@ -321,6 +350,16 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 		TEXT("Purple"),
 		TEXT("Aromatic"),
 		74);
+	AddHarvestDefinition(
+		TEXT("Harvest_Violet"),
+		NSLOCTEXT(
+			"BotanicusCatalog",
+			"VioletHarvest",
+			"Violette"),
+		85,
+		TEXT("Purple"),
+		TEXT("Flowering"),
+		78);
 
 	const auto AddQualityVariants =
 		[this](FName BaseItemKey)
@@ -378,6 +417,7 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	AddQualityVariants(TEXT("Harvest_Orchid"));
 	AddQualityVariants(TEXT("Harvest_Monstera"));
 	AddQualityVariants(TEXT("Harvest_Lavender"));
+	AddQualityVariants(TEXT("Harvest_Violet"));
 
 	FBotanicusItemDefinition& SalesDisplay =
 		NativeFallbackItems.AddDefaulted_GetRef();
@@ -445,6 +485,82 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	PreparationWorkbench.DeliveryQuantity = 1;
 	PreparationWorkbench.DeliveryDelaySeconds = 4.0f;
 	PreparationWorkbench.bPurchasable = false;
+
+	auto AddStorageShelf =
+		[this](
+			FName ItemKey,
+			const FText& DisplayName,
+			const FVector& WorldScale,
+			const FVector& CollisionExtent,
+			int32 Price,
+			bool bWallMounted)
+		{
+			FBotanicusItemDefinition& Shelf =
+				NativeFallbackItems.AddDefaulted_GetRef();
+			Shelf.ItemKey = ItemKey;
+			Shelf.DisplayName = DisplayName;
+			Shelf.Category = EBotanicusItemCategory::Equipment;
+			Shelf.CatalogTabs =
+				static_cast<int32>(EBotanicusCatalogTab::Preparation);
+			Shelf.WorldMesh = TSoftObjectPtr<UStaticMesh>(
+				FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube.Cube")));
+			Shelf.WorldScale = WorldScale;
+			Shelf.WorldActorClass =
+				ABotanicusStorageShelfActor::StaticClass();
+			Shelf.MaximumStack = 1;
+			Shelf.WeightClass =
+				EBotanicusItemWeightClass::OnePlayerCarry;
+			Shelf.CarryMovementSpeedMultiplier = 0.75f;
+			Shelf.Price = Price;
+			Shelf.DeliveryQuantity = 1;
+			Shelf.DeliveryDelaySeconds = 3.0f;
+			Shelf.AllowedPlacementSurfaces =
+				static_cast<int32>(
+					bWallMounted
+						? EBotanicusPlacementSurface::Wall
+						: EBotanicusPlacementSurface::Floor);
+			Shelf.CollisionHalfExtentOverride = CollisionExtent;
+		};
+	AddStorageShelf(
+		TEXT("StorageShelfFloorSmall"),
+		NSLOCTEXT(
+			"BotanicusCatalog",
+			"StorageShelfFloorSmall",
+			"Etagere au sol - 4 places"),
+		FVector(0.6f, 1.7f, 1.5f),
+		FVector(30.0f, 85.0f, 75.0f),
+		180,
+		false);
+	AddStorageShelf(
+		TEXT("StorageShelfFloorLarge"),
+		NSLOCTEXT(
+			"BotanicusCatalog",
+			"StorageShelfFloorLarge",
+			"Etagere au sol - 8 places"),
+		FVector(0.7f, 2.5f, 1.8f),
+		FVector(35.0f, 125.0f, 90.0f),
+		320,
+		false);
+	AddStorageShelf(
+		TEXT("StorageShelfWallSmall"),
+		NSLOCTEXT(
+			"BotanicusCatalog",
+			"StorageShelfWallSmall",
+			"Etagere murale - 3 places"),
+		FVector(0.32f, 1.3f, 0.5f),
+		FVector(16.0f, 65.0f, 25.0f),
+		120,
+		true);
+	AddStorageShelf(
+		TEXT("StorageShelfWallLarge"),
+		NSLOCTEXT(
+			"BotanicusCatalog",
+			"StorageShelfWallLarge",
+			"Etagere murale - 6 places"),
+		FVector(0.36f, 1.9f, 0.96f),
+		FVector(18.0f, 95.0f, 48.0f),
+		220,
+		true);
 
 	FBotanicusItemDefinition& Computer =
 		NativeFallbackItems.AddDefaulted_GetRef();

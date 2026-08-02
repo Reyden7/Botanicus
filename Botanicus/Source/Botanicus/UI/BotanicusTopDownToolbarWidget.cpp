@@ -99,6 +99,14 @@ void UBotanicusTopDownToolbarWidget::RefreshPathState(
 		VisitorCheckoutButton,
 		2,
 		FLinearColor(0.95f, 0.55f, 0.05f, 1.0f));
+	RefreshZoneButton(
+		RefundZoneButton,
+		3,
+		FLinearColor(0.95f, 0.25f, 0.03f, 1.0f));
+	RefreshZoneButton(
+		DeliveryZoneButton,
+		4,
+		FLinearColor(0.95f, 0.72f, 0.08f, 1.0f));
 	if (ConfirmButton)
 	{
 		ConfirmButton->SetIsEnabled(bCanConfirm);
@@ -190,6 +198,8 @@ void UBotanicusTopDownToolbarWidget::BuildLayout()
 	UTextBlock* VisitorParkingLabel = nullptr;
 	UTextBlock* VisitorSalesAreaLabel = nullptr;
 	UTextBlock* VisitorCheckoutLabel = nullptr;
+	UTextBlock* RefundZoneLabel = nullptr;
+	UTextBlock* DeliveryZoneLabel = nullptr;
 	PathButton = AddToolbarButton(
 		WidgetTree,
 		Row,
@@ -232,6 +242,22 @@ void UBotanicusTopDownToolbarWidget::BuildLayout()
 		VisitorRow,
 		NSLOCTEXT("Botanicus", "VisitorCheckoutButton", "CAISSE PNJ"),
 		VisitorCheckoutLabel);
+	RefundZoneButton = AddToolbarButton(
+		WidgetTree,
+		VisitorRow,
+		NSLOCTEXT(
+			"Botanicus",
+			"RefundZoneButton",
+			"REMBOURSEMENT OBJET"),
+		RefundZoneLabel);
+	DeliveryZoneButton = AddToolbarButton(
+		WidgetTree,
+		VisitorRow,
+		NSLOCTEXT(
+			"Botanicus",
+			"DeliveryZoneButton",
+			"ZONE LIVRAISON"),
+		DeliveryZoneLabel);
 
 	PathButton->OnClicked.AddDynamic(
 		this,
@@ -248,6 +274,12 @@ void UBotanicusTopDownToolbarWidget::BuildLayout()
 	VisitorCheckoutButton->OnClicked.AddDynamic(
 		this,
 		&UBotanicusTopDownToolbarWidget::HandleVisitorCheckoutClicked);
+	RefundZoneButton->OnClicked.AddDynamic(
+		this,
+		&UBotanicusTopDownToolbarWidget::HandleRefundZoneClicked);
+	DeliveryZoneButton->OnClicked.AddDynamic(
+		this,
+		&UBotanicusTopDownToolbarWidget::HandleDeliveryZoneClicked);
 	ConfirmButton->OnClicked.AddDynamic(
 		this,
 		&UBotanicusTopDownToolbarWidget::HandleConfirmClicked);
@@ -297,6 +329,22 @@ void UBotanicusTopDownToolbarWidget::HandleVisitorCheckoutClicked()
 	if (BotanicusController)
 	{
 		BotanicusController->BeginVisitorCheckoutPlacement();
+	}
+}
+
+void UBotanicusTopDownToolbarWidget::HandleRefundZoneClicked()
+{
+	if (BotanicusController)
+	{
+		BotanicusController->BeginRefundZonePlacement();
+	}
+}
+
+void UBotanicusTopDownToolbarWidget::HandleDeliveryZoneClicked()
+{
+	if (BotanicusController)
+	{
+		BotanicusController->BeginDeliveryZonePlacement();
 	}
 }
 

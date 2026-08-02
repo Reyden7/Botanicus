@@ -6,6 +6,7 @@
 #include "Components/TextRenderComponent.h"
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
+#include "Sales/BotanicusCashRegisterActor.h"
 #include "Visitors/BotanicusVisitorCharacter.h"
 #include "Visitors/BotanicusVisitorZoneActor.h"
 #include "UObject/ConstructorHelpers.h"
@@ -78,7 +79,8 @@ FVector ABotanicusSelfCheckoutActor::GetCustomerStandLocation() const
 bool ABotanicusSelfCheckoutActor::IsOperational() const
 {
 	return !ActorHasTag(TEXT("BotanicusPlacementPreview")) &&
-		IsInsideCheckoutZone();
+		IsInsideCheckoutZone() &&
+		IsMountedInSelfCheckoutSlot();
 }
 
 ABotanicusVisitorCharacter*
@@ -122,11 +124,43 @@ bool ABotanicusSelfCheckoutActor::IsInsideCheckoutZone() const
 	return false;
 }
 
+bool ABotanicusSelfCheckoutActor::
+	IsMountedInSelfCheckoutSlot() const
+{
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+	for (TActorIterator<ABotanicusCashRegisterActor> RegisterIt(World);
+		 RegisterIt;
+		 ++RegisterIt)
+	{
+		if (!RegisterIt->ActorHasTag(
+				TEXT("BotanicusPlacementPreview")) &&
+			RegisterIt->FindSelfCheckoutSlotIndex(
+				GetActorLocation(),
+				20.0f) != INDEX_NONE)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
 void ABotanicusSelfCheckoutActor::RefreshVisuals()
 {
 	if (!StatusText ||
 		ActorHasTag(TEXT("BotanicusPlacementPreview")))
 	{
+		return;
+	}
+	if (!IsMountedInSelfCheckoutSlot())
+	{
+		StatusText->SetText(FText::FromString(
+			TEXT(
+				"CAISSE AUTO\nA PLACER SUR UN EMPLACEMENT BLEU")));
+		StatusText->SetTextRenderColor(FColor(255, 150, 70));
 		return;
 	}
 	if (!IsInsideCheckoutZone())

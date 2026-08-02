@@ -113,6 +113,62 @@ void ABotanicusPreparationWorkbenchActor::GetLifetimeReplicatedProps(
 		WorkbenchLevel);
 }
 
+bool ABotanicusPreparationWorkbenchActor::CanInteract_Implementation(
+	AActor* Interactor) const
+{
+	return (!HasPreparedPots() || bMoveContentsWithFurniture) &&
+		Super::CanInteract_Implementation(Interactor);
+}
+
+void ABotanicusPreparationWorkbenchActor::BeginPlacement(
+	ABotanicusCharacter* Character)
+{
+	if (bMoveContentsWithFurniture &&
+		MovingPreparedPots.IsEmpty())
+	{
+		CapturePreparedPotTransforms();
+	}
+	Super::BeginPlacement(Character);
+	ApplyPreparedPotTransforms();
+}
+
+void ABotanicusPreparationWorkbenchActor::UpdatePlacement(
+	const FTransform& PlacementTransform,
+	bool bIsValid)
+{
+	Super::UpdatePlacement(PlacementTransform, bIsValid);
+	ApplyPreparedPotTransforms();
+}
+
+void ABotanicusPreparationWorkbenchActor::ConfirmPlacement()
+{
+	Super::ConfirmPlacement();
+	ApplyPreparedPotTransforms();
+	ClearPreparedPotTransforms();
+	bMoveContentsWithFurniture = false;
+}
+
+void ABotanicusPreparationWorkbenchActor::CancelPlacement()
+{
+	Super::CancelPlacement();
+	ApplyPreparedPotTransforms();
+	ClearPreparedPotTransforms();
+	bMoveContentsWithFurniture = false;
+}
+
+void ABotanicusPreparationWorkbenchActor::SetLocalPlacementPreview(
+	const FTransform& PlacementTransform,
+	bool bIsValid)
+{
+	if (bMoveContentsWithFurniture &&
+		MovingPreparedPots.IsEmpty())
+	{
+		CapturePreparedPotTransforms();
+	}
+	Super::SetLocalPlacementPreview(PlacementTransform, bIsValid);
+	ApplyPreparedPotTransforms();
+}
+
 FTransform ABotanicusPreparationWorkbenchActor::
 	GetSalePotPreparationTransform(int32 SlotIndex) const
 {
@@ -232,6 +288,52 @@ void ABotanicusPreparationWorkbenchActor::RestoreWorkbenchLevel(
 	ForceNetUpdate();
 }
 
+bool ABotanicusPreparationWorkbenchActor::HasPreparedPots() const
+{
+	TArray<ABotanicusSalePotActor*> Pots;
+	GetPreparedPots(Pots);
+	return !Pots.IsEmpty();
+}
+
+void ABotanicusPreparationWorkbenchActor::GetPreparedPots(
+	TArray<ABotanicusSalePotActor*>& OutPots) const
+{
+	OutPots.Reset();
+	if (!GetWorld())
+	{
+		return;
+	}
+	for (TActorIterator<ABotanicusSalePotActor> PotIt(GetWorld());
+		 PotIt;
+		 ++PotIt)
+	{
+		if (PotIt->ActorHasTag(TEXT("BotanicusPlacementPreview")))
+		{
+			continue;
+		}
+		if (IsLocationOnPreparationSlot(
+				PotIt->GetActorLocation(),
+				55.0f))
+		{
+			OutPots.Add(*PotIt);
+		}
+	}
+}
+
+void ABotanicusPreparationWorkbenchActor::SetMoveContentsWithFurniture(
+	bool bEnabled)
+{
+	bMoveContentsWithFurniture = bEnabled;
+	if (bEnabled)
+	{
+		CapturePreparedPotTransforms();
+	}
+	else
+	{
+		ClearPreparedPotTransforms();
+	}
+}
+
 bool ABotanicusPreparationWorkbenchActor::IsSlotOccupied(
 	int32 SlotIndex,
 	const ABotanicusSalePotActor* IgnoredPot) const
@@ -323,4 +425,56 @@ void ABotanicusPreparationWorkbenchActor::RefreshLevelVisuals()
 void ABotanicusPreparationWorkbenchActor::OnRep_WorkbenchLevel()
 {
 	RefreshLevelVisuals();
+}
+
+void ABotanicusPreparationWorkbenchActor::CapturePreparedPotTransforms()
+{
+	MovingPreparedPots.Reset();
+	MovingPreparedPotRelativeTransforms.Reset();
+	TArray<ABotanicusSalePotActor*> Pots;
+	GetPreparedPots(Pots);
+	for (ABotanicusSalePotActor* Pot : Pots)
+	{
+		if (!IsValid(Pot))
+		{
+			continue;
+		}
+		MovingPreparedPots.Add(Pot);
+		MovingPreparedPotRelativeTransforms.Add(
+			Pot->GetActorTransform().GetRelativeTransform(
+				GetActorTransform()));
+	}
+}
+
+void ABotanicusPreparationWorkbenchActor::ApplyPreparedPotTransforms()
+{
+	for (int32 Index = 0;
+		 MovingPreparedPots.IsValidIndex(Index) &&
+		 MovingPreparedPotRelativeTransforms.IsValidIndex(Index);
+		 ++Index)
+	{
+		ABotanicusSalePotActor* Pot = MovingPreparedPots[Index].Get();
+		if (!IsValid(Pot))
+		{
+			continue;
+		}
+		Pot->SetActorTransform(
+			MovingPreparedPotRelativeTransforms[Index] *
+				GetActorTransform(),
+			false,
+			nullptr,
+			ETeleportType::TeleportPhysics);
+		if (HasAuthority())
+		{
+			Pot->SetNetDormancy(DORM_Awake);
+			Pot->FlushNetDormancy();
+			Pot->ForceNetUpdate();
+		}
+	}
+}
+
+void ABotanicusPreparationWorkbenchActor::ClearPreparedPotTransforms()
+{
+	MovingPreparedPots.Reset();
+	MovingPreparedPotRelativeTransforms.Reset();
 }
