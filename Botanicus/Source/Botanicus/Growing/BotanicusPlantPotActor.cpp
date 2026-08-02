@@ -11,6 +11,8 @@
 #include "Engine/StaticMesh.h"
 #include "GameFramework/PlayerController.h"
 #include "Growing/BotanicusPlantSubsystem.h"
+#include "Growing/BotanicusWateringCanActor.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
 #include "QuickBar/BotanicusQuickBarComponent.h"
 #include "UObject/ConstructorHelpers.h"
@@ -67,6 +69,17 @@ ABotanicusPlantPotActor::ABotanicusPlantPotActor()
 	StatusText->SetTextRenderColor(FColor(110, 220, 255));
 	StatusText->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
+	ContextActionText = CreateDefaultSubobject<UTextRenderComponent>(
+		TEXT("ContextAction"));
+	ContextActionText->SetupAttachment(SceneRoot);
+	ContextActionText->SetRelativeLocation(FVector(0.0f, 0.0f, 225.0f));
+	ContextActionText->SetHorizontalAlignment(EHTA_Center);
+	ContextActionText->SetVerticalAlignment(EVRTA_TextCenter);
+	ContextActionText->SetWorldSize(18.0f);
+	ContextActionText->SetTextRenderColor(FColor(80, 255, 110));
+	ContextActionText->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	ContextActionText->SetVisibility(false);
+
 	RefreshVisuals();
 }
 
@@ -84,11 +97,20 @@ void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 				: nullptr;
 		if (CameraManager)
 		{
+			const FVector CameraLocation =
+				CameraManager->GetCameraLocation();
 			StatusText->SetWorldRotation(
-				(CameraManager->GetCameraLocation() -
+				(CameraLocation -
 				 StatusText->GetComponentLocation()).Rotation());
+			if (ContextActionText)
+			{
+				ContextActionText->SetWorldRotation(
+					(CameraLocation -
+					 ContextActionText->GetComponentLocation()).Rotation());
+			}
 		}
 	}
+	RefreshLocalContextAction();
 	if (!HasAuthority())
 	{
 		return;
@@ -118,6 +140,7 @@ void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 
 	const float PreviousWater = WaterLevel;
 	const float PreviousGrowth = GrowthProgress;
+	const float PreviousCareScore = CareScore;
 	WaterLevel = FMath::Clamp(
 		WaterLevel -
 			FMath::Max(0.0f, Definition->WaterConsumptionPerSecond) *
@@ -128,6 +151,7 @@ void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 		WaterLevel <= Definition->MaximumHealthyWater &&
 		GrowthProgress < 1.0f)
 	{
+		const float PreviousGrowthForCare = GrowthProgress;
 		GrowthProgress = FMath::Clamp(
 			GrowthProgress +
 				DeltaSeconds /
@@ -136,10 +160,33 @@ void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 						Definition->GrowthDurationSeconds),
 			0.0f,
 			1.0f);
+		const float WaterMidpoint =
+			(Definition->MinimumHealthyWater +
+			 Definition->MaximumHealthyWater) *
+			0.5f;
+		const float WaterHalfRange =
+			FMath::Max(
+				0.01f,
+				(Definition->MaximumHealthyWater -
+				 Definition->MinimumHealthyWater) *
+					0.5f);
+		const float WaterCare =
+			1.0f -
+			FMath::Clamp(
+				FMath::Abs(WaterLevel - WaterMidpoint) /
+					WaterHalfRange,
+				0.0f,
+				1.0f);
+		CareScore = FMath::Clamp(
+			CareScore +
+				(GrowthProgress - PreviousGrowthForCare) * WaterCare,
+			0.0f,
+			1.0f);
 	}
 
 	if (!FMath::IsNearlyEqual(PreviousWater, WaterLevel, 0.0001f) ||
 		!FMath::IsNearlyEqual(PreviousGrowth, GrowthProgress, 0.0001f) ||
+		!FMath::IsNearlyEqual(PreviousCareScore, CareScore, 0.0001f) ||
 		bPrimaryUseChanged)
 	{
 		RefreshVisuals();
@@ -155,9 +202,11 @@ void ABotanicusPlantPotActor::GetLifetimeReplicatedProps(
 	DOREPLIFETIME(ABotanicusPlantPotActor, PlantKey);
 	DOREPLIFETIME(ABotanicusPlantPotActor, WaterLevel);
 	DOREPLIFETIME(ABotanicusPlantPotActor, GrowthProgress);
+	DOREPLIFETIME(ABotanicusPlantPotActor, CareScore);
 	DOREPLIFETIME(ABotanicusPlantPotActor, WateringCount);
 	DOREPLIFETIME(ABotanicusPlantPotActor, SoilFillProgress);
 	DOREPLIFETIME(ABotanicusPlantPotActor, bWateringActive);
+	DOREPLIFETIME(ABotanicusPlantPotActor, HarvestProgress);
 }
 
 FBotanicusInteractionPrompt
@@ -203,8 +252,10 @@ ABotanicusPlantPotActor::GetInteractionPrompt_Implementation(
 	}
 	else
 	{
+		const ABotanicusCharacter* Character =
+			Cast<ABotanicusCharacter>(Interactor);
 		Prompt.ActionText =
-			SelectedItemKey == TEXT("WateringCan")
+			Character && IsValid(Character->GetHeldWateringCan())
 				? NSLOCTEXT(
 					"BotanicusGrowing",
 					"WaterPlant",
@@ -214,17 +265,48 @@ ABotanicusPlantPotActor::GetInteractionPrompt_Implementation(
 					"InspectPlant",
 					"Observer");
 	}
-	// The generic prompt describes E. Pot contents are handled separately by
-	// the controller's left-mouse action.
-	Prompt.ActionText = InteractionAction;
-	Prompt.bCanInteract = IsValid(Interactor);
+	if (IsMature())
+	{
+		const FBotanicusPlantDefinition* Definition =
+			GetPlantDefinition();
+		const FText PlantName =
+			Definition && !Definition->DisplayName.IsEmpty()
+				? Definition->DisplayName
+				: FText::FromName(PlantKey);
+		Prompt.TargetName = PlantName;
+		if (CanHarvestWithInteractor(Interactor))
+		{
+			Prompt.ActionText = FText::Format(
+				NSLOCTEXT(
+					"BotanicusGrowing",
+					"HarvestReady",
+					"Maintenir clic gauche 1 s : utiliser la petite pelle pour recolter {0}"),
+				PlantName);
+			Prompt.bCanInteract = true;
+		}
+		else
+		{
+			Prompt.ActionText = FText::Format(
+				NSLOCTEXT(
+					"BotanicusGrowing",
+					"HarvestNeedsTrowel",
+					"Petite pelle requise pour recolter {0}"),
+				PlantName);
+			Prompt.bCanInteract = false;
+		}
+	}
+	else
+	{
+		Prompt.ActionText = InteractionAction;
+		Prompt.bCanInteract = false;
+	}
 	return Prompt;
 }
 
 bool ABotanicusPlantPotActor::CanInteract_Implementation(
 	AActor* Interactor) const
 {
-	return false;
+	return CanHarvestWithInteractor(Interactor);
 }
 
 void ABotanicusPlantPotActor::Interact_Implementation(AActor* Interactor)
@@ -244,6 +326,10 @@ void ABotanicusPlantPotActor::ConfigureAsLocalPreview(bool bIsValid)
 	if (StatusText)
 	{
 		StatusText->SetVisibility(false);
+	}
+	if (ContextActionText)
+	{
+		ContextActionText->SetVisibility(false);
 	}
 }
 
@@ -320,14 +406,43 @@ void ABotanicusPlantPotActor::BeginPrimaryUse(AActor* Interactor)
 		}
 		PlantKey = Definition->PlantKey;
 		GrowthProgress = 0.02f;
+		CareScore = 0.01f;
 		SendInteractorMessage(
 			Interactor,
 			FString::Printf(
 				TEXT("%s planté. Il faut maintenant arroser."),
 				*Definition->DisplayName.ToString()));
 	}
-	else if (SelectedItemKey == TEXT("WateringCan"))
+	else if (CanHarvestWithInteractor(Interactor))
 	{
+		const FBotanicusPlantDefinition* Definition =
+			GetPlantDefinition();
+		ActivePrimaryUser = Character;
+		PrimaryUseMode = EPrimaryUseMode::Harvest;
+		HarvestProgress = 0.0f;
+		SendInteractorMessage(
+			Interactor,
+			FString::Printf(
+				TEXT(
+					"Maintenez le clic gauche %.1f s pour recolter %s."),
+				Definition
+					? Definition->HarvestDurationSeconds
+					: 1.0f,
+				Definition
+					? *Definition->DisplayName.ToString()
+					: *PlantKey.ToString()));
+	}
+	else if (ABotanicusWateringCanActor* WateringCan =
+		Character->GetHeldWateringCan())
+	{
+		if (!WateringCan->HasWater())
+		{
+			SendInteractorMessage(
+				Interactor,
+				TEXT(
+					"L'arrosoir est vide. Remplissez-le a une reserve d'eau."));
+			return;
+		}
 		const UGameInstance* GameInstance = GetGameInstance();
 		const UBotanicusPlantSubsystem* Plants =
 			GameInstance
@@ -395,10 +510,18 @@ void ABotanicusPlantPotActor::EndPrimaryUse(AActor* Interactor)
 				TEXT("Arrosage arrete : eau %d%%."),
 				FMath::RoundToInt(WaterLevel * 100.0f)));
 	}
+	else if (PrimaryUseMode == EPrimaryUseMode::Harvest &&
+		HarvestProgress > 0.0f)
+	{
+		SendInteractorMessage(
+			Interactor,
+			TEXT("Recolte annulee."));
+	}
 
 	ActivePrimaryUser.Reset();
 	PrimaryUseMode = EPrimaryUseMode::None;
 	SoilFillProgress = 0.0f;
+	HarvestProgress = 0.0f;
 	bWateringActive = false;
 	RefreshVisuals();
 	ForceNetUpdate();
@@ -414,10 +537,7 @@ bool ABotanicusPlantPotActor::UpdatePrimaryUse(float DeltaSeconds)
 	ABotanicusCharacter* Character = ActivePrimaryUser.Get();
 	const bool bCharacterValid =
 		IsValid(Character) &&
-		FVector::DistSquared(
-			Character->GetActorLocation(),
-			GetActorLocation()) <=
-			FMath::Square(450.0f);
+		IsInteractorStillTargeting(Character);
 	const FName SelectedItemKey =
 		bCharacterValid
 			? GetSelectedItemKey(Character)
@@ -458,8 +578,71 @@ bool ABotanicusPlantPotActor::UpdatePrimaryUse(float DeltaSeconds)
 		return true;
 	}
 
+	if (PrimaryUseMode == EPrimaryUseMode::Harvest)
+	{
+		const FBotanicusPlantDefinition* Definition =
+			GetPlantDefinition();
+		if (!bCharacterValid ||
+			!Definition ||
+			!CanHarvestWithInteractor(Character))
+		{
+			EndPrimaryUse(Character);
+			return true;
+		}
+
+		HarvestProgress = FMath::Clamp(
+			HarvestProgress +
+				DeltaSeconds /
+					FMath::Max(
+						0.1f,
+						Definition->HarvestDurationSeconds),
+			0.0f,
+			1.0f);
+		if (HarvestProgress >= 1.0f)
+		{
+			UBotanicusQuickBarComponent* QuickBar =
+				Character->GetQuickBarComponent();
+			int32 AddedSlotIndex = INDEX_NONE;
+			if (!QuickBar ||
+				!QuickBar->AddItem(
+					GetQualityHarvestItemKey(*Definition),
+					FMath::Max(1, Definition->HarvestQuantity),
+					AddedSlotIndex))
+			{
+				SendInteractorMessage(
+					Character,
+					TEXT(
+						"Recolte impossible : liberez de la place dans la hotbar."));
+				EndPrimaryUse(Character);
+				return true;
+			}
+
+			const FString HarvestedPlantName =
+				Definition->DisplayName.ToString();
+			const FString HarvestedQuality =
+				GetPlantQualityLabel();
+			const int32 HarvestedQuantity =
+				FMath::Max(1, Definition->HarvestQuantity);
+			PlantKey = NAME_None;
+			WaterLevel = 0.0f;
+			GrowthProgress = 0.0f;
+			CareScore = 0.0f;
+			WateringCount = 0;
+			HarvestProgress = 0.0f;
+			ActivePrimaryUser.Reset();
+			PrimaryUseMode = EPrimaryUseMode::None;
+			SendInteractorMessage(
+				Character,
+				FString::Printf(
+					TEXT("%s recolte (%s) : x%d ajoute a la hotbar."),
+					*HarvestedPlantName,
+					*HarvestedQuality,
+					HarvestedQuantity));
+		}
+		return true;
+	}
+
 	if (!bCharacterValid ||
-		SelectedItemKey != TEXT("WateringCan") ||
 		PlantKey.IsNone())
 	{
 		EndPrimaryUse(Character);
@@ -479,12 +662,28 @@ bool ABotanicusPlantPotActor::UpdatePrimaryUse(float DeltaSeconds)
 		return true;
 	}
 
+	ABotanicusWateringCanActor* WateringCan =
+		Character->GetHeldWateringCan();
+	if (!IsValid(WateringCan) || !WateringCan->HasWater())
+	{
+		if (IsValid(Character))
+		{
+			SendInteractorMessage(
+				Character,
+				TEXT(
+					"L'arrosoir est vide. L'arrosage s'arrete."));
+		}
+		EndPrimaryUse(Character);
+		return true;
+	}
+
 	WaterLevel = FMath::Clamp(
 		WaterLevel +
 			FMath::Max(0.0f, Definition->WaterAddedPerUse) *
 				DeltaSeconds,
 		0.0f,
 		1.0f);
+	WateringCan->ConsumeWater(0.12f * DeltaSeconds);
 	return true;
 }
 
@@ -504,7 +703,8 @@ void ABotanicusPlantPotActor::RestoreGrowingState(
 	bool bInHasSoil,
 	FName InPlantKey,
 	float InWaterLevel,
-	float InGrowthProgress)
+	float InGrowthProgress,
+	float InCareScore)
 {
 	if (!HasAuthority())
 	{
@@ -514,8 +714,172 @@ void ABotanicusPlantPotActor::RestoreGrowingState(
 	PlantKey = InPlantKey;
 	WaterLevel = FMath::Clamp(InWaterLevel, 0.0f, 1.0f);
 	GrowthProgress = FMath::Clamp(InGrowthProgress, 0.0f, 1.0f);
+	CareScore = FMath::Clamp(InCareScore, 0.0f, 1.0f);
 	RefreshVisuals();
 	ForceNetUpdate();
+}
+
+const FBotanicusPlantDefinition*
+ABotanicusPlantPotActor::GetPlantDefinition() const
+{
+	const UGameInstance* GameInstance = GetGameInstance();
+	const UBotanicusPlantSubsystem* Plants =
+		GameInstance
+			? GameInstance->GetSubsystem<UBotanicusPlantSubsystem>()
+			: nullptr;
+	return Plants ? Plants->FindPlant(PlantKey) : nullptr;
+}
+
+float ABotanicusPlantPotActor::GetCareRating() const
+{
+	return PlantKey.IsNone()
+		? 0.0f
+		: FMath::Clamp(
+			CareScore / FMath::Max(0.02f, GrowthProgress),
+			0.0f,
+			1.0f);
+}
+
+FName ABotanicusPlantPotActor::GetPlantQualityTag() const
+{
+	const float Rating = GetCareRating();
+	if (Rating >= 0.80f)
+	{
+		return TEXT("Exceptional");
+	}
+	if (Rating >= 0.50f)
+	{
+		return TEXT("Beautiful");
+	}
+	return TEXT("Standard");
+}
+
+FString ABotanicusPlantPotActor::GetPlantQualityLabel() const
+{
+	const FName Quality = GetPlantQualityTag();
+	if (Quality == TEXT("Exceptional"))
+	{
+		return TEXT("EXCEPTIONNELLE");
+	}
+	if (Quality == TEXT("Beautiful"))
+	{
+		return TEXT("BELLE");
+	}
+	return TEXT("STANDARD");
+}
+
+FName ABotanicusPlantPotActor::GetQualityHarvestItemKey(
+	const FBotanicusPlantDefinition& Definition) const
+{
+	FString Key = Definition.HarvestItemKey.ToString();
+	const FName Quality = GetPlantQualityTag();
+	if (Quality == TEXT("Beautiful"))
+	{
+		Key += TEXT("_Beautiful");
+	}
+	else if (Quality == TEXT("Exceptional"))
+	{
+		Key += TEXT("_Exceptional");
+	}
+	return FName(*Key);
+}
+
+bool ABotanicusPlantPotActor::CanHarvestWithInteractor(
+	AActor* Interactor) const
+{
+	if (!IsMature())
+	{
+		return false;
+	}
+	const FBotanicusPlantDefinition* Definition =
+		GetPlantDefinition();
+	return Definition &&
+		!Definition->HarvestItemKey.IsNone() &&
+		!Definition->HarvestToolItemKey.IsNone() &&
+		GetSelectedItemKey(Interactor) ==
+			Definition->HarvestToolItemKey;
+}
+
+bool ABotanicusPlantPotActor::IsInteractorStillTargeting(
+	AActor* Interactor) const
+{
+	const APawn* Pawn = Cast<APawn>(Interactor);
+	const APlayerController* Controller =
+		Pawn ? Cast<APlayerController>(Pawn->GetController()) : nullptr;
+	UWorld* World = GetWorld();
+	if (!Pawn || !Controller || !World)
+	{
+		return false;
+	}
+
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	Controller->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	FVector TargetOrigin;
+	FVector TargetExtent;
+	GetActorBounds(true, TargetOrigin, TargetExtent);
+	const FVector ToTarget = TargetOrigin - ViewLocation;
+	const float Distance = ToTarget.Size();
+	if (Distance <= KINDA_SMALL_NUMBER ||
+		Distance > 450.0f ||
+		FVector::DotProduct(
+			ViewRotation.Vector(),
+			ToTarget / Distance) <
+			FMath::Cos(FMath::DegreesToRadians(22.0f)))
+	{
+		return false;
+	}
+
+	FCollisionQueryParams QueryParams(
+		SCENE_QUERY_STAT(BotanicusPlantPotHeldAction),
+		false);
+	QueryParams.AddIgnoredActor(Pawn);
+	FHitResult Hit;
+	return World->LineTraceSingleByChannel(
+			Hit,
+			ViewLocation,
+			TargetOrigin,
+			ECC_Visibility,
+			QueryParams) &&
+		Hit.GetActor() == this;
+}
+
+void ABotanicusPlantPotActor::RefreshLocalContextAction()
+{
+	if (!ContextActionText ||
+		ActorHasTag(TEXT("BotanicusPlacementPreview")))
+	{
+		return;
+	}
+
+	const UWorld* World = GetWorld();
+	const APlayerController* Controller =
+		World ? World->GetFirstPlayerController() : nullptr;
+	APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
+	const bool bShowAction =
+		IsValid(Pawn) &&
+		IsInteractorStillTargeting(Pawn) &&
+		CanHarvestWithInteractor(Pawn);
+	ContextActionText->SetVisibility(bShowAction);
+	if (!bShowAction)
+	{
+		return;
+	}
+
+	const FBotanicusPlantDefinition* Definition =
+		GetPlantDefinition();
+	const FString PlantName =
+		Definition && !Definition->DisplayName.IsEmpty()
+			? Definition->DisplayName.ToString()
+			: PlantKey.ToString();
+	ContextActionText->SetText(
+		FText::FromString(
+			FString::Printf(
+				TEXT(
+					"MAINTENIR CLIC GAUCHE 1 S\nUTILISER PETITE PELLE POUR RECOLTER %s"),
+				*PlantName.ToUpper())));
+	ContextActionText->SetTextRenderColor(
+		FColor(80, 255, 110));
 }
 
 FName ABotanicusPlantPotActor::GetSelectedItemKey(
@@ -537,9 +901,30 @@ void ABotanicusPlantPotActor::RefreshVisuals()
 		SoilMesh->SetVisibility(bHasSoil);
 	}
 	const bool bHasPlant = !PlantKey.IsNone();
+	const FBotanicusPlantDefinition* Definition =
+		GetPlantDefinition();
+	float HeightMultiplier = 1.0f;
+	FVector FoliageShape(1.0f, 1.0f, 0.7f);
+	if (PlantKey == TEXT("Orchid"))
+	{
+		HeightMultiplier = 1.15f;
+		FoliageShape = FVector(0.7f, 0.7f, 1.3f);
+	}
+	else if (PlantKey == TEXT("Monstera"))
+	{
+		HeightMultiplier = 0.9f;
+		FoliageShape = FVector(1.55f, 1.3f, 0.65f);
+	}
+	else if (PlantKey == TEXT("Lavender"))
+	{
+		HeightMultiplier = 1.3f;
+		FoliageShape = FVector(0.62f, 0.62f, 1.5f);
+	}
 	const float VisualGrowth =
 		FMath::Clamp(GrowthProgress, 0.02f, 1.0f);
-	const float StemHeight = FMath::Lerp(8.0f, 80.0f, VisualGrowth);
+	const float StemHeight =
+		FMath::Lerp(8.0f, 80.0f, VisualGrowth) *
+		HeightMultiplier;
 	if (StemMesh)
 	{
 		StemMesh->SetVisibility(bHasPlant);
@@ -556,7 +941,22 @@ void ABotanicusPlantPotActor::RefreshVisuals()
 		const float FoliageScale =
 			FMath::Lerp(0.06f, 0.32f, VisualGrowth);
 		FoliageMesh->SetRelativeScale3D(
-			FVector(FoliageScale, FoliageScale, FoliageScale * 0.7f));
+			FoliageShape * FoliageScale);
+		if (Definition)
+		{
+			if (!FoliageMaterial)
+			{
+				FoliageMaterial =
+					FoliageMesh->
+						CreateAndSetMaterialInstanceDynamic(0);
+			}
+			if (FoliageMaterial)
+			{
+				FoliageMaterial->SetVectorParameterValue(
+					TEXT("Color"),
+					Definition->MatureColor);
+			}
+		}
 	}
 	if (StatusText)
 	{
@@ -571,16 +971,27 @@ void ABotanicusPlantPotActor::RefreshVisuals()
 		{
 			ActionStatus = TEXT("ARROSAGE EN COURS");
 		}
+		else if (HarvestProgress > 0.0f)
+		{
+			ActionStatus = FString::Printf(
+				TEXT("RECOLTE %d%%"),
+				FMath::RoundToInt(HarvestProgress * 100.0f));
+		}
 		StatusText->SetText(
 			FText::FromString(
 				FString::Printf(
 					TEXT(
-						"TERREAU : %s\nGRAINE : %s\nARROSAGES : %d\nEAU : %d%%\nCROISSANCE : %d%%\nACTION : %s"),
+						"TERREAU : %s\nPLANTE : %s\nARROSAGES : %d\nEAU : %d%%\nCROISSANCE : %d%%\nQUALITE ESTIMEE : %s\nACTION : %s"),
 					bHasSoil ? TEXT("OUI") : TEXT("NON"),
-					bHasPlant ? TEXT("OUI") : TEXT("NON"),
+					Definition
+						? *Definition->DisplayName.ToString().ToUpper()
+						: TEXT("NON"),
 					WateringCount,
 					FMath::RoundToInt(WaterLevel * 100.0f),
 					FMath::RoundToInt(GrowthProgress * 100.0f),
+					PlantKey.IsNone()
+						? TEXT("-")
+						: *GetPlantQualityLabel(),
 					*ActionStatus)));
 		StatusText->SetTextRenderColor(
 			bHasSoil

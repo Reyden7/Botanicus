@@ -21,6 +21,30 @@ struct BOTANICUS_API FBotanicusPlantDefinition
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Identity")
 	FText DisplayName;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Harvest")
+	FName HarvestToolItemKey = TEXT("GardenTrowel");
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Harvest")
+	FName HarvestItemKey = NAME_None;
+
+	/** Soil required when repotting this whole plant into a sale pot. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Sales")
+	FName CompatibleSaleSoilItemKey = TEXT("PottingSoil");
+
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category="Harvest",
+		meta=(ClampMin="1"))
+	int32 HarvestQuantity = 1;
+
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category="Harvest",
+		meta=(ClampMin="0.1", Units="s"))
+	float HarvestDurationSeconds = 1.0f;
+
 	UPROPERTY(
 		EditAnywhere,
 		BlueprintReadOnly,
@@ -70,6 +94,8 @@ public:
 	const FBotanicusPlantDefinition* FindPlant(FName PlantKey) const;
 	const FBotanicusPlantDefinition* FindPlantBySeed(
 		FName SeedItemKey) const;
+	const FBotanicusPlantDefinition* FindPlantByHarvestItem(
+		FName HarvestItemKey) const;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Catalog")
 	TArray<FBotanicusPlantDefinition> Plants;

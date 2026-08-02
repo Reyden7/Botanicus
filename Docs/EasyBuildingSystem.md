@@ -198,9 +198,9 @@ Each entry defines:
 - an optional collision half-extent override for meshes whose automatic bounds
   do not represent their usable footprint.
 
-`SeedPacket_Test` and `LargeEquipment_Test` are already present and native
-fallback definitions keep tests operational even if the catalogue asset is
-temporarily unavailable. The hotbar now fills existing compatible stacks up to
+`SeedPacket_Basil` and `LargeEquipment_Test` are present, and native fallback
+definitions keep gameplay operational if the catalogue asset is temporarily
+unavailable. The hotbar now fills existing compatible stacks up to
 the catalogue maximum before using another slot, and refuses a delivery
 atomically if the complete quantity cannot fit. Runtime actors load their mesh,
 scale and display name from the same definition. Catalogue weight and placement
@@ -208,13 +208,28 @@ rules are validated again by the server.
 
 ## Catalogue orders and delivery
 
-The top-down toolbar exposes one `CATALOGUE COMMANDES` button. It opens a native
-catalogue screen populated entirely from the configured Item Data asset. Each
+The planning toolbar now exposes one unified `PANNEAU DE COMMANDE`. Its
+catalogue is organized into five tabs:
+
+- `GRAINES`;
+- `OUTILS DE JARDINAGE`;
+- `PREPARATION`;
+- `VENTE`;
+- `BATIMENTS`.
+
+An item can belong to more than one tab. Potting soil currently appears in
+both preparation and sales. The buildings tab reuses the same
+server-authoritative purchase, development-level, refund and placement flow
+as the former standalone building catalogue. Prototype-only test items remain
+available to native tests but are hidden from the purchasable panel.
+
+The unified button opens a native catalogue screen populated entirely from the
+configured Item Data asset. Each
 row shows the item name, weight class, delivered quantity, price and delivery
-delay. The screen also shows the player's current credit balance and a live
+delay. The screen also shows the shared nursery balance and a live
 countdown for every pending delivery.
 
-Players currently begin a session with 2,000 credits. This default can be
+The nursery currently begins a new session with 2,000 shared credits. This default can be
 changed on the player-controller defaults with `Starting Funds`. Pressing
 `COMMANDER` sends only the stable item key to the authoritative server. The
 server resolves the catalogue definition again, validates the balance, deducts
@@ -230,11 +245,11 @@ delivery pad and spawns the correct delivery actor:
 
 If the server cannot create the delivery actor, it removes the pending order
 and refunds its exact charged price. Multiple orders can be pending at the same
-time. Pending-order state and credits are private to the owning player; delivered
-world actors remain replicated to everyone.
+time. Pending orders remain private to the player who placed them, while the
+wallet and delivered world actors are shared by everyone.
 
-Credits and pending orders are stored per platform player identity in autosave
-version 4. On restart or reconnection, the server restores the exact balance,
+Pending orders are stored per platform player identity. Save version 10 stores
+one shared nursery wallet. On restart or reconnection, the server restores the exact balance,
 recreates every delivery timer from its saved remaining duration and continues
 the queue. Version 3 saves migrate safely by assigning the configured starting
 balance and an empty order queue. Editor PIE sessions use stable local/remote
@@ -250,8 +265,7 @@ the parcel in place.
 Delivery parcels show a yellow `[ E ]` world indicator only while the local
 player is within range and looking toward them.
 
-`SeedPacket_Test` currently delivers ten units so it can demonstrate quantity
-handling. With
+`SeedPacket_Basil` delivers several units in one parcel. With
 the slot selected, `A` opens a local ground-placement preview. The mouse wheel
 rotates it in 5-degree steps (`Shift` gives 1-degree steps), green guide lines
 show nearby item alignment, left click asks the server to place it, and right

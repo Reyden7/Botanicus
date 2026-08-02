@@ -10,6 +10,14 @@ class USplineComponent;
 class USplineMeshComponent;
 class UStaticMesh;
 class UMaterialInterface;
+class UMaterialInstanceDynamic;
+
+UENUM(BlueprintType)
+enum class EBotanicusPathType : uint8
+{
+	Standard,
+	VisitorRoute
+};
 
 /** Replicated spline path created from the top-down planning view. */
 UCLASS()
@@ -23,8 +31,14 @@ public:
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
-	void InitializeConfirmedPath(const TArray<FVector>& WorldPoints);
-	void SetPreviewPath(const TArray<FVector>& WorldPoints);
+	void InitializeConfirmedPath(
+		const TArray<FVector>& WorldPoints,
+		EBotanicusPathType InPathType =
+			EBotanicusPathType::Standard);
+	void SetPreviewPath(
+		const TArray<FVector>& WorldPoints,
+		EBotanicusPathType InPathType =
+			EBotanicusPathType::Standard);
 	void AddJunctionPoint(const FVector& WorldPoint);
 	void RestoreJunctionPoints(const TArray<FVector>& WorldPoints);
 
@@ -40,6 +54,11 @@ public:
 		FVector& OutClosestPoint,
 		float& OutDistance) const;
 	bool IsPreviewPath() const { return bPreviewPath; }
+	EBotanicusPathType GetPathType() const { return PathType; }
+	bool IsVisitorRoute() const
+	{
+		return PathType == EBotanicusPathType::VisitorRoute;
+	}
 
 protected:
 	virtual void OnConstruction(const FTransform& Transform) override;
@@ -51,9 +70,13 @@ private:
 	UFUNCTION()
 	void OnRep_JunctionPoints();
 
+	UFUNCTION()
+	void OnRep_PathType();
+
 	void SetPathPointsInternal(
 		const TArray<FVector>& WorldPoints,
-		bool bIsPreview);
+		bool bIsPreview,
+		EBotanicusPathType InPathType);
 	void RebuildPathMeshes();
 
 	UPROPERTY(VisibleAnywhere, Category="Botanicus|Path")
@@ -65,6 +88,10 @@ private:
 	UPROPERTY(ReplicatedUsing=OnRep_JunctionPoints)
 	TArray<FVector_NetQuantize10> JunctionPoints;
 
+	UPROPERTY(ReplicatedUsing=OnRep_PathType)
+	EBotanicusPathType PathType =
+		EBotanicusPathType::Standard;
+
 	UPROPERTY()
 	TObjectPtr<UStaticMesh> SegmentMesh;
 
@@ -73,6 +100,9 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UMaterialInterface> PathMaterial;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> DynamicPathMaterial;
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<USplineMeshComponent>> SegmentComponents;

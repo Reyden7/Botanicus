@@ -13,6 +13,7 @@ class UCameraComponent;
 class UInputAction;
 class UBotanicusInteractionComponent;
 class UBotanicusQuickBarComponent;
+class ABotanicusWateringCanActor;
 struct FInputActionValue;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogTemplateCharacter, Log, All);
@@ -143,6 +144,15 @@ public:
 			EBotanicusEquipmentCarryRole::None;
 	}
 
+	UFUNCTION(BlueprintPure, Category="Botanicus|Tools")
+	ABotanicusWateringCanActor* GetHeldWateringCan() const
+	{
+		return HeldWateringCan;
+	}
+
+	/** Server-only link used by physical handheld tools. */
+	void SetHeldWateringCan(ABotanicusWateringCanActor* InWateringCan);
+
 	UFUNCTION(
 		BlueprintImplementableEvent,
 		Category="Botanicus|Equipment Carry",
@@ -165,6 +175,9 @@ private:
 	UPROPERTY(ReplicatedUsing=OnRep_EquipmentCarryRole)
 	EBotanicusEquipmentCarryRole EquipmentCarryRole =
 		EBotanicusEquipmentCarryRole::None;
+
+	UPROPERTY(Replicated)
+	TObjectPtr<ABotanicusWateringCanActor> HeldWateringCan;
 
 	float DefaultMaxWalkSpeed = 0.0f;
 };

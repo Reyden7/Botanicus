@@ -20,7 +20,7 @@ ABotanicusDeliveryZoneActor::ABotanicusDeliveryZoneActor()
 	Pad->SetupAttachment(Root);
 	Pad->SetCollisionProfileName(TEXT("BlockAll"));
 	Pad->SetRelativeLocation(FVector(0.0f, 0.0f, 8.0f));
-	Pad->SetRelativeScale3D(FVector(3.5f, 3.5f, 0.15f));
+	Pad->SetRelativeScale3D(FVector(4.8f, 4.8f, 0.15f));
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(
 		TEXT("/Engine/BasicShapes/Cube.Cube"));
@@ -37,7 +37,7 @@ FVector ABotanicusDeliveryZoneActor::GetParcelSpawnLocation(
 	const int32 Row = FMath::Abs(ParcelIndex) / 3;
 	return GetActorLocation() +
 		FVector(
-			(Column - 1) * 95.0f,
-			(Row % 3 - 1) * 95.0f,
-			75.0f);
+			(Column - 1) * 160.0f,
+			(Row % 3 - 1) * 160.0f,
+			16.0f);
 }

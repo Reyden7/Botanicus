@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
+#include "Path/BotanicusPathActor.h"
 #include "BotanicusPlayerController.generated.h"
 
 class UInputMappingContext;
@@ -14,6 +15,9 @@ class UBotanicusTopDownToolbarWidget;
 class UBotanicusCarryProgressWidget;
 class UBotanicusOrderCatalogWidget;
 class UBotanicusBuildingCatalogWidget;
+class UBotanicusSharedFundsWidget;
+class UBotanicusShopObjectivesWidget;
+class ABotanicusGameState;
 class ACameraActor;
 class AActor;
 class ABotanicusPathActor;
@@ -23,6 +27,10 @@ class ABotanicusDeliveryZoneActor;
 class ABotanicusLargeEquipmentActor;
 class ABotanicusPlaceableItemActor;
 class ABotanicusPlantPotActor;
+class ABotanicusSalesDisplayActor;
+class ABotanicusSalePotActor;
+class ABotanicusWateringCanActor;
+class ABotanicusWaterReserveActor;
 class UActorComponent;
 class UMaterialInterface;
 class UPrimitiveComponent;
@@ -114,6 +122,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Path")
 	void BeginPathPlacement();
 
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Visitors")
+	void BeginVisitorRoutePlacement();
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Visitors")
+	void BeginVisitorParkingPlacement();
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Visitors")
+	void BeginVisitorSalesAreaPlacement();
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Visitors")
+	void BeginVisitorCheckoutPlacement();
+
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Path")
 	void ConfirmPathPlacement();
 
@@ -125,6 +145,7 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Path")
 	void CancelPathDeletion();
+	void CancelVisitorZonePlacement();
 
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Building")
 	void ToggleBuildingCatalog();
@@ -139,7 +160,47 @@ public:
 	void PlaceCatalogOrder(FName ItemKey);
 
 	UFUNCTION(BlueprintPure, Category="Botanicus|Delivery")
-	int32 GetAvailableFunds() const { return AvailableFunds; }
+	int32 GetAvailableFunds() const;
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Shop")
+	int32 GetMainShopLevel() const;
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Shop")
+	bool IsMainShopOpen() const;
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Shop")
+	void ToggleMainShopOpen();
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Shop")
+	int32 GetMainShopVisitorCapacity() const;
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Shop")
+	int32 GetTargetVisitorPopulation() const;
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Shop")
+	int32 GetMainShopUpgradeCost() const;
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Shop")
+	int32 GetMainShopRequiredPlantSales() const;
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Shop")
+	int32 GetMainShopRequiredCatalogOrders() const;
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Shop")
+	int32 GetTotalPlantsSold() const;
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Shop")
+	int32 GetTotalCatalogOrders() const;
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Shop")
+	bool CanUpgradeMainShop() const;
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Shop")
+	void UpgradeMainShop();
+
+	/** Development helper exposed by the command panel. */
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Development")
+	void AddTestCredits();
 
 	UFUNCTION(BlueprintPure, Category="Botanicus|Building")
 	int32 GetBuildingProgressionLevel() const
@@ -165,6 +226,9 @@ public:
 		int32 RestoredFunds,
 		const TArray<FBotanicusPendingOrder>& RestoredOrders,
 		int32 RestoredBuildingProgressionLevel = 1);
+
+	/** Server-only reward issued when a prepared plant is sold. */
+	void CreditPlantSale(FName PlantItemKey, int32 SalePrice);
 
 	/** Cancels and refunds an unconfirmed building before logout is saved. */
 	void CancelPendingBuildingPurchaseForLogout();
@@ -232,9 +296,14 @@ protected:
 	void ExitBuildingTopDownView();
 	void ForceFirstPersonView();
 	void InitializeQuickBarWidget();
+	void InitializeSharedFundsWidget();
+	void InitializeShopObjectivesWidget();
 	void InitializeTopDownToolbarWidget();
 	void InitializeOrderCatalogWidget();
 	void InitializeBuildingCatalogWidget();
+	void BeginPathPlacementInternal(EBotanicusPathType PathType);
+	void BeginVisitorZonePlacement(int32 ZoneType);
+	void PlaceVisitorZoneAtCursor();
 	void HideEbsDemoHud();
 	void RefreshTopDownRoofVisibility();
 	void RestoreTopDownRoofVisibility();
@@ -266,12 +335,33 @@ protected:
 	void UpdateBuildingGroupPreview(float DeltaTime);
 	void UpdateCommunicationDoorPreview();
 	bool TryCollectNearbyDeliveryParcel();
+	void BeginParcelMoveCharge(
+		ABotanicusDeliveryParcelActor* Parcel);
+	void UpdateParcelMoveCharge(float DeltaTime);
+	void CancelParcelMoveCharge();
+	void BeginDeliveryParcelMove(
+		ABotanicusDeliveryParcelActor* Parcel);
+	void UpdateDeliveryParcelPlacement(float DeltaTime);
+	void RotateDeliveryParcelPlacement(float Direction);
+	void ConfirmDeliveryParcelPlacement();
+	void CancelDeliveryParcelPlacement();
+	bool ResolveDeliveryParcelPlacement(
+		const ABotanicusDeliveryParcelActor* Parcel,
+		const FVector& RequestedLocation,
+		float RequestedYaw,
+		FTransform& OutTransform) const;
+	bool TryHandleNearbyWateringCan();
+	bool TryRefillHeldWateringCan();
 	bool TryMoveNearbyPlaceableItem();
 	void BeginPlaceableItemMoveCharge(
 		ABotanicusPlaceableItemActor* WorldItem);
 	void UpdatePlaceableItemMoveCharge(float DeltaTime);
 	void CancelPlaceableItemMoveCharge();
 	bool TryBeginNearbyPlantPotAction();
+	bool TryBeginNearbySalePotAction();
+	bool TryBeginNearbyParcelCut();
+	void EndParcelCut();
+	bool TryPlacePlantOnNearbySalesDisplay();
 	void EndPlantPotAction();
 	bool TryHandleNearbyLargeEquipment();
 	void BeginEquipmentCarryCharge(
@@ -353,6 +443,36 @@ protected:
 		ABotanicusDeliveryParcelActor* Parcel);
 
 	UFUNCTION(Server, Reliable)
+	void ServerBeginDeliveryParcelMove(
+		ABotanicusDeliveryParcelActor* Parcel);
+
+	UFUNCTION(Server, Reliable)
+	void ServerConfirmDeliveryParcelMove(
+		ABotanicusDeliveryParcelActor* Parcel,
+		FVector_NetQuantize10 RequestedLocation,
+		float RequestedYaw);
+
+	UFUNCTION(Server, Reliable)
+	void ServerCancelDeliveryParcelMove(
+		ABotanicusDeliveryParcelActor* Parcel);
+
+	UFUNCTION(Server, Reliable)
+	void ServerBeginParcelCut(
+		ABotanicusDeliveryParcelActor* Parcel);
+
+	UFUNCTION(Server, Reliable)
+	void ServerEndParcelCut(
+		ABotanicusDeliveryParcelActor* Parcel);
+
+	UFUNCTION(Server, Reliable)
+	void ServerToggleWateringCan(
+		ABotanicusWateringCanActor* WateringCan);
+
+	UFUNCTION(Server, Reliable)
+	void ServerRefillWateringCan(
+		ABotanicusWaterReserveActor* WaterReserve);
+
+	UFUNCTION(Server, Reliable)
 	void ServerBeginPlantPotAction(
 		ABotanicusPlantPotActor* PlantPot);
 
@@ -361,7 +481,28 @@ protected:
 		ABotanicusPlantPotActor* PlantPot);
 
 	UFUNCTION(Server, Reliable)
+	void ServerBeginSalePotAction(
+		ABotanicusSalePotActor* SalePot);
+
+	UFUNCTION(Server, Reliable)
+	void ServerEndSalePotAction(
+		ABotanicusSalePotActor* SalePot);
+
+	UFUNCTION(Server, Reliable)
+	void ServerPlacePlantOnSalesDisplay(
+		ABotanicusSalesDisplayActor* SalesDisplay);
+
+	UFUNCTION(Server, Reliable)
 	void ServerPlaceCatalogOrder(FName ItemKey);
+
+	UFUNCTION(Server, Reliable)
+	void ServerUpgradeMainShop();
+
+	UFUNCTION(Server, Reliable)
+	void ServerSetMainShopOpen(bool bOpen);
+
+	UFUNCTION(Server, Reliable)
+	void ServerAddTestCredits();
 
 	/** Legacy implementations kept binary-local while old test entry points are retired. */
 	void ServerOrderTestDelivery_Implementation();
@@ -472,7 +613,13 @@ protected:
 
 	UFUNCTION(Server, Reliable)
 	void ServerCreatePath(
-		const TArray<FVector_NetQuantize10>& RequestedPoints);
+		const TArray<FVector_NetQuantize10>& RequestedPoints,
+		uint8 RequestedPathType);
+
+	UFUNCTION(Server, Reliable)
+	void ServerCreateVisitorZone(
+		FVector_NetQuantize10 RequestedLocation,
+		uint8 RequestedZoneType);
 
 	UFUNCTION(Server, Reliable)
 	void ServerDeletePathSegment(
@@ -575,9 +722,6 @@ protected:
 	int32 DevelopmentLevelRewardCredits = 500;
 
 	UPROPERTY(ReplicatedUsing=OnRep_OrderState)
-	int32 AvailableFunds = 0;
-
-	UPROPERTY(ReplicatedUsing=OnRep_OrderState)
 	TArray<FBotanicusPendingOrder> PendingOrders;
 
 	UPROPERTY(ReplicatedUsing=OnRep_OrderState)
@@ -647,6 +791,14 @@ protected:
 		CarryProgressWidget;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UBotanicusSharedFundsWidget>
+		SharedFundsWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBotanicusShopObjectivesWidget>
+		ShopObjectivesWidget;
+
+	UPROPERTY(Transient)
 	TObjectPtr<ABotanicusPlaceableItemActor>
 		LocalQuickBarItemPreview;
 
@@ -665,6 +817,30 @@ protected:
 	UPROPERTY(Transient)
 	TObjectPtr<ABotanicusPlantPotActor>
 		LocalActivePlantPot;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ABotanicusSalePotActor>
+		LocalActiveSalePot;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ABotanicusDeliveryParcelActor>
+		LocalActiveParcelCut;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ABotanicusDeliveryParcelActor>
+		LocalParcelMoveCandidate;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ABotanicusDeliveryParcelActor>
+		LocalParcelMovePreview;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ABotanicusDeliveryParcelActor>
+		LocalMovedDeliveryParcel;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ABotanicusDeliveryParcelActor>
+		ServerMovedDeliveryParcel;
 
 	TArray<FTransform> LocalBuildingOriginalTransforms;
 	TArray<FTransform> ServerBuildingOriginalTransforms;
@@ -690,12 +866,17 @@ protected:
 	float QuickBarItemPreviewUpdateAccumulator = 0.0f;
 	float EquipmentCarryChargeElapsed = 0.0f;
 	float PlaceableItemMoveChargeElapsed = 0.0f;
+	float ParcelMoveChargeElapsed = 0.0f;
+	float ParcelPlacementYaw = 0.0f;
+	float ParcelPreviewUpdateAccumulator = 0.0f;
 	float TopDownRoofRefreshAccumulator = 0.0f;
 	bool bLocalLargeEquipmentPlacementValid = false;
 	bool bLocalQuickBarItemPlacementValid = false;
+	bool bLocalParcelPlacementValid = false;
 	bool bEquipmentCarryHoldActivated = false;
 	bool bEquipmentCarryKeyHeld = false;
 	bool bPlantPotActionHeld = false;
+	bool bParcelCutActionHeld = false;
 	bool bCatalogOrderStateRestored = false;
 	int32 LocalQuickBarItemSlotIndex = INDEX_NONE;
 	FGuid LocalQuickBarItemInstanceId;
@@ -709,6 +890,9 @@ protected:
 	bool bBuildingTopDownViewActive = false;
 	bool bPathPlacementActive = false;
 	bool bPathDeletionActive = false;
+	EBotanicusPathType PendingPathType =
+		EBotanicusPathType::Standard;
+	int32 PendingVisitorZoneType = INDEX_NONE;
 	bool bCommunicationDoorPlacementActive = false;
 	bool bAzertyForwardPressed = false;
 	bool bAzertyBackwardPressed = false;

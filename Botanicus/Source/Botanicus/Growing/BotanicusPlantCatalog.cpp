@@ -21,3 +21,14 @@ UBotanicusPlantCatalog::FindPlantBySeed(FName SeedItemKey) const
 			return Definition.SeedItemKey == SeedItemKey;
 		});
 }
+
+const FBotanicusPlantDefinition*
+UBotanicusPlantCatalog::FindPlantByHarvestItem(
+	FName HarvestItemKey) const
+{
+	return Plants.FindByPredicate(
+		[HarvestItemKey](const FBotanicusPlantDefinition& Definition)
+		{
+			return Definition.HarvestItemKey == HarvestItemKey;
+		});
+}

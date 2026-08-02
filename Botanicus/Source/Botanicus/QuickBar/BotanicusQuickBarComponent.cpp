@@ -3,6 +3,7 @@
 #include "QuickBar/BotanicusQuickBarComponent.h"
 
 #include "BotanicusPlayerController.h"
+#include "BotanicusGameMode.h"
 #include "Catalog/BotanicusItemCatalogSubsystem.h"
 #include "Engine/GameInstance.h"
 #include "GameFramework/Pawn.h"
@@ -101,6 +102,11 @@ bool UBotanicusQuickBarComponent::SetSlotItem(int32 SlotIndex, FName ItemKey)
 	}
 
 	OwnerActor->ForceNetUpdate();
+	if (ABotanicusGameMode* GameMode =
+		GetWorld()->GetAuthGameMode<ABotanicusGameMode>())
+	{
+		GameMode->ScheduleInventoryAutosave();
+	}
 	return true;
 }
 
@@ -126,6 +132,11 @@ bool UBotanicusQuickBarComponent::ClearSlot(int32 SlotIndex)
 	}
 
 	OwnerActor->ForceNetUpdate();
+	if (ABotanicusGameMode* GameMode =
+		GetWorld()->GetAuthGameMode<ABotanicusGameMode>())
+	{
+		GameMode->ScheduleInventoryAutosave();
+	}
 	return true;
 }
 
@@ -233,6 +244,11 @@ bool UBotanicusQuickBarComponent::AddItem(
 		BroadcastSelection();
 	}
 	OwnerActor->ForceNetUpdate();
+	if (ABotanicusGameMode* GameMode =
+		GetWorld()->GetAuthGameMode<ABotanicusGameMode>())
+	{
+		GameMode->ScheduleInventoryAutosave();
+	}
 	return RemainingQuantity == 0;
 }
 
@@ -265,31 +281,17 @@ bool UBotanicusQuickBarComponent::RemoveQuantity(int32 SlotIndex, int32 Quantity
 	}
 
 	OwnerActor->ForceNetUpdate();
+	if (ABotanicusGameMode* GameMode =
+		GetWorld()->GetAuthGameMode<ABotanicusGameMode>())
+	{
+		GameMode->ScheduleInventoryAutosave();
+	}
 	return true;
 }
 
 bool UBotanicusQuickBarComponent::ConsumeSelectedItem(int32 Quantity)
 {
 	return RemoveQuantity(SelectedSlotIndex, Quantity);
-}
-
-void UBotanicusQuickBarComponent::RequestConsumeSelectedItem(int32 Quantity)
-{
-	if (Quantity <= 0 ||
-		!CanLocallyControlQuickBar() ||
-		GetSelectedSlot().ItemKey != TEXT("SeedPacket_Test"))
-	{
-		return;
-	}
-
-	if (GetOwner() && GetOwner()->HasAuthority())
-	{
-		ConsumeSelectedItem(Quantity);
-	}
-	else
-	{
-		ServerConsumeSelectedItem(Quantity);
-	}
 }
 
 int32 UBotanicusQuickBarComponent::GetTotalQuantity(FName ItemKey) const
@@ -468,7 +470,23 @@ bool UBotanicusQuickBarComponent::IsValidSlotIndex(int32 SlotIndex) const
 
 bool UBotanicusQuickBarComponent::IsItemKeyValid(FName ItemKey) const
 {
-	return !ItemKey.IsNone() && GetWorld() && UItemDataSubsystem::Get(this).IsKeyValid(ItemKey);
+	if (ItemKey.IsNone() || !GetWorld() ||
+		!UItemDataSubsystem::Get(this).IsKeyValid(ItemKey))
+	{
+		return false;
+	}
+
+	const UGameInstance* GameInstance = GetWorld()->GetGameInstance();
+	const UBotanicusItemCatalogSubsystem* Catalog =
+		GameInstance
+			? GameInstance->GetSubsystem<
+				UBotanicusItemCatalogSubsystem>()
+			: nullptr;
+	const FBotanicusItemDefinition* Definition =
+		Catalog ? Catalog->FindItem(ItemKey) : nullptr;
+	return !Definition ||
+		Definition->WeightClass ==
+			EBotanicusItemWeightClass::Hotbar;
 }
 
 bool UBotanicusQuickBarComponent::CanLocallyControlQuickBar() const
@@ -557,13 +575,4 @@ void UBotanicusQuickBarComponent::ServerSelectSlot_Implementation(int32 SlotInde
 void UBotanicusQuickBarComponent::ServerActivateSelectedSlot_Implementation()
 {
 	ActivateSelectedSlotOnServer();
-}
-
-void UBotanicusQuickBarComponent::ServerConsumeSelectedItem_Implementation(
-	int32 Quantity)
-{
-	if (GetSelectedSlot().ItemKey == TEXT("SeedPacket_Test"))
-	{
-		ConsumeSelectedItem(Quantity);
-	}
 }

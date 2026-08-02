@@ -55,11 +55,10 @@ The events are push-based, so a UMG widget does not need to poll every frame.
 - Equipped-world visuals will be replicated separately by the equipment system,
   without exposing a player's complete private inventory to other clients.
 
-## Prototype test item and temporary UI
+## Runtime inventory UI
 
-In PIE only, every authoritative player character receives one distinct
-`Paquet de graines test` containing ten seeds in slot 1. This bootstrap is
-compiled out of packaged builds.
+Players fill their inventory through catalogue orders and parcel pickups.
+There is no automatic test item added in PIE.
 
 EBS demonstration tools are not Botanicus inventory items. The complete EBS
 demonstration HUD is collapsed and its damage/mallet actions are disabled.
@@ -78,7 +77,7 @@ Blueprint will not change inventory storage, input or multiplayer replication.
 ### PIE verification
 
 1. Launch a two-player PIE session.
-2. Confirm both players have `Paquet de graines test x10` in slot 1.
+2. Order and collect basil seeds independently for both players.
 3. Use `1` to `0` and the mouse wheel; only the local player's yellow selection
    should move.
 4. Select slot 1 and left-click several times. Only that player's quantity must

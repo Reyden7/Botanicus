@@ -21,6 +21,10 @@ class ABotanicusGameMode : public AGameModeBase
 public:
 	ABotanicusGameMode();
 
+	virtual void InitGame(
+		const FString& MapName,
+		const FString& Options,
+		FString& ErrorMessage) override;
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void PostLogin(APlayerController* NewPlayer) override;
@@ -32,16 +36,20 @@ public:
 	bool BotanicusSaveNow();
 
 	void RegisterRemovedBuildingActor(FName ActorName);
+	/** Coalesces inventory mutations into one save on the next server tick. */
+	void ScheduleInventoryAutosave();
 
 private:
 	FString GetAutosaveSlotName() const;
 	FString GetPlayerSaveKey(const AController* Controller);
 	void LoadAutosave();
+	void InitializeSharedEconomy();
 	void RestoreWorldState();
 	void CapturePlayerInventory(const AController* Controller);
 	void RestorePlayerInventory(AController* Controller);
 	void CapturePlayerEconomy(const AController* Controller);
 	void RestorePlayerEconomy(AController* Controller);
+	void FlushScheduledInventoryAutosave();
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusWorldSaveGame> CurrentSaveGame;
@@ -49,6 +57,8 @@ private:
 	TSet<FName> RemovedBuildingActorNames;
 	TMap<TWeakObjectPtr<AController>, int32> PIERemotePlayerSlots;
 	int32 NextPIERemotePlayerSlot = 0;
+	bool bAutosaveReady = false;
+	bool bInventoryAutosaveScheduled = false;
 };
 
 

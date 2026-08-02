@@ -11,6 +11,7 @@
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/TextBlock.h"
+#include "Components/VerticalBox.h"
 
 namespace
 {
@@ -41,28 +42,63 @@ void UBotanicusTopDownToolbarWidget::InitializeWithController(
 	ABotanicusPlayerController* InController)
 {
 	BotanicusController = InController;
-	RefreshPathState(false, false, false);
+	RefreshPathState(false, false, false, false, INDEX_NONE);
 }
 
 void UBotanicusTopDownToolbarWidget::RefreshPathState(
 	bool bPathModeActive,
 	bool bCanConfirm,
-	bool bPathDeletionActive)
+	bool bPathDeletionActive,
+	bool bVisitorRouteMode,
+	int32 ActiveVisitorZoneType)
 {
 	if (PathButton)
 	{
 		PathButton->SetBackgroundColor(
-			bPathModeActive
+			bPathModeActive && !bVisitorRouteMode
 				? FLinearColor(0.95f, 0.62f, 0.03f, 1.0f)
 				: FLinearColor(0.12f, 0.14f, 0.12f, 0.96f));
 	}
 	if (PathButtonLabel)
 	{
 		PathButtonLabel->SetText(
-			bPathModeActive
+			bPathModeActive && !bVisitorRouteMode
 				? NSLOCTEXT("Botanicus", "PathModeActive", "CHEMIN ACTIF")
 				: NSLOCTEXT("Botanicus", "PathModeInactive", "CHEMIN"));
 	}
+	if (VisitorRouteButton)
+	{
+		VisitorRouteButton->SetBackgroundColor(
+			bPathModeActive && bVisitorRouteMode
+				? FLinearColor(0.03f, 0.78f, 0.75f, 1.0f)
+				: FLinearColor(0.08f, 0.24f, 0.23f, 0.96f));
+	}
+	const auto RefreshZoneButton =
+		[ActiveVisitorZoneType](
+			UButton* Button,
+			int32 ZoneType,
+			const FLinearColor& ActiveColor)
+		{
+			if (Button)
+			{
+				Button->SetBackgroundColor(
+					ActiveVisitorZoneType == ZoneType
+						? ActiveColor
+						: FLinearColor(0.08f, 0.24f, 0.23f, 0.96f));
+			}
+		};
+	RefreshZoneButton(
+		VisitorParkingButton,
+		0,
+		FLinearColor(0.08f, 0.35f, 0.85f, 1.0f));
+	RefreshZoneButton(
+		VisitorSalesAreaButton,
+		1,
+		FLinearColor(0.12f, 0.8f, 0.3f, 1.0f));
+	RefreshZoneButton(
+		VisitorCheckoutButton,
+		2,
+		FLinearColor(0.95f, 0.55f, 0.05f, 1.0f));
 	if (ConfirmButton)
 	{
 		ConfirmButton->SetIsEnabled(bCanConfirm);
@@ -94,7 +130,9 @@ void UBotanicusTopDownToolbarWidget::RefreshPathState(
 	if (CancelButton)
 	{
 		CancelButton->SetVisibility(
-			bPathModeActive || bPathDeletionActive
+			bPathModeActive ||
+				bPathDeletionActive ||
+				ActiveVisitorZoneType != INDEX_NONE
 				? ESlateVisibility::Visible
 				: ESlateVisibility::Collapsed);
 	}
@@ -126,33 +164,40 @@ void UBotanicusTopDownToolbarWidget::BuildLayout()
 	PanelSlot->SetPosition(FVector2D(0.0f, 28.0f));
 	PanelSlot->SetAutoSize(true);
 
+	UVerticalBox* Rows =
+		WidgetTree->ConstructWidget<UVerticalBox>(
+			UVerticalBox::StaticClass(),
+			TEXT("PlanningToolbarRows"));
+	Panel->AddChild(Rows);
+
 	UHorizontalBox* Row =
 		WidgetTree->ConstructWidget<UHorizontalBox>(
 			UHorizontalBox::StaticClass(),
 			TEXT("PlanningToolbarRow"));
-	Panel->AddChild(Row);
+	Rows->AddChildToVerticalBox(Row);
+
+	UHorizontalBox* VisitorRow =
+		WidgetTree->ConstructWidget<UHorizontalBox>(
+			UHorizontalBox::StaticClass(),
+			TEXT("VisitorPlanningToolbarRow"));
+	Rows->AddChildToVerticalBox(VisitorRow);
 
 	UTextBlock* PathLabel = nullptr;
 	UTextBlock* ConfirmLabel = nullptr;
 	UTextBlock* DeletePathLabel = nullptr;
-	UTextBlock* PurchaseBuildingLabel = nullptr;
 	UTextBlock* OrderCatalogLabel = nullptr;
 	UTextBlock* CancelLabel = nullptr;
-	PurchaseBuildingButton = AddToolbarButton(
-		WidgetTree,
-		Row,
-		NSLOCTEXT(
-			"Botanicus",
-			"BuildingCatalogButton",
-			"CATALOGUE BATIMENTS"),
-		PurchaseBuildingLabel);
+	UTextBlock* VisitorRouteLabel = nullptr;
+	UTextBlock* VisitorParkingLabel = nullptr;
+	UTextBlock* VisitorSalesAreaLabel = nullptr;
+	UTextBlock* VisitorCheckoutLabel = nullptr;
 	OrderCatalogButton = AddToolbarButton(
 		WidgetTree,
 		Row,
 		NSLOCTEXT(
 			"Botanicus",
 			"OrderCatalogButton",
-			"CATALOGUE COMMANDES"),
+			"PANNEAU DE COMMANDE"),
 		OrderCatalogLabel);
 	PathButton = AddToolbarButton(
 		WidgetTree,
@@ -176,13 +221,42 @@ void UBotanicusTopDownToolbarWidget::BuildLayout()
 		Row,
 		NSLOCTEXT("Botanicus", "CancelPathButton", "ANNULER"),
 		CancelLabel);
+	VisitorRouteButton = AddToolbarButton(
+		WidgetTree,
+		VisitorRow,
+		NSLOCTEXT("Botanicus", "VisitorRouteButton", "ROUTE PNJ"),
+		VisitorRouteLabel);
+	VisitorParkingButton = AddToolbarButton(
+		WidgetTree,
+		VisitorRow,
+		NSLOCTEXT("Botanicus", "VisitorParkingButton", "PARKING PNJ"),
+		VisitorParkingLabel);
+	VisitorSalesAreaButton = AddToolbarButton(
+		WidgetTree,
+		VisitorRow,
+		NSLOCTEXT("Botanicus", "VisitorSalesAreaButton", "ZONE VENTE"),
+		VisitorSalesAreaLabel);
+	VisitorCheckoutButton = AddToolbarButton(
+		WidgetTree,
+		VisitorRow,
+		NSLOCTEXT("Botanicus", "VisitorCheckoutButton", "CAISSE PNJ"),
+		VisitorCheckoutLabel);
 
 	PathButton->OnClicked.AddDynamic(
 		this,
 		&UBotanicusTopDownToolbarWidget::HandlePathClicked);
-	PurchaseBuildingButton->OnClicked.AddDynamic(
+	VisitorRouteButton->OnClicked.AddDynamic(
 		this,
-		&UBotanicusTopDownToolbarWidget::HandlePurchaseBuildingClicked);
+		&UBotanicusTopDownToolbarWidget::HandleVisitorRouteClicked);
+	VisitorParkingButton->OnClicked.AddDynamic(
+		this,
+		&UBotanicusTopDownToolbarWidget::HandleVisitorParkingClicked);
+	VisitorSalesAreaButton->OnClicked.AddDynamic(
+		this,
+		&UBotanicusTopDownToolbarWidget::HandleVisitorSalesAreaClicked);
+	VisitorCheckoutButton->OnClicked.AddDynamic(
+		this,
+		&UBotanicusTopDownToolbarWidget::HandleVisitorCheckoutClicked);
 	OrderCatalogButton->OnClicked.AddDynamic(
 		this,
 		&UBotanicusTopDownToolbarWidget::HandleOrderCatalogClicked);
@@ -195,7 +269,7 @@ void UBotanicusTopDownToolbarWidget::BuildLayout()
 	CancelButton->OnClicked.AddDynamic(
 		this,
 		&UBotanicusTopDownToolbarWidget::HandleCancelClicked);
-	RefreshPathState(false, false, false);
+	RefreshPathState(false, false, false, false, INDEX_NONE);
 }
 
 void UBotanicusTopDownToolbarWidget::HandlePathClicked()
@@ -203,6 +277,38 @@ void UBotanicusTopDownToolbarWidget::HandlePathClicked()
 	if (BotanicusController)
 	{
 		BotanicusController->BeginPathPlacement();
+	}
+}
+
+void UBotanicusTopDownToolbarWidget::HandleVisitorRouteClicked()
+{
+	if (BotanicusController)
+	{
+		BotanicusController->BeginVisitorRoutePlacement();
+	}
+}
+
+void UBotanicusTopDownToolbarWidget::HandleVisitorParkingClicked()
+{
+	if (BotanicusController)
+	{
+		BotanicusController->BeginVisitorParkingPlacement();
+	}
+}
+
+void UBotanicusTopDownToolbarWidget::HandleVisitorSalesAreaClicked()
+{
+	if (BotanicusController)
+	{
+		BotanicusController->BeginVisitorSalesAreaPlacement();
+	}
+}
+
+void UBotanicusTopDownToolbarWidget::HandleVisitorCheckoutClicked()
+{
+	if (BotanicusController)
+	{
+		BotanicusController->BeginVisitorCheckoutPlacement();
 	}
 }
 
@@ -222,14 +328,6 @@ void UBotanicusTopDownToolbarWidget::HandleDeletePathClicked()
 	}
 }
 
-void UBotanicusTopDownToolbarWidget::HandlePurchaseBuildingClicked()
-{
-	if (BotanicusController)
-	{
-		BotanicusController->ToggleBuildingCatalog();
-	}
-}
-
 void UBotanicusTopDownToolbarWidget::HandleOrderCatalogClicked()
 {
 	if (BotanicusController)
@@ -244,5 +342,6 @@ void UBotanicusTopDownToolbarWidget::HandleCancelClicked()
 	{
 		BotanicusController->CancelPathPlacement();
 		BotanicusController->CancelPathDeletion();
+		BotanicusController->CancelVisitorZonePlacement();
 	}
 }

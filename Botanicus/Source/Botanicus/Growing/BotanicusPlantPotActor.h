@@ -8,6 +8,8 @@
 
 class UStaticMeshComponent;
 class UTextRenderComponent;
+class UMaterialInstanceDynamic;
+struct FBotanicusPlantDefinition;
 
 UCLASS()
 class BOTANICUS_API ABotanicusPlantPotActor
@@ -39,19 +41,31 @@ public:
 		bool bInHasSoil,
 		FName InPlantKey,
 		float InWaterLevel,
-		float InGrowthProgress);
+		float InGrowthProgress,
+		float InCareScore);
 
 	bool HasSoil() const { return bHasSoil; }
 	FName GetPlantKey() const { return PlantKey; }
 	float GetWaterLevel() const { return WaterLevel; }
 	float GetGrowthProgress() const { return GrowthProgress; }
+	float GetCareScore() const { return CareScore; }
 	int32 GetWateringCount() const { return WateringCount; }
+	bool IsMature() const { return !PlantKey.IsNone() && GrowthProgress >= 0.999f; }
 
 	void RestoreWateringCount(int32 InWateringCount);
 
 private:
 	FName GetSelectedItemKey(AActor* Interactor) const;
+	const FBotanicusPlantDefinition* GetPlantDefinition() const;
+	float GetCareRating() const;
+	FName GetPlantQualityTag() const;
+	FString GetPlantQualityLabel() const;
+	FName GetQualityHarvestItemKey(
+		const FBotanicusPlantDefinition& Definition) const;
+	bool CanHarvestWithInteractor(AActor* Interactor) const;
+	bool IsInteractorStillTargeting(AActor* Interactor) const;
 	bool UpdatePrimaryUse(float DeltaSeconds);
+	void RefreshLocalContextAction();
 	void RefreshVisuals();
 	void SendInteractorMessage(
 		AActor* Interactor,
@@ -69,8 +83,14 @@ private:
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UStaticMeshComponent> FoliageMesh;
 
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> FoliageMaterial;
+
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UTextRenderComponent> StatusText;
+
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UTextRenderComponent> ContextActionText;
 
 	UPROPERTY(ReplicatedUsing=OnRep_GrowingState)
 	bool bHasSoil = false;
@@ -85,6 +105,9 @@ private:
 	float GrowthProgress = 0.0f;
 
 	UPROPERTY(ReplicatedUsing=OnRep_GrowingState)
+	float CareScore = 0.0f;
+
+	UPROPERTY(ReplicatedUsing=OnRep_GrowingState)
 	int32 WateringCount = 0;
 
 	UPROPERTY(ReplicatedUsing=OnRep_GrowingState)
@@ -93,13 +116,17 @@ private:
 	UPROPERTY(ReplicatedUsing=OnRep_GrowingState)
 	bool bWateringActive = false;
 
+	UPROPERTY(ReplicatedUsing=OnRep_GrowingState)
+	float HarvestProgress = 0.0f;
+
 	TWeakObjectPtr<class ABotanicusCharacter> ActivePrimaryUser;
 
 	enum class EPrimaryUseMode : uint8
 	{
 		None,
 		FillSoil,
-		Water
+		Water,
+		Harvest
 	};
 
 	EPrimaryUseMode PrimaryUseMode = EPrimaryUseMode::None;

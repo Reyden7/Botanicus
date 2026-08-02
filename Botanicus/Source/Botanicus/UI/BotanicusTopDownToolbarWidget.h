@@ -22,7 +22,9 @@ public:
 	void RefreshPathState(
 		bool bPathModeActive,
 		bool bCanConfirm,
-		bool bPathDeletionActive);
+		bool bPathDeletionActive,
+		bool bVisitorRouteMode,
+		int32 ActiveVisitorZoneType);
 
 protected:
 	virtual void NativeOnInitialized() override;
@@ -34,13 +36,22 @@ private:
 	void HandlePathClicked();
 
 	UFUNCTION()
+	void HandleVisitorRouteClicked();
+
+	UFUNCTION()
+	void HandleVisitorParkingClicked();
+
+	UFUNCTION()
+	void HandleVisitorSalesAreaClicked();
+
+	UFUNCTION()
+	void HandleVisitorCheckoutClicked();
+
+	UFUNCTION()
 	void HandleConfirmClicked();
 
 	UFUNCTION()
 	void HandleDeletePathClicked();
-
-	UFUNCTION()
-	void HandlePurchaseBuildingClicked();
 
 	UFUNCTION()
 	void HandleOrderCatalogClicked();
@@ -55,13 +66,22 @@ private:
 	TObjectPtr<UButton> PathButton;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UButton> VisitorRouteButton;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UButton> VisitorParkingButton;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UButton> VisitorSalesAreaButton;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UButton> VisitorCheckoutButton;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UButton> ConfirmButton;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UButton> DeletePathButton;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UButton> PurchaseBuildingButton;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UButton> OrderCatalogButton;

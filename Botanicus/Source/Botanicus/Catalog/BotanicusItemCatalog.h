@@ -24,9 +24,22 @@ UENUM(BlueprintType)
 enum class EBotanicusItemWeightClass : uint8
 {
 	Hotbar,
+	/** World tool carried directly in the player's hand, never in the hotbar. */
+	Handheld,
 	OnePlayerCarry,
 	TwoPlayerCarry
 };
+
+UENUM(BlueprintType, meta=(Bitflags))
+enum class EBotanicusCatalogTab : uint8
+{
+	None = 0 UMETA(Hidden),
+	Seeds = 1 << 0,
+	GardeningTools = 1 << 1,
+	Preparation = 1 << 2,
+	Sales = 1 << 3
+};
+ENUM_CLASS_FLAGS(EBotanicusCatalogTab);
 
 UENUM(BlueprintType, meta=(Bitflags))
 enum class EBotanicusPlacementSurface : uint8
@@ -53,6 +66,14 @@ struct BOTANICUS_API FBotanicusItemDefinition
 	EBotanicusItemCategory Category =
 		EBotanicusItemCategory::Decoration;
 
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category="Identity",
+		meta=(Bitmask, BitmaskEnum="/Script/Botanicus.EBotanicusCatalogTab"))
+	int32 CatalogTabs =
+		static_cast<int32>(EBotanicusCatalogTab::Preparation);
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Presentation")
 	TSoftObjectPtr<UTexture2D> Icon;
 
@@ -68,6 +89,14 @@ struct BOTANICUS_API FBotanicusItemDefinition
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Inventory", meta=(ClampMin="1"))
 	int32 MaximumStack = 1;
 
+	/** True for a complete nursery plant that can be placed on a sales display. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Inventory")
+	bool bWholePlant = false;
+
+	/** This supply can fill a sale pot before a compatible plant is repotted. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Inventory")
+	bool bSaleSoil = false;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Inventory")
 	EBotanicusItemWeightClass WeightClass =
 		EBotanicusItemWeightClass::Hotbar;
@@ -81,6 +110,32 @@ struct BOTANICUS_API FBotanicusItemDefinition
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Delivery", meta=(ClampMin="0"))
 	int32 Price = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Delivery")
+	bool bPurchasable = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Sales", meta=(ClampMin="0"))
+	int32 SalePrice = 0;
+
+	/** Visitor-facing colour family, for example Green, Red or Pink. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Sales")
+	FName PlantColorTag = NAME_None;
+
+	/** Visitor-facing plant family, for example Aromatic or Flowering. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Sales")
+	FName PlantTypeTag = NAME_None;
+
+	/** Care quality retained by a harvested plant: Standard, Beautiful or Exceptional. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Sales")
+	FName PlantQualityTag = TEXT("Standard");
+
+	/** Base desirability before a visitor's personal preferences are applied. */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category="Sales",
+		meta=(ClampMin="0", ClampMax="100"))
+	int32 VisitorAppeal = 50;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Delivery", meta=(ClampMin="1"))
 	int32 DeliveryQuantity = 1;

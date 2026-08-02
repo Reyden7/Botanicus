@@ -38,6 +38,12 @@ struct BOTANICUS_API FBotanicusSavedPlayerInventory
 
 	UPROPERTY()
 	int32 SelectedSlotIndex = 0;
+
+	UPROPERTY()
+	bool bHasPawnTransform = false;
+
+	UPROPERTY()
+	FTransform PawnTransform = FTransform::Identity;
 };
 
 USTRUCT()
@@ -90,6 +96,24 @@ struct BOTANICUS_API FBotanicusSavedPath
 
 	UPROPERTY()
 	TArray<FVector_NetQuantize10> JunctionPoints;
+
+	UPROPERTY()
+	uint8 PathType = 0;
+};
+
+USTRUCT()
+struct BOTANICUS_API FBotanicusSavedVisitorZone
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	FTransform Transform = FTransform::Identity;
+
+	UPROPERTY()
+	uint8 ZoneType = 1;
+
+	UPROPERTY()
+	FVector BoxExtent = FVector(500.0f, 400.0f, 8.0f);
 };
 
 USTRUCT()
@@ -110,6 +134,12 @@ struct BOTANICUS_API FBotanicusSavedWorldItem
 	int32 Quantity = 1;
 
 	UPROPERTY()
+	uint16 ParcelCutCoverageMask = 0;
+
+	UPROPERTY()
+	bool bParcelOpened = false;
+
+	UPROPERTY()
 	bool bPlantPotHasSoil = false;
 
 	UPROPERTY()
@@ -122,7 +152,22 @@ struct BOTANICUS_API FBotanicusSavedWorldItem
 	float PlantGrowthProgress = 0.0f;
 
 	UPROPERTY()
+	float PlantCareScore = 0.0f;
+
+	UPROPERTY()
 	int32 PlantWateringCount = 0;
+
+	UPROPERTY()
+	FName DisplayedPlantItemKey = NAME_None;
+
+	UPROPERTY()
+	float WateringCanWaterLevel = 1.0f;
+
+	UPROPERTY()
+	FName SalePotSoilItemKey = NAME_None;
+
+	UPROPERTY()
+	FName SalePotPlantItemKey = NAME_None;
 };
 
 /** Server-owned persistent state for one Botanicus map. */
@@ -133,10 +178,47 @@ class BOTANICUS_API UBotanicusWorldSaveGame : public USaveGame
 
 public:
 	UPROPERTY()
-	int32 SaveVersion = 6;
+	int32 SaveVersion = 17;
 
 	UPROPERTY()
 	FString MapName;
+
+	/** Nursery-wide wallet introduced in save version 10. */
+	UPROPERTY()
+	int32 SharedFunds = -1;
+
+	UPROPERTY()
+	int32 MainShopLevel = 1;
+
+	UPROPERTY()
+	bool bMainShopOpen = true;
+
+	UPROPERTY()
+	int32 TotalPlantsSold = 0;
+
+	UPROPERTY()
+	int32 TotalCatalogOrders = 0;
+
+	UPROPERTY()
+	int32 ShopReputationPoints = 300;
+
+	UPROPERTY()
+	int32 LastVisitorSatisfaction = 60;
+
+	UPROPERTY()
+	int32 TotalVisitorReviews = 0;
+
+	UPROPERTY()
+	FName TrendColorTag = NAME_None;
+
+	UPROPERTY()
+	FName TrendTypeTag = NAME_None;
+
+	UPROPERTY()
+	FName TrendQualityTag = NAME_None;
+
+	UPROPERTY()
+	float TrendRemainingSeconds = 600.0f;
 
 	UPROPERTY()
 	TArray<FBotanicusSavedBuildingActor> BuildingActors;
@@ -155,6 +237,9 @@ public:
 
 	UPROPERTY()
 	TArray<FBotanicusSavedPath> Paths;
+
+	UPROPERTY()
+	TArray<FBotanicusSavedVisitorZone> VisitorZones;
 
 	UPROPERTY()
 	TArray<FBotanicusSavedWorldItem> WorldItems;

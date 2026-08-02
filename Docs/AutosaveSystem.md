@@ -9,7 +9,11 @@ Easy Building System demonstration save buttons.
 - every confirmed spline path and all of its control points;
 - each connected player's ten quickbar slots;
 - quantities, distinct item instance IDs and selected slot.
-- each player's credit balance;
+- each player's world transform;
+- the nursery's shared credit balance;
+- the shared main-shop level, plants sold and catalogue-order counters;
+- whether the main shop is currently open or closed;
+- visitor routes and the parking, sales-area and checkout zones;
 - each player's building development level;
 - pending catalogue orders, charged price, quantity and remaining delay;
 - uncollected parcels, heavy equipment and placed small items;
@@ -25,14 +29,32 @@ Each map uses its own slot:
 
 `Botanicus_Autosave_<MapName>`
 
-In multiplayer, building state is stored on the host/server. Player inventories
-and economies use the platform Unique Net ID when available, with a local
+In multiplayer, building state and the shared wallet are stored on the
+host/server. Player inventories, progression and pending orders use the
+platform Unique Net ID when available, with a local
 topology slot for PIE editor testing (`PIELocal_0`, `PIEClient_0`, etc.). PIE
 deliberately ignores both its synthetic Unique Net ID and `PlayerId`, because
 Unreal regenerates the former and keeps incrementing the latter across Play
 sessions.
 
-Save format version 6 adds placed-pot soil, species, water and growth state.
+Save format version 17 adds the persistent shared open/closed shop state.
+Version 16 adds each delivery carton's cut-tape coverage and open
+state, plus the one-time starter-cutter migration. Version 15 adds the three
+shared customer trends and their
+remaining rotation time. Version 14 adds shared shop reputation, the last visitor
+satisfaction and the number of reviews. Version 13 adds the persistent
+care-quality score of every growing plant. Version 12 adds the shared
+main-shop level and its persistent task
+progress. Version 11 adds visitor-route types and the three visitor zones.
+Version 10 adds the shared nursery wallet. The first legacy player
+wallet is migrated once without adding every old balance together.
+Version 9 adds the compatible soil and whole plant stored in each
+prepared sale pot. Version 8 adds player transforms and the remaining water level of
+physical watering cans. Inventory and economy are also written to disk
+immediately during logout, before the pawn is destroyed. Non-hotbar tools from
+older saves are rejected during quickbar restoration.
+Version 7 adds the complete plant stored on each sales display.
+Version 6 adds placed-pot soil, species, water and growth state.
 Version 5 adds the owner-only building development level. Version 4
 saves retain their balance and pending catalogue orders and migrate at
 development level 1. If a version-4 world already contains a confirmed compact

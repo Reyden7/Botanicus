@@ -70,27 +70,6 @@ void ABotanicusCharacter::BeginPlay()
 	ApplyCarryMovementMultiplier();
 	ConfigureTrueFirstPersonLocalView();
 
-#if WITH_EDITOR
-	// Prototype-only bootstrap: PIE players receive one distinct test packet.
-	// Production inventories will be filled by delivered orders and pickups.
-	if (HasAuthority() &&
-		GetWorld() &&
-		GetWorld()->WorldType == EWorldType::PIE &&
-		QuickBarComponent)
-	{
-		int32 AddedSlotIndex = INDEX_NONE;
-		if (!QuickBarComponent->AddItem(
-			TEXT("SeedPacket_Test"),
-			10,
-			AddedSlotIndex))
-		{
-			UE_LOG(
-				LogBotanicus,
-				Warning,
-				TEXT("Prototype seed packet could not be added. Verify its Item Data asset."));
-		}
-	}
-#endif
 }
 
 void ABotanicusCharacter::GetLifetimeReplicatedProps(
@@ -103,6 +82,20 @@ void ABotanicusCharacter::GetLifetimeReplicatedProps(
 	DOREPLIFETIME(
 		ABotanicusCharacter,
 		EquipmentCarryRole);
+	DOREPLIFETIME(
+		ABotanicusCharacter,
+		HeldWateringCan);
+}
+
+void ABotanicusCharacter::SetHeldWateringCan(
+	ABotanicusWateringCanActor* InWateringCan)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	HeldWateringCan = InWateringCan;
+	ForceNetUpdate();
 }
 
 void ABotanicusCharacter::SetCarryMovementMultiplier(

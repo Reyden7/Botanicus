@@ -4,6 +4,9 @@
 #include "BotanicusPlayerController.h"
 #include "BotanicusCharacter.h"
 #include "QuickBar/BotanicusQuickBarComponent.h"
+#include "Sales/BotanicusSalesDisplayActor.h"
+#include "Sales/BotanicusSalePotActor.h"
+#include "Preparation/BotanicusPreparationWorkbenchActor.h"
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
 #include "Components/ActorComponent.h"
@@ -27,6 +30,7 @@
 #include "Blueprint/UserWidget.h"
 #include "Botanicus.h"
 #include "BotanicusGameMode.h"
+#include "BotanicusGameState.h"
 #include "Building/BotanicusCatalogBuildingActor.h"
 #include "Building/BotanicusCommunicationDoorActor.h"
 #include "Catalog/BotanicusBuildingCatalogSubsystem.h"
@@ -37,6 +41,8 @@
 #include "Delivery/BotanicusPlaceableItemActor.h"
 #include "DrawDebugHelpers.h"
 #include "Growing/BotanicusPlantPotActor.h"
+#include "Growing/BotanicusWateringCanActor.h"
+#include "Growing/BotanicusWaterReserveActor.h"
 #include "Online/BotanicusMultiplayerSubsystem.h"
 #include "Path/BotanicusPathActor.h"
 #include "Ping/BotanicusPingMarker.h"
@@ -44,7 +50,10 @@
 #include "UI/BotanicusCarryProgressWidget.h"
 #include "UI/BotanicusBuildingCatalogWidget.h"
 #include "UI/BotanicusOrderCatalogWidget.h"
+#include "UI/BotanicusSharedFundsWidget.h"
+#include "UI/BotanicusShopObjectivesWidget.h"
 #include "UI/BotanicusTopDownToolbarWidget.h"
+#include "Visitors/BotanicusVisitorZoneActor.h"
 #include "Net/UnrealNetwork.h"
 #include "UObject/ConstructorHelpers.h"
 #include "UObject/StructOnScope.h"
@@ -55,6 +64,41 @@
 namespace
 {
 	const FName PurchasedBuildingTag(TEXT("BotanicusPurchasedBuilding"));
+
+	ABotanicusGameState* GetSharedGameState(const UObject* Context)
+	{
+		const UWorld* World = Context ? Context->GetWorld() : nullptr;
+		return World
+			? World->GetGameState<ABotanicusGameState>()
+			: nullptr;
+	}
+
+	bool TrySpendSharedFunds(const UObject* Context, int32 Amount)
+	{
+		ABotanicusGameState* GameState = GetSharedGameState(Context);
+		return GameState && GameState->TrySpendSharedFunds(Amount);
+	}
+
+	void AddSharedFunds(const UObject* Context, int32 Amount)
+	{
+		if (ABotanicusGameState* GameState =
+			GetSharedGameState(Context))
+		{
+			GameState->AddSharedFunds(Amount);
+		}
+	}
+
+	void ScheduleSharedStateAutosave(const UObject* Context)
+	{
+		const UWorld* World = Context ? Context->GetWorld() : nullptr;
+		if (ABotanicusGameMode* GameMode =
+			World
+				? World->GetAuthGameMode<ABotanicusGameMode>()
+				: nullptr)
+		{
+			GameMode->ScheduleInventoryAutosave();
+		}
+	}
 
 	void ConfigurePurchasedActorForNetworking(AActor* Actor)
 	{
@@ -306,10 +350,6 @@ void ABotanicusPlayerController::GetLifetimeReplicatedProps(
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME_CONDITION(
 		ABotanicusPlayerController,
-		AvailableFunds,
-		COND_OwnerOnly);
-	DOREPLIFETIME_CONDITION(
-		ABotanicusPlayerController,
 		PendingOrders,
 		COND_OwnerOnly);
 	DOREPLIFETIME_CONDITION(
@@ -522,11 +562,6 @@ void ABotanicusPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (HasAuthority() && !bCatalogOrderStateRestored)
-	{
-		AvailableFunds = FMath::Max(0, StartingFunds);
-	}
-
 	ForceFirstPersonView();
 	GetWorldTimerManager().SetTimerForNextTick(
 		this,
@@ -534,6 +569,12 @@ void ABotanicusPlayerController::BeginPlay()
 	GetWorldTimerManager().SetTimerForNextTick(
 		this,
 		&ABotanicusPlayerController::InitializeQuickBarWidget);
+	GetWorldTimerManager().SetTimerForNextTick(
+		this,
+		&ABotanicusPlayerController::InitializeSharedFundsWidget);
+	GetWorldTimerManager().SetTimerForNextTick(
+		this,
+		&ABotanicusPlayerController::InitializeShopObjectivesWidget);
 	
 	// only spawn touch controls on local player controllers
 	if (IsLocalPlayerController() && ShouldUseTouchControls())
@@ -559,11 +600,14 @@ void ABotanicusPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReaso
 {
 	CancelEquipmentCarryCharge(true);
 	CancelPlaceableItemMoveCharge();
+	CancelParcelMoveCharge();
 	EndPlantPotAction();
 	CancelQuickBarItemPlacement();
+	CancelDeliveryParcelPlacement();
 	CancelLargeEquipmentPlacement();
 	CancelPathPlacement();
 	CancelPathDeletion();
+	CancelVisitorZonePlacement();
 	if (IsValid(CommunicationDoorPreviewActor))
 	{
 		CommunicationDoorPreviewActor->Destroy();
@@ -601,6 +645,16 @@ void ABotanicusPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReaso
 		QuickBarWidget->RemoveFromParent();
 		QuickBarWidget = nullptr;
 	}
+	if (SharedFundsWidget)
+	{
+		SharedFundsWidget->RemoveFromParent();
+		SharedFundsWidget = nullptr;
+	}
+	if (ShopObjectivesWidget)
+	{
+		ShopObjectivesWidget->RemoveFromParent();
+		ShopObjectivesWidget = nullptr;
+	}
 	if (CarryProgressWidget)
 	{
 		CarryProgressWidget->RemoveFromParent();
@@ -627,6 +681,14 @@ void ABotanicusPlayerController::PlayerTick(float DeltaTime)
 	if (IsLocalPlayerController() && !QuickBarWidget)
 	{
 		InitializeQuickBarWidget();
+	}
+	if (IsLocalPlayerController() && !SharedFundsWidget)
+	{
+		InitializeSharedFundsWidget();
+	}
+	if (IsLocalPlayerController() && !ShopObjectivesWidget)
+	{
+		InitializeShopObjectivesWidget();
 	}
 
 	if (IsLocalPlayerController())
@@ -669,8 +731,10 @@ void ABotanicusPlayerController::PlayerTick(float DeltaTime)
 	UpdatePathPreview();
 	UpdateEquipmentCarryCharge(DeltaTime);
 	UpdatePlaceableItemMoveCharge(DeltaTime);
+	UpdateParcelMoveCharge(DeltaTime);
 	UpdateLargeEquipmentPlacement(DeltaTime);
 	UpdateQuickBarItemPlacement(DeltaTime);
+	UpdateDeliveryParcelPlacement(DeltaTime);
 }
 
 void ABotanicusPlayerController::SetupInputComponent()
@@ -804,6 +868,10 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 			{
 				CancelQuickBarItemPlacement();
 			}
+			if (IsValid(LocalParcelMovePreview))
+			{
+				CancelDeliveryParcelPlacement();
+			}
 			if (bBuildingTopDownViewActive && LocalBuildingGroup.Num() > 0)
 			{
 				CancelBuildingGroupMove();
@@ -828,12 +896,18 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 			CancelPlaceableItemMoveCharge();
 			return true;
 		}
+		if (IsValid(LocalParcelMoveCandidate))
+		{
+			CancelParcelMoveCharge();
+			return true;
+		}
 	}
 
 	if (Params.Key == EKeys::E &&
 		Params.Event == IE_Pressed &&
 		!bBuildingTopDownViewActive &&
-		(TryHandleNearbyLargeEquipment() ||
+		(TryHandleNearbyWateringCan() ||
+		 TryHandleNearbyLargeEquipment() ||
 		 TryCollectNearbyDeliveryParcel() ||
 		 TryMoveNearbyPlaceableItem()))
 	{
@@ -896,12 +970,41 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		}
 	}
 
+	if (IsValid(LocalParcelMovePreview) &&
+		!bBuildingTopDownViewActive)
+	{
+		if (Params.Event == IE_Pressed &&
+			(Params.Key == EKeys::MouseScrollUp ||
+			 Params.Key == EKeys::MouseScrollDown))
+		{
+			RotateDeliveryParcelPlacement(
+				Params.Key == EKeys::MouseScrollUp ? 1.0f : -1.0f);
+			return true;
+		}
+
+		if (Params.Key == EKeys::LeftMouseButton &&
+			Params.Event == IE_Pressed)
+		{
+			ConfirmDeliveryParcelPlacement();
+			return true;
+		}
+
+		if ((Params.Key == EKeys::RightMouseButton ||
+			 Params.Key == EKeys::Escape) &&
+			Params.Event == IE_Pressed)
+		{
+			CancelDeliveryParcelPlacement();
+			return true;
+		}
+	}
+
 	if (Params.Key == EKeys::A)
 	{
 		if (Params.Event == IE_Pressed &&
 			!bBuildingTopDownViewActive &&
 			!IsValid(LocalLargeEquipmentPlacement) &&
-			!IsValid(LocalQuickBarItemPreview))
+			!IsValid(LocalQuickBarItemPreview) &&
+			!IsValid(LocalParcelMovePreview))
 		{
 			BeginQuickBarItemPlacement();
 		}
@@ -917,6 +1020,27 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 
 	if (bBuildingTopDownViewActive)
 	{
+		if (PendingVisitorZoneType != INDEX_NONE)
+		{
+			if (Params.Key == EKeys::LeftMouseButton &&
+				Params.Event == IE_Pressed)
+			{
+				if (!IsCursorOverTopDownToolbar())
+				{
+					PlaceVisitorZoneAtCursor();
+				}
+				return true;
+			}
+
+			if ((Params.Key == EKeys::RightMouseButton ||
+				 Params.Key == EKeys::Escape) &&
+				Params.Event == IE_Pressed)
+			{
+				CancelVisitorZonePlacement();
+				return true;
+			}
+		}
+
 		if (bCommunicationDoorPlacementActive)
 		{
 			if (Params.Key == EKeys::LeftMouseButton &&
@@ -1048,8 +1172,18 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		Params.Key == EKeys::LeftMouseButton)
 	{
 		if (Params.Event == IE_Pressed &&
-			TryBeginNearbyPlantPotAction())
+			(TryBeginNearbyParcelCut() ||
+			 TryRefillHeldWateringCan() ||
+			 TryBeginNearbyPlantPotAction() ||
+			 TryBeginNearbySalePotAction() ||
+			 TryPlacePlantOnNearbySalesDisplay()))
 		{
+			return true;
+		}
+		if (Params.Event == IE_Released &&
+			bParcelCutActionHeld)
+		{
+			EndParcelCut();
 			return true;
 		}
 		if (Params.Event == IE_Released &&
@@ -1096,7 +1230,8 @@ void ABotanicusPlayerController::ToggleBuildingTopDownView()
 bool ABotanicusPlayerController::IsQuickBarInputBlocked() const
 {
 	return bBuildingTopDownViewActive ||
-		IsValid(LocalQuickBarItemPreview);
+		IsValid(LocalQuickBarItemPreview) ||
+		IsValid(LocalParcelMovePreview);
 }
 
 void ABotanicusPlayerController::EnterBuildingTopDownView()
@@ -1177,6 +1312,7 @@ void ABotanicusPlayerController::ExitBuildingTopDownView()
 
 	CancelPathPlacement();
 	CancelPathDeletion();
+	CancelVisitorZonePlacement();
 	if (bCommunicationDoorPlacementActive)
 	{
 		ServerCancelCommunicationDoor();
@@ -1301,6 +1437,47 @@ void ABotanicusPlayerController::InitializeQuickBarWidget()
 	QuickBarWidget->AddToPlayerScreen(10);
 }
 
+void ABotanicusPlayerController::InitializeSharedFundsWidget()
+{
+	if (!IsLocalPlayerController() || SharedFundsWidget)
+	{
+		return;
+	}
+
+	SharedFundsWidget =
+		CreateWidget<UBotanicusSharedFundsWidget>(
+			this,
+			UBotanicusSharedFundsWidget::StaticClass());
+	if (!SharedFundsWidget)
+	{
+		UE_LOG(
+			LogBotanicus,
+			Error,
+			TEXT("Could not create the shared funds widget."));
+		return;
+	}
+
+	SharedFundsWidget->AddToPlayerScreen(40);
+}
+
+void ABotanicusPlayerController::InitializeShopObjectivesWidget()
+{
+	if (!IsLocalPlayerController() || ShopObjectivesWidget)
+	{
+		return;
+	}
+
+	ShopObjectivesWidget =
+		CreateWidget<UBotanicusShopObjectivesWidget>(
+			this,
+			UBotanicusShopObjectivesWidget::StaticClass());
+	if (!ShopObjectivesWidget)
+	{
+		return;
+	}
+	ShopObjectivesWidget->AddToPlayerScreen(39);
+}
+
 void ABotanicusPlayerController::InitializeTopDownToolbarWidget()
 {
 	if (!IsLocalPlayerController() || TopDownToolbarWidget)
@@ -1346,7 +1523,7 @@ void ABotanicusPlayerController::InitializeOrderCatalogWidget()
 	}
 
 	OrderCatalogWidget->InitializeWithController(this);
-	OrderCatalogWidget->AddToPlayerScreen(30);
+	OrderCatalogWidget->AddToPlayerScreen(45);
 	OrderCatalogWidget->SetVisibility(ESlateVisibility::Collapsed);
 }
 
@@ -1551,12 +1728,24 @@ void ABotanicusPlayerController::ZoomBuildingCamera(float Direction)
 
 void ABotanicusPlayerController::BeginPathPlacement()
 {
+	BeginPathPlacementInternal(EBotanicusPathType::Standard);
+}
+
+void ABotanicusPlayerController::BeginVisitorRoutePlacement()
+{
+	BeginPathPlacementInternal(EBotanicusPathType::VisitorRoute);
+}
+
+void ABotanicusPlayerController::BeginPathPlacementInternal(
+	EBotanicusPathType PathType)
+{
 	if (!bBuildingTopDownViewActive || !IsLocalPlayerController())
 	{
 		return;
 	}
 
 	CancelPathDeletion();
+	CancelVisitorZonePlacement();
 	if (LocalBuildingGroup.Num() > 0)
 	{
 		CancelBuildingGroupMove();
@@ -1567,6 +1756,7 @@ void ABotanicusPlayerController::BeginPathPlacement()
 		PendingPathPoints.Reset();
 	}
 	bPathPlacementActive = true;
+	PendingPathType = PathType;
 
 	if (!IsValid(PathPreviewActor))
 	{
@@ -1585,7 +1775,9 @@ void ABotanicusPlayerController::BeginPathPlacement()
 
 	if (PathPreviewActor)
 	{
-		PathPreviewActor->SetPreviewPath(PendingPathPoints);
+		PathPreviewActor->SetPreviewPath(
+			PendingPathPoints,
+			PendingPathType);
 	}
 	RefreshTopDownToolbar();
 }
@@ -1604,13 +1796,16 @@ void ABotanicusPlayerController::ConfirmPathPlacement()
 		RequestedPoints.Add(FVector_NetQuantize10(Point));
 	}
 
-	ServerCreatePath(RequestedPoints);
+	ServerCreatePath(
+		RequestedPoints,
+		static_cast<uint8>(PendingPathType));
 	CancelPathPlacement();
 }
 
 void ABotanicusPlayerController::CancelPathPlacement()
 {
 	bPathPlacementActive = false;
+	PendingPathType = EBotanicusPathType::Standard;
 	PendingPathPoints.Reset();
 	if (IsValid(PathPreviewActor))
 	{
@@ -1618,6 +1813,78 @@ void ABotanicusPlayerController::CancelPathPlacement()
 		PathPreviewActor = nullptr;
 	}
 	RefreshTopDownToolbar();
+}
+
+void ABotanicusPlayerController::BeginVisitorParkingPlacement()
+{
+	BeginVisitorZonePlacement(
+		static_cast<int32>(
+			EBotanicusVisitorZoneType::Parking));
+}
+
+void ABotanicusPlayerController::BeginVisitorSalesAreaPlacement()
+{
+	BeginVisitorZonePlacement(
+		static_cast<int32>(
+			EBotanicusVisitorZoneType::SalesArea));
+}
+
+void ABotanicusPlayerController::BeginVisitorCheckoutPlacement()
+{
+	BeginVisitorZonePlacement(
+		static_cast<int32>(
+			EBotanicusVisitorZoneType::Checkout));
+}
+
+void ABotanicusPlayerController::BeginVisitorZonePlacement(
+	int32 ZoneType)
+{
+	if (!bBuildingTopDownViewActive ||
+		!IsLocalPlayerController() ||
+		ZoneType < 0 ||
+		ZoneType > 2)
+	{
+		return;
+	}
+
+	CancelPathPlacement();
+	CancelPathDeletion();
+	PendingVisitorZoneType = ZoneType;
+	RefreshTopDownToolbar();
+	ClientMessage(
+		TEXT(
+			"Placement zone PNJ : cliquez sur un sol, clic droit pour annuler."));
+}
+
+void ABotanicusPlayerController::CancelVisitorZonePlacement()
+{
+	if (PendingVisitorZoneType == INDEX_NONE)
+	{
+		return;
+	}
+	PendingVisitorZoneType = INDEX_NONE;
+	RefreshTopDownToolbar();
+}
+
+void ABotanicusPlayerController::PlaceVisitorZoneAtCursor()
+{
+	if (PendingVisitorZoneType == INDEX_NONE)
+	{
+		return;
+	}
+
+	FHitResult CursorHit;
+	if (!TraceTopDownCursor(CursorHit))
+	{
+		return;
+	}
+
+	ServerCreateVisitorZone(
+		FVector_NetQuantize10(
+			CursorHit.ImpactPoint +
+			FVector(0.0f, 0.0f, 8.0f)),
+		static_cast<uint8>(PendingVisitorZoneType));
+	CancelVisitorZonePlacement();
 }
 
 void ABotanicusPlayerController::BeginPathDeletion()
@@ -1662,30 +1929,22 @@ void ABotanicusPlayerController::ToggleBuildingCatalog()
 		return;
 	}
 
-	InitializeBuildingCatalogWidget();
-	if (!BuildingCatalogWidget)
+	InitializeOrderCatalogWidget();
+	if (!OrderCatalogWidget)
 	{
 		return;
 	}
-
-	const bool bOpening =
-		BuildingCatalogWidget->GetVisibility() != ESlateVisibility::Visible;
-	BuildingCatalogWidget->SetVisibility(
-		bOpening
-			? ESlateVisibility::Visible
-			: ESlateVisibility::Collapsed);
-	if (bOpening)
+	OrderCatalogWidget->ShowBuildingTab();
+	OrderCatalogWidget->SetVisibility(ESlateVisibility::Visible);
+	if (BuildingCatalogWidget)
 	{
-		if (OrderCatalogWidget)
-		{
-			OrderCatalogWidget->SetVisibility(ESlateVisibility::Collapsed);
-		}
-		bAzertyForwardPressed = false;
-		bAzertyBackwardPressed = false;
-		bAzertyLeftPressed = false;
-		bAzertyRightPressed = false;
-		BuildingCatalogWidget->Refresh();
+		BuildingCatalogWidget->SetVisibility(ESlateVisibility::Collapsed);
 	}
+	bAzertyForwardPressed = false;
+	bAzertyBackwardPressed = false;
+	bAzertyLeftPressed = false;
+	bAzertyRightPressed = false;
+	OrderCatalogWidget->Refresh();
 }
 
 void ABotanicusPlayerController::PurchaseCatalogBuilding(
@@ -1713,6 +1972,10 @@ void ABotanicusPlayerController::PurchaseCatalogBuilding(
 	if (BuildingCatalogWidget)
 	{
 		BuildingCatalogWidget->SetVisibility(ESlateVisibility::Collapsed);
+	}
+	if (OrderCatalogWidget)
+	{
+		OrderCatalogWidget->SetVisibility(ESlateVisibility::Collapsed);
 	}
 	UE_LOG(
 		LogBotanicus,
@@ -1765,6 +2028,112 @@ void ABotanicusPlayerController::PlaceCatalogOrder(FName ItemKey)
 	}
 }
 
+int32 ABotanicusPlayerController::GetAvailableFunds() const
+{
+	const ABotanicusGameState* GameState =
+		GetSharedGameState(this);
+	return GameState
+		? GameState->GetSharedFunds()
+		: FMath::Max(0, StartingFunds);
+}
+
+int32 ABotanicusPlayerController::GetMainShopLevel() const
+{
+	const ABotanicusGameState* GameState = GetSharedGameState(this);
+	return GameState ? GameState->GetMainShopLevel() : 1;
+}
+
+bool ABotanicusPlayerController::IsMainShopOpen() const
+{
+	const ABotanicusGameState* GameState = GetSharedGameState(this);
+	return GameState ? GameState->IsMainShopOpen() : true;
+}
+
+void ABotanicusPlayerController::ToggleMainShopOpen()
+{
+	const bool bNewOpenState = !IsMainShopOpen();
+	if (HasAuthority())
+	{
+		ServerSetMainShopOpen_Implementation(bNewOpenState);
+	}
+	else
+	{
+		ServerSetMainShopOpen(bNewOpenState);
+	}
+}
+
+int32 ABotanicusPlayerController::GetMainShopVisitorCapacity() const
+{
+	const ABotanicusGameState* GameState = GetSharedGameState(this);
+	return GameState ? GameState->GetMainShopVisitorCapacity() : 4;
+}
+
+int32 ABotanicusPlayerController::GetTargetVisitorPopulation() const
+{
+	const ABotanicusGameState* GameState = GetSharedGameState(this);
+	return GameState ? GameState->GetTargetVisitorPopulation() : 16;
+}
+
+int32 ABotanicusPlayerController::GetMainShopUpgradeCost() const
+{
+	const ABotanicusGameState* GameState = GetSharedGameState(this);
+	return GameState ? GameState->GetMainShopUpgradeCost() : 1500;
+}
+
+int32 ABotanicusPlayerController::GetMainShopRequiredPlantSales() const
+{
+	const ABotanicusGameState* GameState = GetSharedGameState(this);
+	return GameState
+		? GameState->GetRequiredPlantSalesForUpgrade()
+		: 3;
+}
+
+int32 ABotanicusPlayerController::GetMainShopRequiredCatalogOrders() const
+{
+	const ABotanicusGameState* GameState = GetSharedGameState(this);
+	return GameState
+		? GameState->GetRequiredCatalogOrdersForUpgrade()
+		: 5;
+}
+
+int32 ABotanicusPlayerController::GetTotalPlantsSold() const
+{
+	const ABotanicusGameState* GameState = GetSharedGameState(this);
+	return GameState ? GameState->GetTotalPlantsSold() : 0;
+}
+
+int32 ABotanicusPlayerController::GetTotalCatalogOrders() const
+{
+	const ABotanicusGameState* GameState = GetSharedGameState(this);
+	return GameState ? GameState->GetTotalCatalogOrders() : 0;
+}
+
+bool ABotanicusPlayerController::CanUpgradeMainShop() const
+{
+	const ABotanicusGameState* GameState = GetSharedGameState(this);
+	return GameState &&
+		GameState->AreMainShopUpgradeTasksComplete() &&
+		GameState->GetSharedFunds() >=
+			GameState->GetMainShopUpgradeCost();
+}
+
+void ABotanicusPlayerController::UpgradeMainShop()
+{
+	if (IsLocalPlayerController() &&
+		bBuildingTopDownViewActive)
+	{
+		ServerUpgradeMainShop();
+	}
+}
+
+void ABotanicusPlayerController::AddTestCredits()
+{
+	if (IsLocalPlayerController())
+	{
+		ServerAddTestCredits();
+	}
+}
+
 void ABotanicusPlayerController::RefreshOrderCatalog()
 {
 	if (OrderCatalogWidget)
@@ -1799,7 +2168,6 @@ void ABotanicusPlayerController::RestoreCatalogOrderState(
 	}
 	PendingOrderTimers.Reset();
 	PendingOrders.Reset();
-	AvailableFunds = FMath::Max(0, RestoredFunds);
 	BuildingProgressionLevel =
 		FMath::Max(1, RestoredBuildingProgressionLevel);
 
@@ -1813,7 +2181,9 @@ void ABotanicusPlayerController::RestoreCatalogOrderState(
 			FindItemDefinition(this, SavedOrder.ItemKey);
 		if (!Definition || SavedOrder.ItemKey.IsNone())
 		{
-			AvailableFunds += FMath::Max(0, SavedOrder.ChargedPrice);
+			AddSharedFunds(
+				this,
+				FMath::Max(0, SavedOrder.ChargedPrice));
 			continue;
 		}
 
@@ -1859,9 +2229,37 @@ void ABotanicusPlayerController::RestoreCatalogOrderState(
 		TEXT(
 			"Restored catalogue economy for %s: %d credits, level %d, %d pending order(s)."),
 		PlayerState ? *PlayerState->GetPlayerName() : TEXT("UnknownPlayer"),
-		AvailableFunds,
+		GetAvailableFunds(),
 		BuildingProgressionLevel,
 		PendingOrders.Num());
+}
+
+void ABotanicusPlayerController::CreditPlantSale(
+	FName PlantItemKey,
+	int32 SalePrice)
+{
+	if (!HasAuthority() || SalePrice <= 0)
+	{
+		return;
+	}
+	AddSharedFunds(this, SalePrice);
+	if (ABotanicusGameState* GameState = GetSharedGameState(this))
+	{
+		GameState->RecordPlantSale();
+	}
+	OnRep_OrderState();
+	ClientMessage(
+		FString::Printf(
+			TEXT("%s vendu : +%d credits."),
+			*PlantItemKey.ToString(),
+			SalePrice));
+	if (ABotanicusGameMode* GameMode =
+		GetWorld()
+			? GetWorld()->GetAuthGameMode<ABotanicusGameMode>()
+			: nullptr)
+	{
+		GameMode->ScheduleInventoryAutosave();
+	}
 }
 
 void ABotanicusPlayerController::CancelPendingBuildingPurchaseForLogout()
@@ -2734,6 +3132,57 @@ bool ABotanicusPlayerController::ResolveQuickBarItemPlacement(
 		return false;
 	}
 
+	const ABotanicusSalePotActor* SalePot =
+		Cast<ABotanicusSalePotActor>(IgnoredWorldItem);
+	const bool bIsSalePotItem =
+		ItemKey == TEXT("SalePot") || IsValid(SalePot);
+	if (SalePot && SalePot->IsReadyForSale())
+	{
+		for (TActorIterator<ABotanicusSalesDisplayActor> DisplayIt(
+				 World);
+			 DisplayIt;
+			 ++DisplayIt)
+		{
+			if (!DisplayIt->IsEmpty())
+			{
+				continue;
+			}
+			const FTransform DisplayTransform =
+				DisplayIt->GetSalePotPlacementTransform();
+			if (FVector::DistSquared2D(
+					RequestedLocation,
+					DisplayTransform.GetLocation()) <=
+				FMath::Square(170.0f))
+			{
+				OutTransform = DisplayTransform;
+				return true;
+			}
+		}
+	}
+	if (bIsSalePotItem)
+	{
+		for (TActorIterator<ABotanicusPreparationWorkbenchActor>
+				 WorkbenchIt(World);
+			 WorkbenchIt;
+			 ++WorkbenchIt)
+		{
+			if (!WorkbenchIt->IsSalePotSlotAvailable(SalePot))
+			{
+				continue;
+			}
+			const FTransform WorkbenchTransform =
+				WorkbenchIt->GetSalePotPreparationTransform();
+			if (FVector::DistSquared2D(
+					RequestedLocation,
+					WorkbenchTransform.GetLocation()) <=
+				FMath::Square(170.0f))
+			{
+				OutTransform = WorkbenchTransform;
+				return true;
+			}
+		}
+	}
+
 	FCollisionQueryParams FloorQuery(
 		SCENE_QUERY_STAT(BotanicusQuickBarItemPlacementFloor),
 		false);
@@ -2911,7 +3360,463 @@ bool ABotanicusPlayerController::TryCollectNearbyDeliveryParcel()
 		return false;
 	}
 
-	ServerCollectDeliveryParcel(NearestParcel);
+	if (NearestParcel->IsOpened())
+	{
+		ServerCollectDeliveryParcel(NearestParcel);
+	}
+	else
+	{
+		BeginParcelMoveCharge(NearestParcel);
+	}
+	return true;
+}
+
+void ABotanicusPlayerController::BeginParcelMoveCharge(
+	ABotanicusDeliveryParcelActor* Parcel)
+{
+	if (!IsLocalPlayerController() ||
+		!IsValid(Parcel) ||
+		Parcel->IsOpened() ||
+		IsValid(LocalParcelMoveCandidate) ||
+		IsValid(LocalParcelMovePreview) ||
+		IsValid(LocalQuickBarItemPreview) ||
+		IsValid(LocalLargeEquipmentPlacement))
+	{
+		return;
+	}
+
+	LocalParcelMoveCandidate = Parcel;
+	ParcelMoveChargeElapsed = 0.0f;
+	bEquipmentCarryKeyHeld = true;
+
+	if (!CarryProgressWidget)
+	{
+		CarryProgressWidget =
+			CreateWidget<UBotanicusCarryProgressWidget>(
+				this,
+				UBotanicusCarryProgressWidget::StaticClass());
+		if (CarryProgressWidget)
+		{
+			CarryProgressWidget->AddToPlayerScreen(50);
+			CarryProgressWidget->SetAlignmentInViewport(
+				FVector2D(0.5f, 0.5f));
+			CarryProgressWidget->SetDesiredSizeInViewport(
+				FVector2D(68.0f, 68.0f));
+		}
+	}
+
+	if (CarryProgressWidget)
+	{
+		int32 ViewportWidth = 0;
+		int32 ViewportHeight = 0;
+		GetViewportSize(ViewportWidth, ViewportHeight);
+		CarryProgressWidget->SetPositionInViewport(
+			FVector2D(
+				static_cast<float>(ViewportWidth) * 0.5f,
+				static_cast<float>(ViewportHeight) * 0.5f + 85.0f),
+			true);
+		CarryProgressWidget->SetCarryProgress(0.0f);
+		CarryProgressWidget->SetVisibility(
+			ESlateVisibility::HitTestInvisible);
+	}
+}
+
+void ABotanicusPlayerController::UpdateParcelMoveCharge(
+	float DeltaTime)
+{
+	if (!IsLocalPlayerController() ||
+		!IsValid(LocalParcelMoveCandidate))
+	{
+		return;
+	}
+
+	if (!bEquipmentCarryKeyHeld ||
+		LocalParcelMoveCandidate->IsOpened() ||
+		!IsLookingAtWorldItem(LocalParcelMoveCandidate, 450.0f))
+	{
+		CancelParcelMoveCharge();
+		return;
+	}
+
+	ParcelMoveChargeElapsed += DeltaTime;
+	const float ChargeProgress = FMath::Clamp(
+		ParcelMoveChargeElapsed /
+			FMath::Max(0.1f, PlaceableItemMoveHoldDuration),
+		0.0f,
+		1.0f);
+	if (CarryProgressWidget)
+	{
+		CarryProgressWidget->SetCarryProgress(ChargeProgress);
+	}
+	if (ChargeProgress < 1.0f)
+	{
+		return;
+	}
+
+	ABotanicusDeliveryParcelActor* ParcelToMove =
+		LocalParcelMoveCandidate;
+	LocalParcelMoveCandidate = nullptr;
+	ParcelMoveChargeElapsed = 0.0f;
+	bEquipmentCarryKeyHeld = false;
+	if (CarryProgressWidget)
+	{
+		CarryProgressWidget->SetVisibility(
+			ESlateVisibility::Collapsed);
+		CarryProgressWidget->SetCarryProgress(0.0f);
+	}
+	BeginDeliveryParcelMove(ParcelToMove);
+}
+
+void ABotanicusPlayerController::CancelParcelMoveCharge()
+{
+	LocalParcelMoveCandidate = nullptr;
+	ParcelMoveChargeElapsed = 0.0f;
+	bEquipmentCarryKeyHeld = false;
+	if (CarryProgressWidget)
+	{
+		CarryProgressWidget->SetVisibility(
+			ESlateVisibility::Collapsed);
+		CarryProgressWidget->SetCarryProgress(0.0f);
+	}
+}
+
+void ABotanicusPlayerController::BeginDeliveryParcelMove(
+	ABotanicusDeliveryParcelActor* Parcel)
+{
+	UWorld* World = GetWorld();
+	if (!IsLocalPlayerController() ||
+		!World ||
+		!GetPawn() ||
+		!IsValid(Parcel) ||
+		Parcel->IsOpened() ||
+		IsValid(LocalParcelMovePreview))
+	{
+		return;
+	}
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	SpawnParameters.ObjectFlags |= RF_Transient;
+	ABotanicusDeliveryParcelActor* Preview =
+		World->SpawnActor<ABotanicusDeliveryParcelActor>(
+			ABotanicusDeliveryParcelActor::StaticClass(),
+			Parcel->GetActorTransform(),
+			SpawnParameters);
+	if (!Preview)
+	{
+		ClientMessage(TEXT("Impossible de deplacer ce colis."));
+		return;
+	}
+
+	Preview->SetReplicates(false);
+	Preview->Tags.AddUnique(TEXT("BotanicusPlacementPreview"));
+	Preview->RestoreParcelState(
+		Parcel->GetItemKey(),
+		Parcel->GetQuantity(),
+		Parcel->GetCutCoverageMask(),
+		false);
+	Preview->SetActorEnableCollision(false);
+
+	LocalParcelMovePreview = Preview;
+	LocalMovedDeliveryParcel = Parcel;
+	ParcelPlacementYaw = Parcel->GetActorRotation().Yaw;
+	ParcelPreviewUpdateAccumulator = 1.0f;
+	bLocalParcelPlacementValid = false;
+	ServerBeginDeliveryParcelMove(Parcel);
+	ClientMessage(
+		TEXT(
+			"Deplacement du colis : clic gauche pour poser, molette pour tourner, clic droit pour annuler."));
+}
+
+void ABotanicusPlayerController::UpdateDeliveryParcelPlacement(
+	float DeltaTime)
+{
+	if (!IsLocalPlayerController() ||
+		bBuildingTopDownViewActive ||
+		!IsValid(LocalParcelMovePreview) ||
+		!IsValid(LocalMovedDeliveryParcel) ||
+		!GetPawn())
+	{
+		return;
+	}
+
+	ParcelPreviewUpdateAccumulator += DeltaTime;
+	if (ParcelPreviewUpdateAccumulator < (1.0f / 30.0f))
+	{
+		return;
+	}
+	ParcelPreviewUpdateAccumulator = 0.0f;
+
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	GetPlayerViewPoint(ViewLocation, ViewRotation);
+	FVector FlatForward = ViewRotation.Vector();
+	FlatForward.Z = 0.0f;
+	if (!FlatForward.Normalize())
+	{
+		FlatForward = GetPawn()->GetActorForwardVector();
+		FlatForward.Z = 0.0f;
+		FlatForward.Normalize();
+	}
+
+	const FVector RequestedLocation =
+		GetPawn()->GetActorLocation() +
+		FlatForward * QuickBarItemPlacementDistance;
+	FTransform PlacementTransform;
+	bLocalParcelPlacementValid =
+		ResolveDeliveryParcelPlacement(
+			LocalMovedDeliveryParcel,
+			RequestedLocation,
+			ParcelPlacementYaw,
+			PlacementTransform);
+	LocalParcelMovePreview->SetActorTransform(
+		PlacementTransform,
+		false,
+		nullptr,
+		ETeleportType::TeleportPhysics);
+}
+
+void ABotanicusPlayerController::RotateDeliveryParcelPlacement(
+	float Direction)
+{
+	if (!IsValid(LocalParcelMovePreview))
+	{
+		return;
+	}
+
+	const bool bFineRotation =
+		IsInputKeyDown(EKeys::LeftShift) ||
+		IsInputKeyDown(EKeys::RightShift);
+	ParcelPlacementYaw =
+		FMath::UnwindDegrees(
+			ParcelPlacementYaw +
+			Direction *
+				(bFineRotation
+					? FineEquipmentRotationStep
+					: EquipmentRotationStep));
+	ParcelPreviewUpdateAccumulator = 1.0f;
+}
+
+void ABotanicusPlayerController::ConfirmDeliveryParcelPlacement()
+{
+	if (!IsValid(LocalParcelMovePreview) ||
+		!IsValid(LocalMovedDeliveryParcel))
+	{
+		return;
+	}
+	if (!bLocalParcelPlacementValid)
+	{
+		ClientMessage(
+			TEXT("Position invalide : le colis ne peut pas etre pose ici."));
+		return;
+	}
+
+	ServerConfirmDeliveryParcelMove(
+		LocalMovedDeliveryParcel,
+		LocalParcelMovePreview->GetActorLocation(),
+		ParcelPlacementYaw);
+	LocalParcelMovePreview->Destroy();
+	LocalParcelMovePreview = nullptr;
+	LocalMovedDeliveryParcel = nullptr;
+	bLocalParcelPlacementValid = false;
+}
+
+void ABotanicusPlayerController::CancelDeliveryParcelPlacement()
+{
+	if (IsValid(LocalMovedDeliveryParcel))
+	{
+		ServerCancelDeliveryParcelMove(LocalMovedDeliveryParcel);
+	}
+	if (IsValid(LocalParcelMovePreview))
+	{
+		LocalParcelMovePreview->Destroy();
+	}
+	LocalParcelMovePreview = nullptr;
+	LocalMovedDeliveryParcel = nullptr;
+	bLocalParcelPlacementValid = false;
+}
+
+bool ABotanicusPlayerController::ResolveDeliveryParcelPlacement(
+	const ABotanicusDeliveryParcelActor* Parcel,
+	const FVector& RequestedLocation,
+	float RequestedYaw,
+	FTransform& OutTransform) const
+{
+	UWorld* World = GetWorld();
+	APawn* ControlledPawn = GetPawn();
+	if (!World || !ControlledPawn || !IsValid(Parcel) ||
+		Parcel->IsOpened() ||
+		FVector::DistSquared2D(
+			ControlledPawn->GetActorLocation(),
+			RequestedLocation) >
+			FMath::Square(MaximumQuickBarItemPlacementDistance))
+	{
+		OutTransform = FTransform(
+			FRotator(0.0f, RequestedYaw, 0.0f),
+			RequestedLocation);
+		return false;
+	}
+
+	const FVector BoxExtent = Parcel->GetParcelHalfExtent().GetAbs();
+	FCollisionQueryParams FloorQuery(
+		SCENE_QUERY_STAT(BotanicusDeliveryParcelPlacementFloor),
+		false);
+	FloorQuery.AddIgnoredActor(ControlledPawn);
+	FloorQuery.AddIgnoredActor(Parcel);
+	if (IsValid(LocalParcelMovePreview))
+	{
+		FloorQuery.AddIgnoredActor(LocalParcelMovePreview);
+	}
+
+	const float PawnBaseZ = ControlledPawn->GetActorLocation().Z;
+	const FVector TraceStart(
+		RequestedLocation.X,
+		RequestedLocation.Y,
+		PawnBaseZ + 160.0f);
+	const FVector TraceEnd(
+		RequestedLocation.X,
+		RequestedLocation.Y,
+		PawnBaseZ - 450.0f);
+	FHitResult FloorHit;
+	const bool bFoundFloor = World->LineTraceSingleByChannel(
+		FloorHit,
+		TraceStart,
+		TraceEnd,
+		ECC_Visibility,
+		FloorQuery);
+
+	const FVector PlacementLocation(
+		RequestedLocation.X,
+		RequestedLocation.Y,
+		bFoundFloor
+			? FloorHit.ImpactPoint.Z + BoxExtent.Z + 3.0f
+			: RequestedLocation.Z);
+	const FQuat PlacementRotation =
+		FRotator(0.0f, RequestedYaw, 0.0f).Quaternion();
+	OutTransform = FTransform(
+		PlacementRotation,
+		PlacementLocation);
+	if (!bFoundFloor || FloorHit.ImpactNormal.Z < 0.7f)
+	{
+		return false;
+	}
+
+	FCollisionObjectQueryParams ObjectQuery;
+	ObjectQuery.AddObjectTypesToQuery(ECC_WorldStatic);
+	ObjectQuery.AddObjectTypesToQuery(ECC_WorldDynamic);
+	ObjectQuery.AddObjectTypesToQuery(ECC_Pawn);
+	FCollisionQueryParams OverlapQuery(
+		SCENE_QUERY_STAT(BotanicusDeliveryParcelPlacementOverlap),
+		false);
+	OverlapQuery.AddIgnoredActor(ControlledPawn);
+	OverlapQuery.AddIgnoredActor(Parcel);
+	if (IsValid(LocalParcelMovePreview))
+	{
+		OverlapQuery.AddIgnoredActor(LocalParcelMovePreview);
+	}
+
+	const FVector TestExtent(
+		FMath::Max(5.0f, BoxExtent.X - 3.0f),
+		FMath::Max(5.0f, BoxExtent.Y - 3.0f),
+		FMath::Max(5.0f, BoxExtent.Z - 3.0f));
+	TArray<FOverlapResult> Overlaps;
+	return !World->OverlapMultiByObjectType(
+		Overlaps,
+		PlacementLocation,
+		PlacementRotation,
+		ObjectQuery,
+		FCollisionShape::MakeBox(TestExtent),
+		OverlapQuery);
+}
+
+bool ABotanicusPlayerController::TryHandleNearbyWateringCan()
+{
+	if (!IsLocalPlayerController() || !GetPawn() || !GetWorld())
+	{
+		return false;
+	}
+
+	ABotanicusCharacter* BotanicusCharacter =
+		Cast<ABotanicusCharacter>(GetPawn());
+	if (!BotanicusCharacter)
+	{
+		return false;
+	}
+	if (ABotanicusWateringCanActor* HeldCan =
+		BotanicusCharacter->GetHeldWateringCan())
+	{
+		ServerToggleWateringCan(HeldCan);
+		return true;
+	}
+
+	ABotanicusWateringCanActor* NearestCan = nullptr;
+	float BestDistanceSquared = FMath::Square(350.0f);
+	for (TActorIterator<ABotanicusWateringCanActor> CanIt(GetWorld());
+		 CanIt;
+		 ++CanIt)
+	{
+		if (IsValid(CanIt->GetCarrier()))
+		{
+			continue;
+		}
+		const float DistanceSquared = FVector::DistSquared(
+			BotanicusCharacter->GetActorLocation(),
+			CanIt->GetActorLocation());
+		if (DistanceSquared <= BestDistanceSquared &&
+			IsLookingAtWorldItem(*CanIt, 350.0f))
+		{
+			BestDistanceSquared = DistanceSquared;
+			NearestCan = *CanIt;
+		}
+	}
+	if (!NearestCan)
+	{
+		return false;
+	}
+	ServerToggleWateringCan(NearestCan);
+	return true;
+}
+
+bool ABotanicusPlayerController::TryRefillHeldWateringCan()
+{
+	if (!IsLocalPlayerController() || !GetPawn() || !GetWorld())
+	{
+		return false;
+	}
+	const ABotanicusCharacter* BotanicusCharacter =
+		Cast<ABotanicusCharacter>(GetPawn());
+	const ABotanicusWateringCanActor* HeldCan =
+		BotanicusCharacter
+			? BotanicusCharacter->GetHeldWateringCan()
+			: nullptr;
+	if (!IsValid(HeldCan) || HeldCan->IsFull())
+	{
+		return false;
+	}
+
+	ABotanicusWaterReserveActor* NearestReserve = nullptr;
+	float BestDistanceSquared = FMath::Square(400.0f);
+	for (TActorIterator<ABotanicusWaterReserveActor> ReserveIt(
+			 GetWorld());
+		 ReserveIt;
+		 ++ReserveIt)
+	{
+		const float DistanceSquared = FVector::DistSquared(
+			BotanicusCharacter->GetActorLocation(),
+			ReserveIt->GetActorLocation());
+		if (DistanceSquared <= BestDistanceSquared &&
+			IsLookingAtWorldItem(*ReserveIt, 400.0f))
+		{
+			BestDistanceSquared = DistanceSquared;
+			NearestReserve = *ReserveIt;
+		}
+	}
+	if (!NearestReserve)
+	{
+		return false;
+	}
+	ServerRefillWateringCan(NearestReserve);
 	return true;
 }
 
@@ -2930,6 +3835,10 @@ bool ABotanicusPlayerController::TryMoveNearbyPlaceableItem()
 		 ++ItemIt)
 	{
 		if (ItemIt->ActorHasTag(TEXT("BotanicusPlacementPreview")))
+		{
+			continue;
+		}
+		if (Cast<ABotanicusWateringCanActor>(*ItemIt))
 		{
 			continue;
 		}
@@ -3097,14 +4006,149 @@ bool ABotanicusPlayerController::TryBeginNearbyPlantPotAction()
 	return true;
 }
 
+bool ABotanicusPlayerController::TryBeginNearbyParcelCut()
+{
+	ABotanicusCharacter* BotanicusCharacter =
+		Cast<ABotanicusCharacter>(GetPawn());
+	const UBotanicusQuickBarComponent* QuickBar =
+		BotanicusCharacter
+			? BotanicusCharacter->GetQuickBarComponent()
+			: nullptr;
+	if (!IsLocalPlayerController() ||
+		!BotanicusCharacter ||
+		!QuickBar ||
+		!GetWorld() ||
+		QuickBar->GetSelectedSlot().ItemKey != TEXT("BoxCutter"))
+	{
+		return false;
+	}
+
+	ABotanicusDeliveryParcelActor* TargetParcel = nullptr;
+	float BestDistanceSquared = FMath::Square(450.0f);
+	for (TActorIterator<ABotanicusDeliveryParcelActor> ParcelIt(
+			 GetWorld());
+		 ParcelIt;
+		 ++ParcelIt)
+	{
+		if (ParcelIt->IsOpened())
+		{
+			continue;
+		}
+		const float DistanceSquared = FVector::DistSquared(
+			BotanicusCharacter->GetActorLocation(),
+			ParcelIt->GetActorLocation());
+		if (DistanceSquared <= BestDistanceSquared &&
+			IsLookingAtWorldItem(*ParcelIt, 450.0f))
+		{
+			BestDistanceSquared = DistanceSquared;
+			TargetParcel = *ParcelIt;
+		}
+	}
+	if (!TargetParcel)
+	{
+		return false;
+	}
+
+	LocalActiveParcelCut = TargetParcel;
+	bParcelCutActionHeld = true;
+	ServerBeginParcelCut(TargetParcel);
+	return true;
+}
+
+void ABotanicusPlayerController::EndParcelCut()
+{
+	if (IsValid(LocalActiveParcelCut))
+	{
+		ServerEndParcelCut(LocalActiveParcelCut);
+	}
+	LocalActiveParcelCut = nullptr;
+	bParcelCutActionHeld = false;
+}
+
 void ABotanicusPlayerController::EndPlantPotAction()
 {
 	if (IsValid(LocalActivePlantPot))
 	{
 		ServerEndPlantPotAction(LocalActivePlantPot);
 	}
+	if (IsValid(LocalActiveSalePot))
+	{
+		ServerEndSalePotAction(LocalActiveSalePot);
+	}
 	LocalActivePlantPot = nullptr;
+	LocalActiveSalePot = nullptr;
 	bPlantPotActionHeld = false;
+}
+
+bool ABotanicusPlayerController::TryBeginNearbySalePotAction()
+{
+	if (!IsLocalPlayerController() || !GetPawn() || !GetWorld())
+	{
+		return false;
+	}
+
+	ABotanicusSalePotActor* NearestPot = nullptr;
+	float BestDistanceSquared = FMath::Square(400.0f);
+	for (TActorIterator<ABotanicusSalePotActor> PotIt(GetWorld());
+		 PotIt;
+		 ++PotIt)
+	{
+		const float DistanceSquared = FVector::DistSquared(
+			GetPawn()->GetActorLocation(),
+			PotIt->GetActorLocation());
+		if (DistanceSquared <= BestDistanceSquared &&
+			IsLookingAtWorldItem(*PotIt, 400.0f))
+		{
+			BestDistanceSquared = DistanceSquared;
+			NearestPot = *PotIt;
+		}
+	}
+	if (!NearestPot)
+	{
+		return false;
+	}
+
+	LocalActiveSalePot = NearestPot;
+	bPlantPotActionHeld = true;
+	ServerBeginSalePotAction(NearestPot);
+	return true;
+}
+
+bool ABotanicusPlayerController::
+	TryPlacePlantOnNearbySalesDisplay()
+{
+	if (!IsLocalPlayerController() || !GetPawn() || !GetWorld() ||
+		IsValid(LocalQuickBarItemPreview) ||
+		IsValid(LocalLargeEquipmentPlacement))
+	{
+		return false;
+	}
+
+	ABotanicusSalesDisplayActor* NearestDisplay = nullptr;
+	float BestDistanceSquared = FMath::Square(400.0f);
+	for (TActorIterator<ABotanicusSalesDisplayActor> DisplayIt(
+			 GetWorld());
+		 DisplayIt;
+		 ++DisplayIt)
+	{
+		const float DistanceSquared = FVector::DistSquared(
+			GetPawn()->GetActorLocation(),
+			DisplayIt->GetActorLocation());
+		if (DistanceSquared <= BestDistanceSquared &&
+			IsLookingAtWorldItem(*DisplayIt, 400.0f))
+		{
+			BestDistanceSquared = DistanceSquared;
+			NearestDisplay = *DisplayIt;
+		}
+	}
+
+	if (!NearestDisplay)
+	{
+		return false;
+	}
+
+	ServerPlacePlantOnSalesDisplay(NearestDisplay);
+	return true;
 }
 
 bool ABotanicusPlayerController::IsLookingAtWorldItem(
@@ -3200,7 +4244,9 @@ void ABotanicusPlayerController::AddPathPointAtCursor()
 	PendingPathPoints.Add(Point);
 	if (PathPreviewActor)
 	{
-		PathPreviewActor->SetPreviewPath(PendingPathPoints);
+		PathPreviewActor->SetPreviewPath(
+			PendingPathPoints,
+			PendingPathType);
 	}
 	RefreshTopDownToolbar();
 }
@@ -3216,7 +4262,9 @@ void ABotanicusPlayerController::RemoveLastPathPoint()
 	PendingPathPoints.Pop();
 	if (PathPreviewActor)
 	{
-		PathPreviewActor->SetPreviewPath(PendingPathPoints);
+		PathPreviewActor->SetPreviewPath(
+			PendingPathPoints,
+			PendingPathType);
 	}
 	RefreshTopDownToolbar();
 }
@@ -3241,7 +4289,9 @@ void ABotanicusPlayerController::UpdatePathPreview()
 	{
 		PreviewPoints.Add(CursorPoint);
 	}
-	PathPreviewActor->SetPreviewPath(PreviewPoints);
+	PathPreviewActor->SetPreviewPath(
+		PreviewPoints,
+		PendingPathType);
 }
 
 void ABotanicusPlayerController::RefreshTopDownToolbar()
@@ -3251,7 +4301,10 @@ void ABotanicusPlayerController::RefreshTopDownToolbar()
 		TopDownToolbarWidget->RefreshPathState(
 			bPathPlacementActive,
 			PendingPathPoints.Num() >= 2,
-			bPathDeletionActive);
+			bPathDeletionActive,
+			PendingPathType ==
+				EBotanicusPathType::VisitorRoute,
+			PendingVisitorZoneType);
 	}
 }
 
@@ -3264,6 +4317,14 @@ bool ABotanicusPlayerController::GetPathCursorPoint(
 		return false;
 	}
 
+	if (PendingPathType == EBotanicusPathType::VisitorRoute)
+	{
+		OutPoint =
+			CursorHit.ImpactPoint +
+			FVector(0.0f, 0.0f, 4.0f);
+		return true;
+	}
+
 	float LandscapeHeight = 0.0f;
 	if (!FindLandscapeHeight(
 		FVector2D(CursorHit.ImpactPoint.X, CursorHit.ImpactPoint.Y),
@@ -3271,7 +4332,6 @@ bool ABotanicusPlayerController::GetPathCursorPoint(
 	{
 		return false;
 	}
-
 	const FVector RawPoint(
 		CursorHit.ImpactPoint.X,
 		CursorHit.ImpactPoint.Y,
@@ -3414,7 +4474,7 @@ bool ABotanicusPlayerController::IsCursorOverTopDownToolbar() const
 		return false;
 	}
 	GetViewportSize(ViewportX, ViewportY);
-	return MouseY <= 125.0f &&
+	return MouseY <= 170.0f &&
 		FMath::Abs(MouseX - ViewportX * 0.5f) <= 620.0f;
 }
 
@@ -4010,7 +5070,7 @@ void ABotanicusPlayerController::ServerPurchaseCatalogBuilding_Implementation(
 		Display,
 		TEXT("Server received building purchase %s with %d credits."),
 		*BuildingKey.ToString(),
-		AvailableFunds);
+		GetAvailableFunds());
 
 	const FBotanicusBuildingDefinition* Definition =
 		FindBuildingDefinition(this, BuildingKey);
@@ -4042,7 +5102,7 @@ void ABotanicusPlayerController::ServerPurchaseCatalogBuilding_Implementation(
 		return;
 	}
 	const int32 Price = FMath::Max(0, Definition->Price);
-	if (AvailableFunds < Price)
+	if (GetAvailableFunds() < Price)
 	{
 		ClientMessage(TEXT("Crédits insuffisants pour ce bâtiment."));
 		return;
@@ -4138,7 +5198,11 @@ void ABotanicusPlayerController::ServerPurchaseCatalogBuilding_Implementation(
 	}
 
 	const FVector InitialOffset = Definition->PreviewOffset;
-	AvailableFunds -= Price;
+	if (!TrySpendSharedFunds(this, Price))
+	{
+		ClientMessage(TEXT("Crédits insuffisants pour ce bâtiment."));
+		return;
+	}
 	ServerPendingBuildingPurchasePrice = Price;
 	ServerPendingBuildingPurchaseKey = BuildingKey;
 	ForceNetUpdate();
@@ -4363,7 +5427,7 @@ void ABotanicusPlayerController::ServerOrderTestDelivery_Implementation()
 		return;
 	}
 
-	const FName TestItemKey(TEXT("SeedPacket_Test"));
+	const FName TestItemKey(TEXT("SeedPacket_Basil"));
 	const FBotanicusItemDefinition* Definition =
 		FindItemDefinition(this, TestItemKey);
 	Parcel->InitializeParcel(
@@ -4371,6 +5435,9 @@ void ABotanicusPlayerController::ServerOrderTestDelivery_Implementation()
 		Definition
 			? FMath::Max(1, Definition->DeliveryQuantity)
 			: 10);
+	Parcel->SetActorLocation(
+		Parcel->GetActorLocation() +
+		FVector(0.0f, 0.0f, Parcel->GetParcelHalfExtent().Z));
 	ClientMessage(
 		TEXT(
 			"Commande livrée : quittez la vue top-down et récupérez le colis avec E."));
@@ -4499,20 +5566,24 @@ void ABotanicusPlayerController::ServerPlaceCatalogOrder_Implementation(
 
 	const FBotanicusItemDefinition* Definition =
 		FindItemDefinition(this, ItemKey);
-	if (!Definition)
+	if (!Definition || !Definition->bPurchasable)
 	{
-		ClientMessage(TEXT("Commande refusee : article inconnu."));
+		ClientMessage(TEXT("Commande refusee : article indisponible."));
 		return;
 	}
 
 	const int32 Price = FMath::Max(0, Definition->Price);
-	if (AvailableFunds < Price)
+	if (GetAvailableFunds() < Price)
 	{
 		ClientMessage(TEXT("Fonds insuffisants pour cette commande."));
 		return;
 	}
 
-	AvailableFunds -= Price;
+	if (!TrySpendSharedFunds(this, Price))
+	{
+		ClientMessage(TEXT("Fonds insuffisants pour cette commande."));
+		return;
+	}
 	FBotanicusPendingOrder& Order =
 		PendingOrders.AddDefaulted_GetRef();
 	Order.OrderId = FGuid::NewGuid();
@@ -4530,6 +5601,11 @@ void ABotanicusPlayerController::ServerPlaceCatalogOrder_Implementation(
 		? GameState->GetServerWorldTimeSeconds()
 		: GetWorld()->GetTimeSeconds();
 	Order.DeliveryServerTime = ServerTime + Delay;
+	if (ABotanicusGameState* BotanicusGameState =
+		GetSharedGameState(this))
+	{
+		BotanicusGameState->RecordCatalogOrder();
+	}
 
 	FTimerDelegate DeliveryDelegate;
 	DeliveryDelegate.BindUObject(
@@ -4556,8 +5632,71 @@ void ABotanicusPlayerController::ServerPlaceCatalogOrder_Implementation(
 		*ItemKey.ToString(),
 		PlayerState ? *PlayerState->GetPlayerName() : TEXT("UnknownPlayer"),
 		Price,
-		AvailableFunds,
+		GetAvailableFunds(),
 		Delay);
+	ScheduleSharedStateAutosave(this);
+}
+
+void ABotanicusPlayerController::ServerUpgradeMainShop_Implementation()
+{
+	ABotanicusGameState* GameState = GetSharedGameState(this);
+	if (!GameState)
+	{
+		return;
+	}
+	if (!GameState->AreMainShopUpgradeTasksComplete())
+	{
+		ClientMessage(
+			TEXT("Amelioration refusee : terminez toutes les taches."));
+		return;
+	}
+	if (GameState->GetSharedFunds() <
+		GameState->GetMainShopUpgradeCost())
+	{
+		ClientMessage(
+			TEXT("Amelioration refusee : credits insuffisants."));
+		return;
+	}
+	if (!GameState->TryUpgradeMainShop())
+	{
+		return;
+	}
+
+	ClientMessage(
+		*FString::Printf(
+			TEXT(
+				"Boutique principale niveau %d : capacite %d visiteurs."),
+			GameState->GetMainShopLevel(),
+			GameState->GetMainShopVisitorCapacity()));
+	OnRep_OrderState();
+	ScheduleSharedStateAutosave(this);
+}
+
+void ABotanicusPlayerController::ServerSetMainShopOpen_Implementation(
+	bool bOpen)
+{
+	ABotanicusGameState* GameState = GetSharedGameState(this);
+	if (!GameState || GameState->IsMainShopOpen() == bOpen)
+	{
+		return;
+	}
+
+	GameState->SetMainShopOpen(bOpen);
+	OnRep_OrderState();
+	ClientMessage(
+		bOpen
+			? TEXT("Le magasin est ouvert : les visiteurs peuvent arriver.")
+			: TEXT("Le magasin est ferme : tous les visiteurs repartent."));
+	ScheduleSharedStateAutosave(this);
+}
+
+void ABotanicusPlayerController::ServerAddTestCredits_Implementation()
+{
+	constexpr int32 TestCreditAmount = 100;
+	AddSharedFunds(this, TestCreditAmount);
+	OnRep_OrderState();
+	ClientMessage(TEXT("Test : +100 crédits ajoutés à la caisse commune."));
+	ScheduleSharedStateAutosave(this);
 }
 
 ABotanicusDeliveryZoneActor*
@@ -4639,6 +5778,19 @@ bool ABotanicusPlayerController::DeliverCatalogItem(
 			++DeliveryIndex;
 		}
 	}
+	for (TActorIterator<ABotanicusPlaceableItemActor> ItemIt(World);
+		 ItemIt;
+		 ++ItemIt)
+	{
+		if (!ItemIt->ActorHasTag(TEXT("BotanicusPlacementPreview")) &&
+			FVector::DistSquared2D(
+				ItemIt->GetActorLocation(),
+				DeliveryZone->GetActorLocation()) <
+				FMath::Square(700.0f))
+		{
+			++DeliveryIndex;
+		}
+	}
 	for (TActorIterator<ABotanicusLargeEquipmentActor> EquipmentIt(
 			 World);
 		 EquipmentIt;
@@ -4659,32 +5811,19 @@ bool ABotanicusPlayerController::DeliverCatalogItem(
 		ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 	const FVector DeliverySpawnLocation =
 		DeliveryZone->GetParcelSpawnLocation(DeliveryIndex);
-	if (Definition->WeightClass ==
-		EBotanicusItemWeightClass::Hotbar)
-	{
-		ABotanicusDeliveryParcelActor* Parcel =
-			World->SpawnActor<ABotanicusDeliveryParcelActor>(
-				DeliverySpawnLocation,
-				FRotator::ZeroRotator,
-				SpawnParameters);
-		if (!Parcel)
-		{
-			return false;
-		}
-		Parcel->InitializeParcel(ItemKey, FMath::Max(1, Quantity));
-		return true;
-	}
-
-	ABotanicusLargeEquipmentActor* Equipment =
-		World->SpawnActor<ABotanicusLargeEquipmentActor>(
-			DeliverySpawnLocation + FVector(0.0f, 0.0f, 35.0f),
+	ABotanicusDeliveryParcelActor* Parcel =
+		World->SpawnActor<ABotanicusDeliveryParcelActor>(
+			DeliverySpawnLocation,
 			FRotator::ZeroRotator,
 			SpawnParameters);
-	if (!Equipment)
+	if (!Parcel)
 	{
 		return false;
 	}
-	Equipment->InitializeEquipment(ItemKey);
+	Parcel->InitializeParcel(ItemKey, FMath::Max(1, Quantity));
+	Parcel->SetActorLocation(
+		DeliverySpawnLocation +
+		FVector(0.0f, 0.0f, Parcel->GetParcelHalfExtent().Z));
 	return true;
 }
 
@@ -4739,7 +5878,7 @@ void ABotanicusPlayerController::CompleteCatalogOrder(
 	PendingOrderTimers.Remove(OrderId);
 	if (!bDelivered)
 	{
-		AvailableFunds += Order.ChargedPrice;
+		AddSharedFunds(this, Order.ChargedPrice);
 		ClientMessage(
 			TEXT("Livraison impossible : commande remboursee."));
 	}
@@ -4750,6 +5889,7 @@ void ABotanicusPlayerController::CompleteCatalogOrder(
 	}
 	ForceNetUpdate();
 	OnRep_OrderState();
+	ScheduleSharedStateAutosave(this);
 }
 
 void ABotanicusPlayerController::
@@ -5147,6 +6287,7 @@ void ABotanicusPlayerController::
 {
 	if (!IsValid(WorldItem) ||
 		WorldItem->ActorHasTag(TEXT("BotanicusPlacementPreview")) ||
+		Cast<ABotanicusWateringCanActor>(WorldItem) ||
 		!IsLookingAtWorldItem(WorldItem, 450.0f))
 	{
 		ClientMessage(
@@ -5182,6 +6323,28 @@ void ABotanicusPlayerController::
 		return;
 	}
 
+	if (ABotanicusSalePotActor* SalePot =
+		Cast<ABotanicusSalePotActor>(WorldItem))
+	{
+		for (TActorIterator<ABotanicusSalesDisplayActor> DisplayIt(
+				 GetWorld());
+			 DisplayIt;
+			 ++DisplayIt)
+		{
+			if (DisplayIt->IsEmpty() &&
+				FVector::DistSquared(
+					PlacementTransform.GetLocation(),
+					DisplayIt->GetSalePotPlacementTransform().
+						GetLocation()) <=
+					FMath::Square(30.0f) &&
+				DisplayIt->TryMountSalePot(SalePot, this))
+			{
+				ServerMovedPlaceableItem = nullptr;
+				return;
+			}
+		}
+	}
+
 	WorldItem->SetActorTransform(
 		PlacementTransform,
 		false,
@@ -5204,6 +6367,94 @@ void ABotanicusPlayerController::
 }
 
 void ABotanicusPlayerController::
+	ServerBeginDeliveryParcelMove_Implementation(
+		ABotanicusDeliveryParcelActor* Parcel)
+{
+	if (!IsValid(Parcel) ||
+		Parcel->IsOpened() ||
+		Parcel->ActorHasTag(TEXT("BotanicusPlacementPreview")) ||
+		!IsLookingAtWorldItem(Parcel, 450.0f))
+	{
+		ClientMessage(
+			TEXT(
+				"Regardez le colis ferme et rapprochez-vous pour le deplacer."));
+		return;
+	}
+
+	for (TActorIterator<ABotanicusPlayerController> ControllerIt(
+			 GetWorld());
+		 ControllerIt;
+		 ++ControllerIt)
+	{
+		if (*ControllerIt != this &&
+			ControllerIt->ServerMovedDeliveryParcel == Parcel)
+		{
+			ClientMessage(
+				TEXT("Ce colis est deja deplace par un autre joueur."));
+			return;
+		}
+	}
+
+	Parcel->EndCutting(GetPawn());
+	ServerMovedDeliveryParcel = Parcel;
+}
+
+void ABotanicusPlayerController::
+	ServerConfirmDeliveryParcelMove_Implementation(
+		ABotanicusDeliveryParcelActor* Parcel,
+		FVector_NetQuantize10 RequestedLocation,
+		float RequestedYaw)
+{
+	if (!IsValid(Parcel) ||
+		Parcel->IsOpened() ||
+		ServerMovedDeliveryParcel != Parcel)
+	{
+		ClientMessage(TEXT("Deplacement refuse : colis non reserve."));
+		return;
+	}
+
+	FTransform PlacementTransform;
+	if (!ResolveDeliveryParcelPlacement(
+			Parcel,
+			FVector(RequestedLocation),
+			RequestedYaw,
+			PlacementTransform))
+	{
+		ClientMessage(
+			TEXT("Deplacement refuse : position du colis invalide."));
+		return;
+	}
+
+	Parcel->SetActorTransform(
+		PlacementTransform,
+		false,
+		nullptr,
+		ETeleportType::TeleportPhysics);
+	Parcel->SetNetDormancy(DORM_Awake);
+	Parcel->FlushNetDormancy();
+	Parcel->ForceNetUpdate();
+	ServerMovedDeliveryParcel = nullptr;
+
+	if (ABotanicusGameMode* GameMode =
+			GetWorld()
+				? GetWorld()->GetAuthGameMode<ABotanicusGameMode>()
+				: nullptr)
+	{
+		GameMode->ScheduleInventoryAutosave();
+	}
+}
+
+void ABotanicusPlayerController::
+	ServerCancelDeliveryParcelMove_Implementation(
+		ABotanicusDeliveryParcelActor* Parcel)
+{
+	if (ServerMovedDeliveryParcel == Parcel)
+	{
+		ServerMovedDeliveryParcel = nullptr;
+	}
+}
+
+void ABotanicusPlayerController::
 	ServerCollectDeliveryParcel_Implementation(
 		ABotanicusDeliveryParcelActor* Parcel)
 {
@@ -5220,6 +6471,82 @@ void ABotanicusPlayerController::
 	IBotanicusInteractable::Execute_Interact(
 		Parcel,
 		ControlledPawn);
+}
+
+void ABotanicusPlayerController::
+	ServerBeginParcelCut_Implementation(
+		ABotanicusDeliveryParcelActor* Parcel)
+{
+	APawn* ControlledPawn = GetPawn();
+	if (!IsValid(Parcel) ||
+		!ControlledPawn ||
+		!IsLookingAtWorldItem(Parcel, 450.0f))
+	{
+		return;
+	}
+	Parcel->BeginCutting(ControlledPawn);
+}
+
+void ABotanicusPlayerController::
+	ServerEndParcelCut_Implementation(
+		ABotanicusDeliveryParcelActor* Parcel)
+{
+	if (IsValid(Parcel))
+	{
+		Parcel->EndCutting(GetPawn());
+	}
+}
+
+void ABotanicusPlayerController::
+	ServerToggleWateringCan_Implementation(
+		ABotanicusWateringCanActor* WateringCan)
+{
+	ABotanicusCharacter* BotanicusCharacter =
+		Cast<ABotanicusCharacter>(GetPawn());
+	if (!BotanicusCharacter || !IsValid(WateringCan))
+	{
+		return;
+	}
+
+	if (BotanicusCharacter->GetHeldWateringCan() == WateringCan)
+	{
+		WateringCan->Drop();
+		ClientMessage(TEXT("Arrosoir pose."));
+		return;
+	}
+	if (IsValid(BotanicusCharacter->GetHeldWateringCan()) ||
+		IsValid(WateringCan->GetCarrier()) ||
+		!IsLookingAtWorldItem(WateringCan, 400.0f))
+	{
+		ClientMessage(
+			TEXT("Regardez l'arrosoir et rapprochez-vous pour le prendre."));
+		return;
+	}
+	if (WateringCan->TryPickUp(BotanicusCharacter))
+	{
+		ClientMessage(
+			FString::Printf(
+				TEXT("Arrosoir en main - eau : %d%%."),
+				FMath::RoundToInt(
+					WateringCan->GetWaterLevel() * 100.0f)));
+	}
+}
+
+void ABotanicusPlayerController::
+	ServerRefillWateringCan_Implementation(
+		ABotanicusWaterReserveActor* WaterReserve)
+{
+	ABotanicusCharacter* BotanicusCharacter =
+		Cast<ABotanicusCharacter>(GetPawn());
+	if (!BotanicusCharacter || !IsValid(WaterReserve) ||
+		!IsLookingAtWorldItem(WaterReserve, 450.0f))
+	{
+		return;
+	}
+	if (WaterReserve->TryRefill(BotanicusCharacter))
+	{
+		ClientMessage(TEXT("Arrosoir rempli : eau 100%."));
+	}
 }
 
 void ABotanicusPlayerController::
@@ -5256,6 +6583,45 @@ void ABotanicusPlayerController::
 	{
 		PlantPot->EndPrimaryUse(GetPawn());
 	}
+}
+
+void ABotanicusPlayerController::
+	ServerBeginSalePotAction_Implementation(
+		ABotanicusSalePotActor* SalePot)
+{
+	APawn* ControlledPawn = GetPawn();
+	if (!IsValid(SalePot) || !ControlledPawn ||
+		!IsLookingAtWorldItem(SalePot, 450.0f))
+	{
+		return;
+	}
+	SalePot->BeginPrimaryUse(ControlledPawn);
+}
+
+void ABotanicusPlayerController::
+	ServerEndSalePotAction_Implementation(
+		ABotanicusSalePotActor* SalePot)
+{
+	if (IsValid(SalePot))
+	{
+		SalePot->EndPrimaryUse(GetPawn());
+	}
+}
+
+void ABotanicusPlayerController::
+	ServerPlacePlantOnSalesDisplay_Implementation(
+		ABotanicusSalesDisplayActor* SalesDisplay)
+{
+	APawn* ControlledPawn = GetPawn();
+	if (!IsValid(SalesDisplay) || !ControlledPawn ||
+		!IsLookingAtWorldItem(SalesDisplay, 450.0f))
+	{
+		ClientMessage(
+			TEXT(
+				"Regardez le presentoir et rapprochez-vous pour exposer la plante."));
+		return;
+	}
+	SalesDisplay->TryPlaceSelectedPlant(ControlledPawn);
 }
 
 void ABotanicusPlayerController::
@@ -5425,13 +6791,15 @@ void ABotanicusPlayerController::ServerConfirmBuildingGroupMove_Implementation()
 		}
 	}
 
+	const bool bConfirmingBuildingPurchase =
+		bServerBuildingPurchasePlacement;
 	const bool bBeginDoorPlacement =
-		bServerBuildingPurchasePlacement &&
+		bConfirmingBuildingPurchase &&
 		BuildCommunicationDoorCandidates(ServerBuildingGroup);
 	const int32 PreviousProgressionLevel =
 		BuildingProgressionLevel;
 	int32 NewProgressionLevel = BuildingProgressionLevel;
-	if (bServerBuildingPurchasePlacement)
+	if (bConfirmingBuildingPurchase)
 	{
 		BroadcastPurchasedBuildingSnapshot(true);
 		if (const FBotanicusBuildingDefinition* PurchasedDefinition =
@@ -5450,8 +6818,9 @@ void ABotanicusPlayerController::ServerConfirmBuildingGroupMove_Implementation()
 		BuildingProgressionLevel = NewProgressionLevel;
 		if (NewProgressionLevel > PreviousProgressionLevel)
 		{
-			AvailableFunds +=
-				FMath::Max(0, DevelopmentLevelRewardCredits);
+			AddSharedFunds(
+				this,
+				FMath::Max(0, DevelopmentLevelRewardCredits));
 		}
 		ServerPendingBuildingPurchasePrice = 0;
 		ServerPendingBuildingPurchaseKey = NAME_None;
@@ -5459,6 +6828,10 @@ void ABotanicusPlayerController::ServerConfirmBuildingGroupMove_Implementation()
 		OnRep_OrderState();
 	}
 	ClearServerBuildingGroupMove();
+	if (bConfirmingBuildingPurchase)
+	{
+		ScheduleSharedStateAutosave(this);
+	}
 	ClientEndBuildingGroupMove(true);
 	if (NewProgressionLevel > PreviousProgressionLevel)
 	{
@@ -5745,10 +7118,17 @@ void ABotanicusPlayerController::ServerPlacePing_Implementation(
 }
 
 void ABotanicusPlayerController::ServerCreatePath_Implementation(
-	const TArray<FVector_NetQuantize10>& RequestedPoints)
+	const TArray<FVector_NetQuantize10>& RequestedPoints,
+	uint8 RequestedPathType)
 {
 	UWorld* World = GetWorld();
 	APawn* ControlledPawn = GetPawn();
+	const EBotanicusPathType PathType =
+		RequestedPathType ==
+			static_cast<uint8>(
+				EBotanicusPathType::VisitorRoute)
+			? EBotanicusPathType::VisitorRoute
+			: EBotanicusPathType::Standard;
 	if (!World ||
 		!ControlledPawn ||
 		RequestedPoints.Num() < 2 ||
@@ -5774,20 +7154,30 @@ void ABotanicusPlayerController::ServerCreatePath_Implementation(
 			return;
 		}
 
-		float LandscapeHeight = 0.0f;
-		if (!FindLandscapeHeight(
-			FVector2D(RequestedPoint.X, RequestedPoint.Y),
-			LandscapeHeight))
+		FVector GroundedPoint;
+		if (PathType == EBotanicusPathType::VisitorRoute)
 		{
-			return;
+			GroundedPoint = FVector(RequestedPoint);
+		}
+		else
+		{
+			float LandscapeHeight = 0.0f;
+			if (!FindLandscapeHeight(
+				FVector2D(RequestedPoint.X, RequestedPoint.Y),
+				LandscapeHeight))
+			{
+				return;
+			}
+			GroundedPoint = FVector(
+				RequestedPoint.X,
+				RequestedPoint.Y,
+				LandscapeHeight + 8.0f);
 		}
 
-		FVector GroundedPoint(
-			RequestedPoint.X,
-			RequestedPoint.Y,
-			LandscapeHeight + 8.0f);
-		if (PointIndex == 0 ||
+		if (PathType == EBotanicusPathType::Standard &&
+			(PointIndex == 0 ||
 			PointIndex == RequestedPoints.Num() - 1)
+			)
 		{
 			FVector SnappedPoint;
 			ABotanicusPathActor* ConnectedPath = nullptr;
@@ -5815,6 +7205,31 @@ void ABotanicusPlayerController::ServerCreatePath_Implementation(
 			{
 				return;
 			}
+
+			if (PathType ==
+				EBotanicusPathType::VisitorRoute)
+			{
+				FCollisionQueryParams QueryParams(
+					SCENE_QUERY_STAT(
+						BotanicusVisitorRouteWallValidation),
+					false);
+				QueryParams.AddIgnoredActor(ControlledPawn);
+				FHitResult WallHit;
+				if (World->LineTraceSingleByChannel(
+						WallHit,
+						ValidatedPoints.Last() +
+							FVector(0.0f, 0.0f, 80.0f),
+						GroundedPoint +
+							FVector(0.0f, 0.0f, 80.0f),
+						ECC_Visibility,
+						QueryParams))
+				{
+					ClientMessage(
+						TEXT(
+							"Route PNJ refusée : un segment traverse un mur ou un obstacle."));
+					return;
+				}
+			}
 		}
 		ValidatedPoints.Add(GroundedPoint);
 	}
@@ -5841,21 +7256,92 @@ void ABotanicusPlayerController::ServerCreatePath_Implementation(
 		return;
 	}
 
-	Path->InitializeConfirmedPath(ValidatedPoints);
-	if (ConnectedPaths[0])
+	Path->InitializeConfirmedPath(
+		ValidatedPoints,
+		PathType);
+	if (PathType == EBotanicusPathType::Standard &&
+		ConnectedPaths[0])
 	{
 		ConnectedPaths[0]->AddJunctionPoint(ValidatedPoints[0]);
 	}
-	if (ConnectedPaths[1])
+	if (PathType == EBotanicusPathType::Standard &&
+		ConnectedPaths[1])
 	{
 		ConnectedPaths[1]->AddJunctionPoint(ValidatedPoints.Last());
 	}
 	UE_LOG(
 		LogBotanicus,
 		Display,
-		TEXT("Created a replicated path with %d points and length %.0f cm."),
+		TEXT("Created replicated %s with %d points and length %.0f cm."),
+		PathType == EBotanicusPathType::VisitorRoute
+			? TEXT("visitor route")
+			: TEXT("path"),
 		ValidatedPoints.Num(),
 		TotalLength);
+	ScheduleSharedStateAutosave(this);
+}
+
+void ABotanicusPlayerController::
+	ServerCreateVisitorZone_Implementation(
+	FVector_NetQuantize10 RequestedLocation,
+	uint8 RequestedZoneType)
+{
+	UWorld* World = GetWorld();
+	APawn* ControlledPawn = GetPawn();
+	if (!World ||
+		!ControlledPawn ||
+		RequestedLocation.ContainsNaN() ||
+		RequestedZoneType > 2 ||
+		FVector::DistSquared2D(
+			ControlledPawn->GetActorLocation(),
+			FVector(RequestedLocation)) >
+			FMath::Square(MaximumBuildingEditDistance))
+	{
+		return;
+	}
+
+	const EBotanicusVisitorZoneType ZoneType =
+		static_cast<EBotanicusVisitorZoneType>(
+			RequestedZoneType);
+	for (TActorIterator<ABotanicusVisitorZoneActor> ZoneIt(World);
+		 ZoneIt;
+		 ++ZoneIt)
+	{
+		if (ZoneIt->GetZoneType() == ZoneType)
+		{
+			ZoneIt->Destroy();
+		}
+	}
+
+	FVector ZoneExtent;
+	switch (ZoneType)
+	{
+	case EBotanicusVisitorZoneType::Parking:
+		ZoneExtent = FVector(500.0f, 300.0f, 6.0f);
+		break;
+	case EBotanicusVisitorZoneType::SalesArea:
+		ZoneExtent = FVector(700.0f, 500.0f, 6.0f);
+		break;
+	case EBotanicusVisitorZoneType::Checkout:
+	default:
+		ZoneExtent = FVector(180.0f, 140.0f, 6.0f);
+		break;
+	}
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	ABotanicusVisitorZoneActor* Zone =
+		World->SpawnActor<ABotanicusVisitorZoneActor>(
+			ABotanicusVisitorZoneActor::StaticClass(),
+			FVector(RequestedLocation),
+			FRotator::ZeroRotator,
+			SpawnParameters);
+	if (Zone)
+	{
+		Zone->InitializeZone(ZoneType, ZoneExtent);
+		ScheduleSharedStateAutosave(this);
+	}
 }
 
 void ABotanicusPlayerController::ServerDeletePathSegment_Implementation(
@@ -5917,9 +7403,15 @@ void ABotanicusPlayerController::ServerDeletePathSegment_Implementation(
 
 	const TArray<FVector> OriginalJunctions =
 		Path->GetJunctionWorldPoints();
+	const EBotanicusPathType OriginalPathType =
+		Path->GetPathType();
 	int32 RemainingPieceCount = 0;
 	auto SpawnRemainingPiece =
-		[this, World, &OriginalJunctions, &RemainingPieceCount](
+		[this,
+		 World,
+		 &OriginalJunctions,
+		 OriginalPathType,
+		 &RemainingPieceCount](
 			const TArray<FVector>& PiecePoints)
 		{
 			if (PiecePoints.Num() < 2)
@@ -5941,7 +7433,9 @@ void ABotanicusPlayerController::ServerDeletePathSegment_Implementation(
 				return;
 			}
 
-			Piece->InitializeConfirmedPath(PiecePoints);
+			Piece->InitializeConfirmedPath(
+				PiecePoints,
+				OriginalPathType);
 			TArray<FVector> RetainedJunctions;
 			for (const FVector& JunctionPoint : OriginalJunctions)
 			{
@@ -7094,7 +8588,7 @@ void ABotanicusPlayerController::RefundPendingBuildingPurchase()
 
 	const int32 RefundedPrice = ServerPendingBuildingPurchasePrice;
 	const FName RefundedKey = ServerPendingBuildingPurchaseKey;
-	AvailableFunds += RefundedPrice;
+	AddSharedFunds(this, RefundedPrice);
 	ServerPendingBuildingPurchasePrice = 0;
 	ServerPendingBuildingPurchaseKey = NAME_None;
 	ForceNetUpdate();
@@ -7109,6 +8603,7 @@ void ABotanicusPlayerController::RefundPendingBuildingPurchase()
 		TEXT("Refunded %d credits for cancelled building purchase %s."),
 		RefundedPrice,
 		*RefundedKey.ToString());
+	ScheduleSharedStateAutosave(this);
 }
 
 bool ABotanicusPlayerController::ShouldUseTouchControls() const

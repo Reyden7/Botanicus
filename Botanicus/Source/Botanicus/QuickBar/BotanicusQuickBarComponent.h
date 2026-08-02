@@ -112,10 +112,6 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Botanicus|Inventory")
 	bool ConsumeSelectedItem(int32 Quantity = 1);
 
-	/** Requests an authoritative consumption from the owning local player. */
-	UFUNCTION(BlueprintCallable, Category="Botanicus|Inventory")
-	void RequestConsumeSelectedItem(int32 Quantity = 1);
-
 	UFUNCTION(BlueprintPure, Category="Botanicus|Inventory")
 	int32 GetTotalQuantity(FName ItemKey) const;
 
@@ -189,6 +185,4 @@ private:
 	UFUNCTION(Server, Reliable)
 	void ServerActivateSelectedSlot();
 
-	UFUNCTION(Server, Reliable)
-	void ServerConsumeSelectedItem(int32 Quantity);
 };

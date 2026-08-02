@@ -8,6 +8,7 @@
 #include "Engine/CollisionProfile.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -49,19 +50,22 @@ void ABotanicusPathActor::GetLifetimeReplicatedProps(
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(ABotanicusPathActor, PathPoints);
 	DOREPLIFETIME(ABotanicusPathActor, JunctionPoints);
+	DOREPLIFETIME(ABotanicusPathActor, PathType);
 }
 
 void ABotanicusPathActor::InitializeConfirmedPath(
-	const TArray<FVector>& WorldPoints)
+	const TArray<FVector>& WorldPoints,
+	EBotanicusPathType InPathType)
 {
-	SetPathPointsInternal(WorldPoints, false);
+	SetPathPointsInternal(WorldPoints, false, InPathType);
 	ForceNetUpdate();
 }
 
 void ABotanicusPathActor::SetPreviewPath(
-	const TArray<FVector>& WorldPoints)
+	const TArray<FVector>& WorldPoints,
+	EBotanicusPathType InPathType)
 {
-	SetPathPointsInternal(WorldPoints, true);
+	SetPathPointsInternal(WorldPoints, true, InPathType);
 }
 
 void ABotanicusPathActor::AddJunctionPoint(const FVector& WorldPoint)
@@ -184,10 +188,18 @@ void ABotanicusPathActor::OnRep_JunctionPoints()
 	RebuildPathMeshes();
 }
 
+void ABotanicusPathActor::OnRep_PathType()
+{
+	DynamicPathMaterial = nullptr;
+	RebuildPathMeshes();
+}
+
 void ABotanicusPathActor::SetPathPointsInternal(
 	const TArray<FVector>& WorldPoints,
-	bool bIsPreview)
+	bool bIsPreview,
+	EBotanicusPathType InPathType)
 {
+	PathType = InPathType;
 	PathPoints.Reset(WorldPoints.Num());
 	for (const FVector& Point : WorldPoints)
 	{
@@ -233,6 +245,20 @@ void ABotanicusPathActor::RebuildPathMeshes()
 	}
 	SplineComponent->UpdateSpline();
 
+	if (PathMaterial && !DynamicPathMaterial)
+	{
+		DynamicPathMaterial =
+			UMaterialInstanceDynamic::Create(PathMaterial, this);
+		if (DynamicPathMaterial)
+		{
+			DynamicPathMaterial->SetVectorParameterValue(
+				TEXT("Color"),
+				PathType == EBotanicusPathType::VisitorRoute
+					? FLinearColor(0.04f, 0.85f, 0.8f, 1.0f)
+					: FLinearColor(0.32f, 0.32f, 0.32f, 1.0f));
+		}
+	}
+
 	if (!SegmentMesh || PathPoints.Num() < 2)
 	{
 		return;
@@ -258,9 +284,9 @@ void ABotanicusPathActor::RebuildPathMeshes()
 		Segment->RegisterComponent();
 		Segment->SetStaticMesh(SegmentMesh);
 		Segment->SetForwardAxis(ESplineMeshAxis::X, false);
-		if (PathMaterial)
+		if (DynamicPathMaterial)
 		{
-			Segment->SetMaterial(0, PathMaterial);
+			Segment->SetMaterial(0, DynamicPathMaterial);
 		}
 
 		FVector StartPosition;
@@ -286,14 +312,26 @@ void ABotanicusPathActor::RebuildPathMeshes()
 			false);
 		Segment->SetStartScale(SegmentScale, false);
 		Segment->SetEndScale(SegmentScale, true);
-		Segment->SetCollisionEnabled(
-			bPreviewPath
-				? ECollisionEnabled::NoCollision
-				: ECollisionEnabled::QueryAndPhysics);
-		Segment->SetCollisionProfileName(
-			bPreviewPath
-				? UCollisionProfile::NoCollision_ProfileName
-				: UCollisionProfile::BlockAll_ProfileName);
+		if (bPreviewPath)
+		{
+			Segment->SetCollisionProfileName(
+				UCollisionProfile::NoCollision_ProfileName);
+		}
+		else if (PathType ==
+			EBotanicusPathType::VisitorRoute)
+		{
+			Segment->SetCollisionEnabled(
+				ECollisionEnabled::QueryOnly);
+			Segment->SetCollisionResponseToAllChannels(ECR_Ignore);
+			Segment->SetCollisionResponseToChannel(
+				ECC_Visibility,
+				ECR_Block);
+		}
+		else
+		{
+			Segment->SetCollisionProfileName(
+				UCollisionProfile::BlockAll_ProfileName);
+		}
 		Segment->SetRenderCustomDepth(bPreviewPath);
 		Segment->SetCustomDepthStencilValue(1);
 		SegmentComponents.Add(Segment);
@@ -317,9 +355,9 @@ void ABotanicusPathActor::RebuildPathMeshes()
 		Junction->SetupAttachment(SplineComponent);
 		Junction->RegisterComponent();
 		Junction->SetStaticMesh(JunctionMesh);
-		if (PathMaterial)
+		if (DynamicPathMaterial)
 		{
-			Junction->SetMaterial(0, PathMaterial);
+			Junction->SetMaterial(0, DynamicPathMaterial);
 		}
 		Junction->SetWorldLocation(FVector(JunctionPoint));
 		Junction->SetWorldScale3D(
@@ -327,8 +365,20 @@ void ABotanicusPathActor::RebuildPathMeshes()
 				PathWidth / 100.0f,
 				PathWidth / 100.0f,
 				PathThickness / 100.0f));
-		Junction->SetCollisionProfileName(
-			UCollisionProfile::BlockAll_ProfileName);
+		if (PathType == EBotanicusPathType::VisitorRoute)
+		{
+			Junction->SetCollisionEnabled(
+				ECollisionEnabled::QueryOnly);
+			Junction->SetCollisionResponseToAllChannels(ECR_Ignore);
+			Junction->SetCollisionResponseToChannel(
+				ECC_Visibility,
+				ECR_Block);
+		}
+		else
+		{
+			Junction->SetCollisionProfileName(
+				UCollisionProfile::BlockAll_ProfileName);
+		}
 		JunctionComponents.Add(Junction);
 	}
 }

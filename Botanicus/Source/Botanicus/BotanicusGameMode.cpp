@@ -4,6 +4,7 @@
 
 #include "Botanicus.h"
 #include "BotanicusCharacter.h"
+#include "BotanicusGameState.h"
 #include "BotanicusPlayerController.h"
 #include "Building/BotanicusCatalogBuildingActor.h"
 #include "Building/BotanicusCommunicationDoorActor.h"
@@ -11,6 +12,9 @@
 #include "Delivery/BotanicusLargeEquipmentActor.h"
 #include "Delivery/BotanicusPlaceableItemActor.h"
 #include "Growing/BotanicusPlantPotActor.h"
+#include "Growing/BotanicusWateringCanActor.h"
+#include "Sales/BotanicusSalesDisplayActor.h"
+#include "Sales/BotanicusSalePotActor.h"
 #include "Engine/LocalPlayer.h"
 #include "EngineUtils.h"
 #include "GameFramework/GameStateBase.h"
@@ -20,6 +24,9 @@
 #include "Path/BotanicusPathActor.h"
 #include "QuickBar/BotanicusQuickBarComponent.h"
 #include "Save/BotanicusWorldSaveGame.h"
+#include "TimerManager.h"
+#include "Visitors/BotanicusVisitorManager.h"
+#include "Visitors/BotanicusVisitorZoneActor.h"
 
 namespace
 {
@@ -47,6 +54,18 @@ namespace
 
 ABotanicusGameMode::ABotanicusGameMode()
 {
+	GameStateClass = ABotanicusGameState::StaticClass();
+}
+
+void ABotanicusGameMode::InitGame(
+	const FString& MapName,
+	const FString& Options,
+	FString& ErrorMessage)
+{
+	// Existing Blueprint game modes may still serialize the former base
+	// GameState class. Enforce the shared Botanicus state before it is spawned.
+	GameStateClass = ABotanicusGameState::StaticClass();
+	Super::InitGame(MapName, Options, ErrorMessage);
 }
 
 void ABotanicusGameMode::BeginPlay()
@@ -56,17 +75,29 @@ void ABotanicusGameMode::BeginPlay()
 	if (HasAuthority())
 	{
 		LoadAutosave();
+		InitializeSharedEconomy();
 		RestoreWorldState();
 		if (UWorld* World = GetWorld())
 		{
+			TActorIterator<ABotanicusVisitorManager> ManagerIt(World);
+			if (!ManagerIt)
+			{
+				World->SpawnActor<ABotanicusVisitorManager>();
+			}
+
 			for (FConstPlayerControllerIterator ControllerIt =
 					 World->GetPlayerControllerIterator();
 				 ControllerIt;
 				 ++ControllerIt)
 			{
+				// The listen-server pawn may have been restarted before
+				// GameMode::BeginPlay loaded the autosave. Replay its
+				// inventory/transform restoration now that data is ready.
+				RestorePlayerInventory(ControllerIt->Get());
 				RestorePlayerEconomy(ControllerIt->Get());
 			}
 		}
+		bAutosaveReady = true;
 	}
 }
 
@@ -118,8 +149,20 @@ void ABotanicusGameMode::Logout(AController* Exiting)
 			BotanicusController->
 				CancelPendingBuildingPurchaseForLogout();
 		}
+		if (ABotanicusCharacter* Character =
+			Cast<ABotanicusCharacter>(Exiting->GetPawn()))
+		{
+			if (ABotanicusWateringCanActor* WateringCan =
+				Character->GetHeldWateringCan())
+			{
+				// A handheld tool remains in the shared world when its
+				// carrier disconnects and is then captured by the save.
+				WateringCan->Drop();
+			}
+		}
 		CapturePlayerInventory(Exiting);
 		CapturePlayerEconomy(Exiting);
+		BotanicusSaveNow();
 	}
 
 	Super::Logout(Exiting);
@@ -131,6 +174,25 @@ void ABotanicusGameMode::RegisterRemovedBuildingActor(FName ActorName)
 	{
 		RemovedBuildingActorNames.Add(ActorName);
 	}
+}
+
+void ABotanicusGameMode::ScheduleInventoryAutosave()
+{
+	if (!HasAuthority() || !bAutosaveReady ||
+		bInventoryAutosaveScheduled || !GetWorld())
+	{
+		return;
+	}
+	bInventoryAutosaveScheduled = true;
+	GetWorld()->GetTimerManager().SetTimerForNextTick(
+		this,
+		&ABotanicusGameMode::FlushScheduledInventoryAutosave);
+}
+
+void ABotanicusGameMode::FlushScheduledInventoryAutosave()
+{
+	bInventoryAutosaveScheduled = false;
+	BotanicusSaveNow();
 }
 
 bool ABotanicusGameMode::BotanicusSaveNow()
@@ -155,9 +217,38 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 
 	CurrentSaveGame->MapName =
 		UGameplayStatics::GetCurrentLevelName(this, true);
-	CurrentSaveGame->SaveVersion = 6;
+	CurrentSaveGame->SaveVersion = 17;
+	if (const ABotanicusGameState* BotanicusGameState =
+		World->GetGameState<ABotanicusGameState>())
+	{
+		CurrentSaveGame->SharedFunds =
+			BotanicusGameState->GetSharedFunds();
+		CurrentSaveGame->MainShopLevel =
+			BotanicusGameState->GetMainShopLevel();
+		CurrentSaveGame->bMainShopOpen =
+			BotanicusGameState->IsMainShopOpen();
+		CurrentSaveGame->TotalPlantsSold =
+			BotanicusGameState->GetTotalPlantsSold();
+		CurrentSaveGame->TotalCatalogOrders =
+			BotanicusGameState->GetTotalCatalogOrders();
+		CurrentSaveGame->ShopReputationPoints =
+			BotanicusGameState->GetShopReputationPoints();
+		CurrentSaveGame->LastVisitorSatisfaction =
+			BotanicusGameState->GetLastVisitorSatisfaction();
+		CurrentSaveGame->TotalVisitorReviews =
+			BotanicusGameState->GetTotalVisitorReviews();
+		CurrentSaveGame->TrendColorTag =
+			BotanicusGameState->GetTrendColorTag();
+		CurrentSaveGame->TrendTypeTag =
+			BotanicusGameState->GetTrendTypeTag();
+		CurrentSaveGame->TrendQualityTag =
+			BotanicusGameState->GetTrendQualityTag();
+		CurrentSaveGame->TrendRemainingSeconds =
+			BotanicusGameState->GetTrendRemainingSeconds();
+	}
 	CurrentSaveGame->BuildingActors.Reset();
 	CurrentSaveGame->Paths.Reset();
+	CurrentSaveGame->VisitorZones.Reset();
 	CurrentSaveGame->WorldItems.Reset();
 	CurrentSaveGame->RemovedBuildingActorNames =
 		RemovedBuildingActorNames.Array();
@@ -200,6 +291,8 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 
 		FBotanicusSavedPath& SavedPath =
 			CurrentSaveGame->Paths.AddDefaulted_GetRef();
+		SavedPath.PathType =
+			static_cast<uint8>(PathIt->GetPathType());
 		SavedPath.Points.Reserve(WorldPoints.Num());
 		for (const FVector& Point : WorldPoints)
 		{
@@ -211,6 +304,18 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 			SavedPath.JunctionPoints.Add(
 				FVector_NetQuantize10(JunctionPoint));
 		}
+	}
+
+	for (TActorIterator<ABotanicusVisitorZoneActor> ZoneIt(World);
+		 ZoneIt;
+		 ++ZoneIt)
+	{
+		FBotanicusSavedVisitorZone& SavedZone =
+			CurrentSaveGame->VisitorZones.AddDefaulted_GetRef();
+		SavedZone.Transform = ZoneIt->GetActorTransform();
+		SavedZone.ZoneType =
+			static_cast<uint8>(ZoneIt->GetZoneType());
+		SavedZone.BoxExtent = ZoneIt->GetZoneExtent();
 	}
 
 	for (TActorIterator<ABotanicusCommunicationDoorActor> DoorIt(World);
@@ -236,6 +341,9 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		SavedItem.Transform = ParcelIt->GetActorTransform();
 		SavedItem.ItemKey = ParcelIt->GetItemKey();
 		SavedItem.Quantity = ParcelIt->GetQuantity();
+		SavedItem.ParcelCutCoverageMask =
+			ParcelIt->GetCutCoverageMask();
+		SavedItem.bParcelOpened = ParcelIt->IsOpened();
 	}
 
 	for (TActorIterator<ABotanicusLargeEquipmentActor> EquipmentIt(World);
@@ -281,8 +389,30 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 			SavedItem.PlantWaterLevel = PlantPot->GetWaterLevel();
 			SavedItem.PlantGrowthProgress =
 				PlantPot->GetGrowthProgress();
+			SavedItem.PlantCareScore =
+				PlantPot->GetCareScore();
 			SavedItem.PlantWateringCount =
 				PlantPot->GetWateringCount();
+		}
+		else if (const ABotanicusSalesDisplayActor* SalesDisplay =
+			Cast<ABotanicusSalesDisplayActor>(*ItemIt))
+		{
+			SavedItem.DisplayedPlantItemKey =
+				SalesDisplay->GetDisplayedPlantItemKey();
+		}
+		else if (const ABotanicusWateringCanActor* WateringCan =
+			Cast<ABotanicusWateringCanActor>(*ItemIt))
+		{
+			SavedItem.WateringCanWaterLevel =
+				WateringCan->GetWaterLevel();
+		}
+		else if (const ABotanicusSalePotActor* SalePot =
+			Cast<ABotanicusSalePotActor>(*ItemIt))
+		{
+			SavedItem.SalePotSoilItemKey =
+				SalePot->GetSoilItemKey();
+			SavedItem.SalePotPlantItemKey =
+				SalePot->GetPlantItemKey();
 		}
 	}
 
@@ -434,6 +564,91 @@ void ABotanicusGameMode::LoadAutosave()
 		CurrentSaveGame->WorldItems.Num());
 }
 
+void ABotanicusGameMode::InitializeSharedEconomy()
+{
+	UWorld* World = GetWorld();
+	ABotanicusGameState* BotanicusGameState =
+		World ? World->GetGameState<ABotanicusGameState>() : nullptr;
+	if (!BotanicusGameState || !CurrentSaveGame)
+	{
+		return;
+	}
+
+	int32 RestoredSharedFunds = 2000;
+	if (CurrentSaveGame->SaveVersion >= 10 &&
+		CurrentSaveGame->SharedFunds >= 0)
+	{
+		RestoredSharedFunds = CurrentSaveGame->SharedFunds;
+	}
+	else if (CurrentSaveGame->PlayerEconomies.Num() > 0)
+	{
+		// One-time migration: the first legacy wallet becomes the nursery
+		// wallet. We deliberately do not add all players' balances together.
+		RestoredSharedFunds =
+			CurrentSaveGame->PlayerEconomies[0].AvailableFunds;
+	}
+	else
+	{
+		for (FConstPlayerControllerIterator ControllerIt =
+				 World->GetPlayerControllerIterator();
+			 ControllerIt;
+			 ++ControllerIt)
+		{
+			if (const ABotanicusPlayerController* Controller =
+				Cast<ABotanicusPlayerController>(ControllerIt->Get()))
+			{
+				RestoredSharedFunds =
+					Controller->GetDefaultStartingFunds();
+				break;
+			}
+		}
+	}
+
+	BotanicusGameState->InitializeSharedFunds(RestoredSharedFunds);
+	BotanicusGameState->InitializeMainShopProgression(
+		CurrentSaveGame->SaveVersion >= 12
+			? CurrentSaveGame->MainShopLevel
+			: 1,
+		CurrentSaveGame->SaveVersion >= 12
+			? CurrentSaveGame->TotalPlantsSold
+			: 0,
+		CurrentSaveGame->SaveVersion >= 12
+			? CurrentSaveGame->TotalCatalogOrders
+			: 0);
+	BotanicusGameState->InitializeMainShopOpen(
+		CurrentSaveGame->SaveVersion >= 17
+			? CurrentSaveGame->bMainShopOpen
+			: true);
+	BotanicusGameState->InitializeShopReputation(
+		CurrentSaveGame->SaveVersion >= 14
+			? CurrentSaveGame->ShopReputationPoints
+			: 300,
+		CurrentSaveGame->SaveVersion >= 14
+			? CurrentSaveGame->LastVisitorSatisfaction
+			: 60,
+		CurrentSaveGame->SaveVersion >= 14
+			? CurrentSaveGame->TotalVisitorReviews
+			: 0);
+	BotanicusGameState->InitializeShopTrends(
+		CurrentSaveGame->SaveVersion >= 15
+			? CurrentSaveGame->TrendColorTag
+			: NAME_None,
+		CurrentSaveGame->SaveVersion >= 15
+			? CurrentSaveGame->TrendTypeTag
+			: NAME_None,
+		CurrentSaveGame->SaveVersion >= 15
+			? CurrentSaveGame->TrendQualityTag
+			: NAME_None,
+		CurrentSaveGame->SaveVersion >= 15
+			? CurrentSaveGame->TrendRemainingSeconds
+			: 600.0f);
+	UE_LOG(
+		LogBotanicus,
+		Display,
+		TEXT("Shared nursery wallet initialized with %d credits."),
+		FMath::Max(0, RestoredSharedFunds));
+}
+
 void ABotanicusGameMode::RestoreWorldState()
 {
 	UWorld* World = GetWorld();
@@ -576,7 +791,16 @@ void ABotanicusGameMode::RestoreWorldState()
 			World->SpawnActor<ABotanicusPathActor>();
 		if (RestoredPath)
 		{
-			RestoredPath->InitializeConfirmedPath(WorldPoints);
+		const EBotanicusPathType RestoredPathType =
+			CurrentSaveGame->SaveVersion >= 11 &&
+				SavedPath.PathType ==
+					static_cast<uint8>(
+						EBotanicusPathType::VisitorRoute)
+				? EBotanicusPathType::VisitorRoute
+				: EBotanicusPathType::Standard;
+		RestoredPath->InitializeConfirmedPath(
+			WorldPoints,
+			RestoredPathType);
 			TArray<FVector> JunctionPoints;
 			JunctionPoints.Reserve(SavedPath.JunctionPoints.Num());
 			for (const FVector_NetQuantize10& JunctionPoint :
@@ -595,6 +819,40 @@ void ABotanicusGameMode::RestoreWorldState()
 		TEXT("Restored %d/%d saved paths."),
 		RestoredPathCount,
 		CurrentSaveGame->Paths.Num());
+
+	for (TActorIterator<ABotanicusVisitorZoneActor> ZoneIt(World);
+		 ZoneIt;
+		 ++ZoneIt)
+	{
+		ZoneIt->Destroy();
+	}
+	if (CurrentSaveGame->SaveVersion >= 11)
+	{
+		for (const FBotanicusSavedVisitorZone& SavedZone :
+			 CurrentSaveGame->VisitorZones)
+		{
+			FActorSpawnParameters SpawnParameters;
+			SpawnParameters.SpawnCollisionHandlingOverride =
+				ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			ABotanicusVisitorZoneActor* Zone =
+				World->SpawnActor<ABotanicusVisitorZoneActor>(
+					ABotanicusVisitorZoneActor::StaticClass(),
+					SavedZone.Transform,
+					SpawnParameters);
+			if (Zone)
+			{
+				const EBotanicusVisitorZoneType ZoneType =
+					static_cast<EBotanicusVisitorZoneType>(
+						FMath::Clamp<int32>(
+							SavedZone.ZoneType,
+							0,
+							2));
+				Zone->InitializeZone(
+					ZoneType,
+					SavedZone.BoxExtent);
+			}
+		}
+	}
 
 	TArray<AActor*> ExistingWorldItems;
 	for (TActorIterator<ABotanicusDeliveryParcelActor> ParcelIt(World);
@@ -659,9 +917,15 @@ void ABotanicusGameMode::RestoreWorldState()
 		if (ABotanicusDeliveryParcelActor* Parcel =
 			Cast<ABotanicusDeliveryParcelActor>(RestoredItem))
 		{
-			Parcel->InitializeParcel(
+			Parcel->RestoreParcelState(
 				SavedItem.ItemKey,
-				SavedItem.Quantity);
+				SavedItem.Quantity,
+				CurrentSaveGame->SaveVersion >= 16
+					? SavedItem.ParcelCutCoverageMask
+					: 0,
+				CurrentSaveGame->SaveVersion >= 16
+					? SavedItem.bParcelOpened
+					: true);
 		}
 		else if (ABotanicusPlaceableItemActor* PlacedItem =
 			Cast<ABotanicusPlaceableItemActor>(RestoredItem))
@@ -676,9 +940,29 @@ void ABotanicusGameMode::RestoreWorldState()
 					SavedItem.bPlantPotHasSoil,
 					SavedItem.PlantKey,
 					SavedItem.PlantWaterLevel,
-					SavedItem.PlantGrowthProgress);
+					SavedItem.PlantGrowthProgress,
+					SavedItem.PlantCareScore);
 				PlantPot->RestoreWateringCount(
 					SavedItem.PlantWateringCount);
+			}
+			else if (ABotanicusSalesDisplayActor* SalesDisplay =
+				Cast<ABotanicusSalesDisplayActor>(PlacedItem))
+			{
+				SalesDisplay->RestoreDisplayedPlant(
+					SavedItem.DisplayedPlantItemKey);
+			}
+			else if (ABotanicusWateringCanActor* WateringCan =
+				Cast<ABotanicusWateringCanActor>(PlacedItem))
+			{
+				WateringCan->RestoreWaterLevel(
+					SavedItem.WateringCanWaterLevel);
+			}
+			else if (ABotanicusSalePotActor* SalePot =
+				Cast<ABotanicusSalePotActor>(PlacedItem))
+			{
+				SalePot->RestoreSalePotState(
+					SavedItem.SalePotSoilItemKey,
+					SavedItem.SalePotPlantItemKey);
 			}
 		}
 		else if (ABotanicusLargeEquipmentActor* Equipment =
@@ -719,7 +1003,6 @@ void ABotanicusGameMode::CapturePlayerInventory(
 	{
 		return;
 	}
-
 	FBotanicusSavedPlayerInventory* SavedInventory =
 		CurrentSaveGame->PlayerInventories.FindByPredicate(
 			[&PlayerKey](const FBotanicusSavedPlayerInventory& Entry)
@@ -736,6 +1019,33 @@ void ABotanicusGameMode::CapturePlayerInventory(
 	SavedInventory->Slots = QuickBar->GetSlots();
 	SavedInventory->SelectedSlotIndex =
 		QuickBar->GetSelectedSlotIndex();
+	if (const APawn* Pawn = Controller->GetPawn())
+	{
+		SavedInventory->bHasPawnTransform = true;
+		SavedInventory->PawnTransform = Pawn->GetActorTransform();
+	}
+
+	int32 NonEmptySlotCount = 0;
+	int32 TotalItemQuantity = 0;
+	for (const FBotanicusQuickBarSlot& Slot : SavedInventory->Slots)
+	{
+		if (!Slot.IsEmpty())
+		{
+			++NonEmptySlotCount;
+			TotalItemQuantity += Slot.Quantity;
+		}
+	}
+	UE_LOG(
+		LogBotanicus,
+		Display,
+		TEXT(
+			"Captured inventory for '%s': %d occupied slot(s), %d total item(s), position=%s."),
+		*PlayerKey,
+		NonEmptySlotCount,
+		TotalItemQuantity,
+		SavedInventory->bHasPawnTransform
+			? *SavedInventory->PawnTransform.GetLocation().ToCompactString()
+			: TEXT("none"));
 }
 
 void ABotanicusGameMode::RestorePlayerInventory(AController* Controller)
@@ -754,8 +1064,43 @@ void ABotanicusGameMode::RestorePlayerInventory(AController* Controller)
 	{
 		return;
 	}
+	const auto GrantStarterCutter =
+		[QuickBar]()
+		{
+			const bool bAlreadyHasCutter =
+				QuickBar->GetSlots().ContainsByPredicate(
+					[](const FBotanicusQuickBarSlot& Slot)
+					{
+						return !Slot.IsEmpty() &&
+							Slot.ItemKey == TEXT("BoxCutter");
+					});
+			if (!bAlreadyHasCutter)
+			{
+				int32 CutterSlot = INDEX_NONE;
+				if (QuickBar->AddItem(
+					TEXT("BoxCutter"),
+					1,
+					CutterSlot))
+				{
+					UE_LOG(
+						LogBotanicus,
+						Display,
+						TEXT(
+							"Added the starter cutter to quickbar slot %d."),
+						CutterSlot + 1);
+				}
+				else
+				{
+					UE_LOG(
+						LogBotanicus,
+						Warning,
+						TEXT(
+							"Could not add the starter cutter: the quickbar has no free slot."));
+				}
+			}
+		};
 
-	const FBotanicusSavedPlayerInventory* SavedInventory =
+	FBotanicusSavedPlayerInventory* SavedInventory =
 		CurrentSaveGame->PlayerInventories.FindByPredicate(
 			[&PlayerKey](const FBotanicusSavedPlayerInventory& Entry)
 			{
@@ -763,12 +1108,98 @@ void ABotanicusGameMode::RestorePlayerInventory(AController* Controller)
 			});
 	if (!SavedInventory)
 	{
+		GrantStarterCutter();
 		return;
+	}
+	if (SavedInventory->bHasPawnTransform)
+	{
+		Character->SetActorTransform(
+			SavedInventory->PawnTransform,
+			false,
+			nullptr,
+			ETeleportType::TeleportPhysics);
+	}
+
+	// Version 7 and earlier stored the watering can as a hotbar item.
+	// Convert it once into its version-8 physical world representation.
+	if (CurrentSaveGame->SaveVersion < 8 && GetWorld())
+	{
+		int32 LegacyWateringCanCount = 0;
+		for (FBotanicusQuickBarSlot& SavedSlot : SavedInventory->Slots)
+		{
+			if (SavedSlot.ItemKey == TEXT("WateringCan") &&
+				SavedSlot.Quantity > 0)
+			{
+				LegacyWateringCanCount += SavedSlot.Quantity;
+				SavedSlot = FBotanicusQuickBarSlot();
+			}
+		}
+
+		for (int32 CanIndex = 0;
+			 CanIndex < LegacyWateringCanCount;
+			 ++CanIndex)
+		{
+			FActorSpawnParameters SpawnParameters;
+			SpawnParameters.SpawnCollisionHandlingOverride =
+				ESpawnActorCollisionHandlingMethod::
+					AdjustIfPossibleButAlwaysSpawn;
+			const FVector SpawnLocation =
+				Character->GetActorLocation() +
+				Character->GetActorForwardVector() * 110.0f +
+				Character->GetActorRightVector() *
+					(static_cast<float>(CanIndex) * 45.0f) +
+				FVector(0.0f, 0.0f, 25.0f);
+			if (ABotanicusWateringCanActor* WateringCan =
+				GetWorld()->SpawnActor<ABotanicusWateringCanActor>(
+					SpawnLocation,
+					FRotator::ZeroRotator,
+					SpawnParameters))
+			{
+				WateringCan->InitializePlacedItem(
+					TEXT("WateringCan"),
+					1);
+			}
+		}
+		if (LegacyWateringCanCount > 0)
+		{
+			UE_LOG(
+				LogBotanicus,
+				Display,
+				TEXT(
+					"Migrated %d legacy hotbar watering can(s) into physical world tools."),
+				LegacyWateringCanCount);
+		}
 	}
 
 	QuickBar->ApplySavedState(
 		SavedInventory->Slots,
 		SavedInventory->SelectedSlotIndex);
+	// Always ensure that every player owns the cutter required to open
+	// delivery cartons. This also repairs version-16 saves made before the
+	// cutter could be inserted into an available quickbar slot.
+	GrantStarterCutter();
+
+	int32 RestoredSlotCount = 0;
+	int32 RestoredItemQuantity = 0;
+	for (const FBotanicusQuickBarSlot& Slot : QuickBar->GetSlots())
+	{
+		if (!Slot.IsEmpty())
+		{
+			++RestoredSlotCount;
+			RestoredItemQuantity += Slot.Quantity;
+		}
+	}
+	UE_LOG(
+		LogBotanicus,
+		Display,
+		TEXT(
+			"Restored inventory for '%s': %d occupied slot(s), %d total item(s), position=%s."),
+		*PlayerKey,
+		RestoredSlotCount,
+		RestoredItemQuantity,
+		SavedInventory->bHasPawnTransform
+			? *SavedInventory->PawnTransform.GetLocation().ToCompactString()
+			: TEXT("none"));
 }
 
 void ABotanicusGameMode::CapturePlayerEconomy(

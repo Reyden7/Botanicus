@@ -20,6 +20,8 @@ public:
 	const FBotanicusPlantDefinition* FindPlant(FName PlantKey) const;
 	const FBotanicusPlantDefinition* FindPlantBySeed(
 		FName SeedItemKey) const;
+	const FBotanicusPlantDefinition* FindPlantByHarvestItem(
+		FName HarvestItemKey) const;
 
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Growing")
 	TArray<FBotanicusPlantDefinition> GetAllPlants() const;
