@@ -15,6 +15,17 @@
 #include "Net/UnrealNetwork.h"
 #include "UObject/ConstructorHelpers.h"
 
+namespace
+{
+	bool IsFurnitureEquipmentKey(const FName ItemKey)
+	{
+		const FString ItemKeyString = ItemKey.ToString();
+		return ItemKey == TEXT("PreparationWorkbench")
+			|| ItemKeyString.StartsWith(TEXT("StorageShelf"))
+			|| ItemKeyString.StartsWith(TEXT("WorkSurface"));
+	}
+}
+
 ABotanicusLargeEquipmentActor::ABotanicusLargeEquipmentActor()
 {
 	bAlwaysRelevant = true;
@@ -95,6 +106,12 @@ void ABotanicusLargeEquipmentActor::Tick(float DeltaSeconds)
 		UGameplayStatics::GetPlayerCameraManager(this, 0);
 	if (!InteractionIndicator || !LocalPawn || !CameraManager)
 	{
+		return;
+	}
+
+	if (IsFurnitureEquipmentKey(ItemKey))
+	{
+		InteractionIndicator->SetVisibility(false);
 		return;
 	}
 

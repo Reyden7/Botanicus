@@ -10,6 +10,7 @@
 #include "Sales/BotanicusSelfCheckoutActor.h"
 #include "Storage/BotanicusStorageShelfActor.h"
 #include "Preparation/BotanicusPreparationWorkbenchActor.h"
+#include "Preparation/BotanicusWorkSurfaceActor.h"
 #include "Preparation/BotanicusComputerActor.h"
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
@@ -47,6 +48,7 @@
 #include "DrawDebugHelpers.h"
 #include "Economy/BotanicusRefundZoneActor.h"
 #include "Growing/BotanicusPlantPotActor.h"
+#include "Growing/BotanicusMultiPlantPotActor.h"
 #include "Growing/BotanicusWateringCanActor.h"
 #include "Growing/BotanicusWaterReserveActor.h"
 #include "Interaction/BotanicusInteractable.h"
@@ -64,6 +66,7 @@
 #include "UI/BotanicusClockWidget.h"
 #include "UI/BotanicusStorageQuantityWidget.h"
 #include "UI/BotanicusInteractionTargetWidget.h"
+#include "UI/BotanicusThrowPowerWidget.h"
 #include "UI/BotanicusTopDownToolbarWidget.h"
 #include "Visitors/BotanicusVisitorZoneActor.h"
 #include "Net/UnrealNetwork.h"
@@ -76,6 +79,72 @@
 namespace
 {
 	const FName PurchasedBuildingTag(TEXT("BotanicusPurchasedBuilding"));
+
+	bool CanCharacterUseWaterReserve(
+		const ABotanicusCharacter* Character,
+		const ABotanicusWaterReserveActor* WaterReserve,
+		float MaximumDistance)
+	{
+		if (!IsValid(Character) ||
+			!IsValid(WaterReserve) ||
+			MaximumDistance <= 0.0f)
+		{
+			return false;
+		}
+
+		FVector TargetOrigin;
+		FVector TargetExtent;
+		WaterReserve->GetActorBounds(
+			true,
+			TargetOrigin,
+			TargetExtent);
+		const FVector ViewLocation =
+			Character->GetPawnViewLocation();
+		const FVector ToReserve =
+			TargetOrigin - ViewLocation;
+		const float Distance = ToReserve.Size();
+		if (Distance <= KINDA_SMALL_NUMBER ||
+			Distance > MaximumDistance)
+		{
+			return false;
+		}
+
+		const AController* CharacterController =
+			Character->GetController();
+		const FVector AimDirection =
+			CharacterController
+				? CharacterController->GetControlRotation().Vector()
+				: Character->GetActorForwardVector();
+		return FVector::DotProduct(
+				AimDirection,
+				ToReserve / Distance) >=
+			FMath::Cos(FMath::DegreesToRadians(45.0f));
+	}
+
+	ABotanicusWateringCanActor* FindCarriedWateringCan(
+		UWorld* World,
+		const ABotanicusCharacter* Character)
+	{
+		if (!World || !IsValid(Character))
+		{
+			return nullptr;
+		}
+		if (ABotanicusWateringCanActor* LinkedCan =
+			Character->GetHeldWateringCan())
+		{
+			return LinkedCan;
+		}
+		for (TActorIterator<ABotanicusWateringCanActor> CanIt(World);
+			 CanIt;
+			 ++CanIt)
+		{
+			if (CanIt->GetCarrier() == Character)
+			{
+				return *CanIt;
+			}
+		}
+		return nullptr;
+	}
 
 	ABotanicusGameState* GetSharedGameState(const UObject* Context)
 	{
@@ -915,6 +984,7 @@ void ABotanicusPlayerController::PlayerTick(float DeltaTime)
 	UpdateWateringCanRefill(DeltaTime);
 	UpdateLargeEquipmentPlacement(DeltaTime);
 	UpdateQuickBarItemPlacement(DeltaTime);
+	UpdateThrowPowerWidget();
 	UpdateDeliveryParcelPlacement(DeltaTime);
 }
 
@@ -959,7 +1029,8 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 {
 	// Furniture mode must remain reachable even if another native catalogue
 	// widget accidentally retains Visible input state.
-	if (Params.Key == EKeys::B)
+	if (Params.Key == EKeys::B &&
+		!bQuickBarReorganizationMode)
 	{
 		if (Params.Event == IE_Pressed)
 		{
@@ -972,7 +1043,30 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 	{
 		if (Params.Event == IE_Pressed)
 		{
+			ToggleQuickBarReorganizationMode();
+		}
+		return true;
+	}
+
+	if (Params.Key == EKeys::F1)
+	{
+		if (Params.Event == IE_Pressed)
+		{
+			if (bQuickBarReorganizationMode)
+			{
+				ToggleQuickBarReorganizationMode();
+			}
 			ToggleDevelopmentPanel();
+		}
+		return true;
+	}
+
+	if (bQuickBarReorganizationMode)
+	{
+		if (Params.Key == EKeys::Escape &&
+			Params.Event == IE_Pressed)
+		{
+			ToggleQuickBarReorganizationMode();
 		}
 		return true;
 	}
@@ -1217,7 +1311,31 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		if (Params.Key == EKeys::LeftMouseButton &&
 			Params.Event == IE_Pressed)
 		{
-			ConfirmQuickBarItemPlacement();
+			if (IsValid(LocalMovedPlaceableItem))
+			{
+				ConfirmQuickBarItemPlacement();
+			}
+			else
+			{
+				bQuickBarThrowChargeActive = true;
+				QuickBarThrowChargeStartTime =
+					FPlatformTime::Seconds();
+				InitializeThrowPowerWidget();
+				if (ThrowPowerWidget)
+				{
+					ThrowPowerWidget->SetThrowPower(0.0f);
+					ThrowPowerWidget->SetVisibility(
+						ESlateVisibility::HitTestInvisible);
+				}
+			}
+			return true;
+		}
+
+		if (Params.Key == EKeys::LeftMouseButton &&
+			Params.Event == IE_Released &&
+			bQuickBarThrowChargeActive)
+		{
+			ReleaseQuickBarThrowCharge();
 			return true;
 		}
 
@@ -1497,6 +1615,7 @@ void ABotanicusPlayerController::ToggleBuildingTopDownView()
 bool ABotanicusPlayerController::IsQuickBarInputBlocked() const
 {
 	return bBuildingTopDownViewActive ||
+		bQuickBarReorganizationMode ||
 		IsValid(LocalQuickBarItemPreview) ||
 		IsValid(LocalParcelMovePreview);
 }
@@ -1553,6 +1672,7 @@ bool ABotanicusPlayerController::IsFurnitureActor(
 		ItemKey == TEXT("SelfCheckout") ||
 		ItemKey == TEXT("SalesDisplay") ||
 		ItemKey == TEXT("WaterReserve") ||
+		ItemKey.ToString().StartsWith(TEXT("WorkSurface")) ||
 		ItemKey.ToString().StartsWith(TEXT("StorageShelf"));
 }
 
@@ -1699,12 +1819,12 @@ void ABotanicusPlayerController::RefreshInteractionTargetHighlight()
 				QueryParams))
 		{
 			AActor* HitActor = Hit.GetActor();
-			const bool bIsStorageFurniture =
-				Cast<ABotanicusStorageShelfActor>(HitActor) != nullptr;
+			const bool bIsFurniture =
+				IsFurnitureActor(HitActor);
 			if (IsValid(HitActor) &&
 				!HitActor->ActorHasTag(
 					TEXT("BotanicusPlacementPreview")) &&
-				!bIsStorageFurniture &&
+				!bIsFurniture &&
 				HitActor->GetClass()->ImplementsInterface(
 					UBotanicusInteractable::StaticClass()))
 			{
@@ -1989,6 +2109,81 @@ void ABotanicusPlayerController::InitializeQuickBarWidget()
 	QuickBarWidget->InitializeWithQuickBar(
 		BotanicusCharacter->GetQuickBarComponent());
 	QuickBarWidget->AddToPlayerScreen(10);
+}
+
+void ABotanicusPlayerController::
+	ToggleQuickBarReorganizationMode()
+{
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+
+	InitializeQuickBarWidget();
+	if (!QuickBarWidget)
+	{
+		return;
+	}
+
+	const bool bOpening = !bQuickBarReorganizationMode;
+	if (bOpening &&
+		((DevelopmentPanelWidget &&
+		  DevelopmentPanelWidget->GetVisibility() ==
+			  ESlateVisibility::Visible) ||
+		 (OrderCatalogWidget &&
+		  OrderCatalogWidget->GetVisibility() ==
+			  ESlateVisibility::Visible) ||
+		 (BuildingCatalogWidget &&
+		  BuildingCatalogWidget->GetVisibility() ==
+			  ESlateVisibility::Visible)))
+	{
+		ClientMessage(
+			TEXT(
+				"Fermez le panneau ouvert avant de reorganiser la hotbar."));
+		return;
+	}
+	if (bOpening && bBuildingTopDownViewActive)
+	{
+		ClientMessage(
+			TEXT(
+				"Quittez la vue construction avant de reorganiser la hotbar."));
+		return;
+	}
+
+	bQuickBarReorganizationMode = bOpening;
+	if (bQuickBarReorganizationMode)
+	{
+		if (IsValid(LocalQuickBarItemPreview))
+		{
+			CancelQuickBarItemPlacement();
+		}
+		bAzertyForwardPressed = false;
+		bAzertyBackwardPressed = false;
+		bAzertyLeftPressed = false;
+		bAzertyRightPressed = false;
+	}
+
+	QuickBarWidget->SetReorganizationMode(
+		bQuickBarReorganizationMode);
+	if (bQuickBarReorganizationMode)
+	{
+		bShowMouseCursor = true;
+		FInputModeGameAndUI InputMode;
+		InputMode.SetHideCursorDuringCapture(false);
+		InputMode.SetLockMouseToViewportBehavior(
+			EMouseLockMode::DoNotLock);
+		InputMode.SetWidgetToFocus(
+			QuickBarWidget->TakeWidget());
+		SetInputMode(InputMode);
+		ClientMessage(
+			TEXT(
+				"ORGANISATION HOTBAR : glissez un objet vers la case choisie. TAB ou ECHAP pour fermer."));
+	}
+	else
+	{
+		bShowMouseCursor = false;
+		SetInputMode(FInputModeGameOnly());
+	}
 }
 
 void ABotanicusPlayerController::InitializeSharedFundsWidget()
@@ -3367,6 +3562,12 @@ bool ABotanicusPlayerController::TryHandleNearbyLargeEquipment()
 			{
 				Workbench->SetMoveContentsWithFurniture(true);
 			}
+			if (ABotanicusWorkSurfaceActor* WorkSurface =
+					Cast<ABotanicusWorkSurfaceActor>(
+						NearestEquipment))
+			{
+				WorkSurface->SetMoveContentsWithFurniture(true);
+			}
 			ServerToggleCarryLargeEquipment(NearestEquipment);
 		}
 		else
@@ -3402,6 +3603,12 @@ void ABotanicusPlayerController::BeginEquipmentCarryCharge(
 			Cast<ABotanicusPreparationWorkbenchActor>(Equipment))
 	{
 		Workbench->SetMoveContentsWithFurniture(
+			bFurnitureMoveModeActive);
+	}
+	if (ABotanicusWorkSurfaceActor* WorkSurface =
+			Cast<ABotanicusWorkSurfaceActor>(Equipment))
+	{
+		WorkSurface->SetMoveContentsWithFurniture(
 			bFurnitureMoveModeActive);
 	}
 
@@ -3531,6 +3738,11 @@ void ABotanicusPlayerController::CancelEquipmentCarryCharge(
 				Cast<ABotanicusPreparationWorkbenchActor>(Equipment))
 		{
 			Workbench->SetMoveContentsWithFurniture(false);
+		}
+		if (ABotanicusWorkSurfaceActor* WorkSurface =
+				Cast<ABotanicusWorkSurfaceActor>(Equipment))
+		{
+			WorkSurface->SetMoveContentsWithFurniture(false);
 		}
 	}
 	if (bNotifyServer &&
@@ -3784,6 +3996,12 @@ void ABotanicusPlayerController::ConfirmLargeEquipmentPlacement()
 	{
 		Workbench->SetMoveContentsWithFurniture(false);
 	}
+	if (ABotanicusWorkSurfaceActor* WorkSurface =
+			Cast<ABotanicusWorkSurfaceActor>(
+				LocalLargeEquipmentPlacement))
+	{
+		WorkSurface->SetMoveContentsWithFurniture(false);
+	}
 	LocalLargeEquipmentPlacement = nullptr;
 	bLocalLargeEquipmentPlacementValid = false;
 }
@@ -3808,6 +4026,12 @@ void ABotanicusPlayerController::CancelLargeEquipmentPlacement()
 				LocalLargeEquipmentPlacement))
 	{
 		Workbench->SetMoveContentsWithFurniture(false);
+	}
+	if (ABotanicusWorkSurfaceActor* WorkSurface =
+			Cast<ABotanicusWorkSurfaceActor>(
+				LocalLargeEquipmentPlacement))
+	{
+		WorkSurface->SetMoveContentsWithFurniture(false);
 	}
 	LocalLargeEquipmentPlacement = nullptr;
 	bLocalLargeEquipmentPlacementValid = false;
@@ -3846,6 +4070,14 @@ bool ABotanicusPlayerController::ResolveLargeEquipmentPlacement(
 	if (MovingWorkbench)
 	{
 		MovingWorkbench->GetPreparedPots(PreparedPots);
+	}
+	const ABotanicusWorkSurfaceActor* MovingWorkSurface =
+		Cast<ABotanicusWorkSurfaceActor>(Equipment);
+	TArray<AActor*> WorkSurfaceContents;
+	if (MovingWorkSurface)
+	{
+		MovingWorkSurface->GetSurfaceContents(
+			WorkSurfaceContents);
 	}
 	if (StorageShelf && StorageShelf->IsWallMountedShelf())
 	{
@@ -3983,6 +4215,10 @@ bool ABotanicusPlayerController::ResolveLargeEquipmentPlacement(
 	{
 		OverlapQuery.AddIgnoredActor(PreparedPot);
 	}
+	for (AActor* SurfaceContent : WorkSurfaceContents)
+	{
+		OverlapQuery.AddIgnoredActor(SurfaceContent);
+	}
 
 	const FVector TestExtent(
 		FMath::Max(5.0f, EffectiveBoxExtent.X - 4.0f),
@@ -4026,12 +4262,17 @@ void ABotanicusPlayerController::BeginQuickBarItemPlacement()
 		ABotanicusStorageShelfActor::IsCatalogItemCompatible(
 			this,
 			SelectedSlot.ItemKey);
+	const bool bWorkSurfaceCompatible =
+		ABotanicusWorkSurfaceActor::IsCatalogItemCompatible(
+			this,
+			SelectedSlot.ItemKey);
 	if (!Definition ||
 		Definition->WeightClass !=
 			EBotanicusItemWeightClass::Hotbar ||
 		(!Definition->CanBePlacedOn(
 			 EBotanicusPlacementSurface::Floor) &&
-		 !bShelfCompatible))
+		 !bShelfCompatible &&
+		 !bWorkSurfaceCompatible))
 	{
 		if (SelectedSlot.ItemKey == TEXT("PottingSoil"))
 		{
@@ -4043,7 +4284,7 @@ void ABotanicusPlayerController::BeginQuickBarItemPlacement()
 		{
 			ClientMessage(
 				TEXT(
-					"Objet incompatible : seules les graines et les pots peuvent etre ranges sur une etagere."));
+					"Cet objet ne peut pas etre pose au sol, sur une etagere ou sur un plan de travail."));
 		}
 		return;
 	}
@@ -4074,8 +4315,28 @@ void ABotanicusPlayerController::BeginQuickBarItemPlacement()
 
 	Preview->Tags.AddUnique(TEXT("BotanicusPlacementPreview"));
 	Preview->InitializePlacedItem(SelectedSlot.ItemKey, 1);
+	ApplyCarriedItemState(SelectedSlot, Preview);
 	Preview->ConfigureAsLocalPreview(false);
 	LocalQuickBarItemPreview = Preview;
+
+	ABotanicusPlaceableItemActor* InspectedItem =
+		World->SpawnActor<ABotanicusPlaceableItemActor>(
+			PreviewClass,
+			GetPawn()->GetActorTransform(),
+			SpawnParameters);
+	if (InspectedItem)
+	{
+		InspectedItem->Tags.AddUnique(
+			TEXT("BotanicusInspectionPreview"));
+		InspectedItem->InitializePlacedItem(
+			SelectedSlot.ItemKey,
+			1);
+		ApplyCarriedItemState(SelectedSlot, InspectedItem);
+		InspectedItem->ConfigureAsLocalPreview(true);
+		InspectedItem->ConfigureAsLocalInspection();
+		LocalInspectedQuickBarItem = InspectedItem;
+	}
+
 	LocalQuickBarItemSlotIndex = QuickBar->GetSelectedSlotIndex();
 	LocalQuickBarItemInstanceId = SelectedSlot.InstanceId;
 	LocalQuickBarItemKey = SelectedSlot.ItemKey;
@@ -4085,7 +4346,220 @@ void ABotanicusPlayerController::BeginQuickBarItemPlacement()
 	bLocalQuickBarItemPlacementValid = false;
 	ClientMessage(
 		TEXT(
-			"Placement : visez un emplacement d'etagere puis utilisez la molette pour choisir la quantite. Hors etagere, la molette tourne l'objet."));
+			"Objet en main : clic gauche pour poser, maintenez le clic gauche pour lancer (3 s maximum), clic droit pour annuler."));
+}
+
+void ABotanicusPlayerController::ApplyCarriedItemState(
+	const FBotanicusQuickBarSlot& Slot,
+	ABotanicusPlaceableItemActor* Item) const
+{
+	if (!IsValid(Item))
+	{
+		return;
+	}
+
+	if (Slot.CarriedState.bHasMultiPlanterState)
+	{
+		if (ABotanicusMultiPlantPotActor* MultiPlanter =
+			Cast<ABotanicusMultiPlantPotActor>(Item))
+		{
+			TArray<FBotanicusMultiPlantSlotState> Slots;
+			for (int32 Index = 0;
+				 Index <
+				 Slot.CarriedState.MultiPlanterPlantKeys.Num();
+				 ++Index)
+			{
+				FBotanicusMultiPlantSlotState& PlantSlot =
+					Slots.AddDefaulted_GetRef();
+				PlantSlot.PlantKey =
+					Slot.CarriedState.
+						MultiPlanterPlantKeys[Index];
+				PlantSlot.WaterLevel =
+					Slot.CarriedState.MultiPlanterWaterLevels.
+						IsValidIndex(Index)
+						? Slot.CarriedState.
+							MultiPlanterWaterLevels[Index]
+						: 0.0f;
+				PlantSlot.GrowthProgress =
+					Slot.CarriedState.
+						MultiPlanterGrowthProgress.
+						IsValidIndex(Index)
+						? Slot.CarriedState.
+							MultiPlanterGrowthProgress[Index]
+						: 0.0f;
+				PlantSlot.CareScore =
+					Slot.CarriedState.MultiPlanterCareScores.
+						IsValidIndex(Index)
+						? Slot.CarriedState.
+							MultiPlanterCareScores[Index]
+						: 0.0f;
+				PlantSlot.WateringCount =
+					Slot.CarriedState.
+						MultiPlanterWateringCounts.
+						IsValidIndex(Index)
+						? Slot.CarriedState.
+							MultiPlanterWateringCounts[Index]
+						: 0;
+			}
+			MultiPlanter->RestoreMultiPlantState(
+				Slot.CarriedState.MultiPlanterSoilUnits,
+				Slots);
+		}
+	}
+	else if (Slot.CarriedState.bHasPlantPotState)
+	{
+		if (ABotanicusPlantPotActor* PlantPot =
+			Cast<ABotanicusPlantPotActor>(Item))
+		{
+			PlantPot->RestoreGrowingState(
+				Slot.CarriedState.bPlantPotHasSoil,
+				Slot.CarriedState.PlantKey,
+				Slot.CarriedState.WaterLevel,
+				Slot.CarriedState.GrowthProgress,
+				Slot.CarriedState.CareScore);
+			PlantPot->RestoreWateringCount(
+				Slot.CarriedState.WateringCount);
+		}
+	}
+	else if (Slot.CarriedState.bHasSalePotState)
+	{
+		if (ABotanicusSalePotActor* SalePot =
+			Cast<ABotanicusSalePotActor>(Item))
+		{
+			SalePot->RestoreSalePotState(
+				Slot.CarriedState.SaleSoilItemKey,
+				Slot.CarriedState.SalePlantItemKey);
+		}
+	}
+}
+
+void ABotanicusPlayerController::ReleaseQuickBarThrowCharge()
+{
+	if (!bQuickBarThrowChargeActive)
+	{
+		return;
+	}
+
+	bQuickBarThrowChargeActive = false;
+	HideThrowPowerWidget();
+	const float HoldDuration = FMath::Clamp(
+		static_cast<float>(
+			FPlatformTime::Seconds() -
+			QuickBarThrowChargeStartTime),
+		0.0f,
+		MaximumQuickBarThrowHoldDuration);
+	if (HoldDuration < QuickBarThrowHoldThreshold)
+	{
+		ConfirmQuickBarItemPlacement();
+		return;
+	}
+
+	ThrowSelectedQuickBarItem(HoldDuration);
+}
+
+void ABotanicusPlayerController::InitializeThrowPowerWidget()
+{
+	if (!IsLocalPlayerController() || ThrowPowerWidget)
+	{
+		return;
+	}
+
+	ThrowPowerWidget =
+		CreateWidget<UBotanicusThrowPowerWidget>(
+			this,
+			UBotanicusThrowPowerWidget::StaticClass());
+	if (!ThrowPowerWidget)
+	{
+		return;
+	}
+
+	ThrowPowerWidget->AddToPlayerScreen(62);
+	ThrowPowerWidget->SetAlignmentInViewport(
+		FVector2D(0.5f, 0.5f));
+	ThrowPowerWidget->SetDesiredSizeInViewport(
+		FVector2D(360.0f, 82.0f));
+	int32 ViewportWidth = 0;
+	int32 ViewportHeight = 0;
+	GetViewportSize(ViewportWidth, ViewportHeight);
+	ThrowPowerWidget->SetPositionInViewport(
+		FVector2D(
+			static_cast<float>(ViewportWidth) * 0.5f,
+			static_cast<float>(ViewportHeight) - 205.0f),
+		true);
+	ThrowPowerWidget->SetVisibility(
+		ESlateVisibility::Collapsed);
+}
+
+void ABotanicusPlayerController::UpdateThrowPowerWidget()
+{
+	if (!bQuickBarThrowChargeActive)
+	{
+		return;
+	}
+
+	InitializeThrowPowerWidget();
+	if (!ThrowPowerWidget)
+	{
+		return;
+	}
+
+	const float HoldDuration = FMath::Max(
+		0.0f,
+		static_cast<float>(
+			FPlatformTime::Seconds() -
+			QuickBarThrowChargeStartTime));
+	ThrowPowerWidget->SetThrowPower(
+		HoldDuration /
+			FMath::Max(
+				0.1f,
+				MaximumQuickBarThrowHoldDuration));
+	ThrowPowerWidget->SetVisibility(
+		ESlateVisibility::HitTestInvisible);
+}
+
+void ABotanicusPlayerController::HideThrowPowerWidget()
+{
+	if (ThrowPowerWidget)
+	{
+		ThrowPowerWidget->SetThrowPower(0.0f);
+		ThrowPowerWidget->SetVisibility(
+			ESlateVisibility::Collapsed);
+	}
+}
+
+void ABotanicusPlayerController::ThrowSelectedQuickBarItem(
+	float HoldDuration)
+{
+	if (!IsLocalPlayerController() ||
+		!GetPawn() ||
+		!IsValid(LocalQuickBarItemPreview) ||
+		IsValid(LocalMovedPlaceableItem) ||
+		LocalQuickBarItemSlotIndex == INDEX_NONE ||
+		LocalQuickBarItemKey.IsNone())
+	{
+		return;
+	}
+
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	GetPlayerViewPoint(ViewLocation, ViewRotation);
+	FVector ThrowDirection =
+		ViewRotation.Vector() + FVector(0.0f, 0.0f, 0.12f);
+	if (!ThrowDirection.Normalize())
+	{
+		ThrowDirection = GetPawn()->GetActorForwardVector();
+	}
+
+	const int32 SlotIndex = LocalQuickBarItemSlotIndex;
+	const FGuid InstanceId = LocalQuickBarItemInstanceId;
+	const FName ItemKey = LocalQuickBarItemKey;
+	CancelQuickBarItemPlacement();
+	ServerThrowQuickBarItem(
+		SlotIndex,
+		InstanceId,
+		ItemKey,
+		ThrowDirection,
+		HoldDuration);
 }
 
 void ABotanicusPlayerController::BeginWorldItemMove(
@@ -4106,6 +4580,9 @@ void ABotanicusPlayerController::BeginWorldItemMove(
 		(!Definition->CanBePlacedOn(
 			 EBotanicusPlacementSurface::Floor) &&
 		 !ABotanicusStorageShelfActor::IsCatalogItemCompatible(
+			 this,
+			 ItemKey) &&
+		 !ABotanicusWorkSurfaceActor::IsCatalogItemCompatible(
 			 this,
 			 ItemKey)))
 	{
@@ -4177,6 +4654,26 @@ void ABotanicusPlayerController::UpdateQuickBarItemPlacement(
 	FVector ViewLocation;
 	FRotator ViewRotation;
 	GetPlayerViewPoint(ViewLocation, ViewRotation);
+	if (IsValid(LocalInspectedQuickBarItem))
+	{
+		const FVector ViewForward = ViewRotation.Vector();
+		const FVector ViewRight =
+			FRotationMatrix(ViewRotation).GetUnitAxis(EAxis::Y);
+		const FVector ViewUp =
+			FRotationMatrix(ViewRotation).GetUnitAxis(EAxis::Z);
+		LocalInspectedQuickBarItem->SetActorLocationAndRotation(
+			ViewLocation +
+				ViewForward * 85.0f +
+				ViewRight * 22.0f -
+				ViewUp * 22.0f,
+			FRotator(
+				0.0f,
+				ViewRotation.Yaw + 180.0f,
+				0.0f),
+			false,
+			nullptr,
+			ETeleportType::TeleportPhysics);
+	}
 	FVector FlatForward = ViewRotation.Vector();
 	FlatForward.Z = 0.0f;
 	if (!FlatForward.Normalize())
@@ -4477,7 +4974,12 @@ void ABotanicusPlayerController::ConfirmQuickBarItemPlacement()
 			LocalQuickBarPlacementQuantity);
 	}
 	LocalQuickBarItemPreview->Destroy();
+	if (IsValid(LocalInspectedQuickBarItem))
+	{
+		LocalInspectedQuickBarItem->Destroy();
+	}
 	LocalQuickBarItemPreview = nullptr;
+	LocalInspectedQuickBarItem = nullptr;
 	LocalMovedPlaceableItem = nullptr;
 	LocalQuickBarItemSlotIndex = INDEX_NONE;
 	LocalQuickBarItemInstanceId.Invalidate();
@@ -4493,6 +4995,8 @@ void ABotanicusPlayerController::ConfirmQuickBarItemPlacement()
 
 void ABotanicusPlayerController::CancelQuickBarItemPlacement()
 {
+	bQuickBarThrowChargeActive = false;
+	HideThrowPowerWidget();
 	if (IsValid(LocalMovedPlaceableItem))
 	{
 		ServerCancelPlaceableItemMove(LocalMovedPlaceableItem);
@@ -4501,7 +5005,12 @@ void ABotanicusPlayerController::CancelQuickBarItemPlacement()
 	{
 		LocalQuickBarItemPreview->Destroy();
 	}
+	if (IsValid(LocalInspectedQuickBarItem))
+	{
+		LocalInspectedQuickBarItem->Destroy();
+	}
 	LocalQuickBarItemPreview = nullptr;
+	LocalInspectedQuickBarItem = nullptr;
 	LocalMovedPlaceableItem = nullptr;
 	LocalQuickBarItemSlotIndex = INDEX_NONE;
 	LocalQuickBarItemInstanceId.Invalidate();
@@ -4693,6 +5202,97 @@ bool ABotanicusPlayerController::ResolveQuickBarItemPlacement(
 			FRotator(0.0f, RequestedYaw, 0.0f),
 			RequestedLocation);
 		return false;
+	}
+
+	if (ABotanicusWorkSurfaceActor::IsCatalogItemCompatible(
+			this,
+			ItemKey))
+	{
+		FVector ViewLocation;
+		FRotator ViewRotation;
+		GetPlayerViewPoint(ViewLocation, ViewRotation);
+		FCollisionQueryParams SurfaceTraceQuery(
+			SCENE_QUERY_STAT(BotanicusWorkSurfaceAim),
+			false);
+		SurfaceTraceQuery.AddIgnoredActor(ControlledPawn);
+		if (IsValid(LocalQuickBarItemPreview))
+		{
+			SurfaceTraceQuery.AddIgnoredActor(
+				LocalQuickBarItemPreview);
+		}
+		if (IsValid(IgnoredWorldItem))
+		{
+			SurfaceTraceQuery.AddIgnoredActor(IgnoredWorldItem);
+		}
+
+		FHitResult SurfaceHit;
+		if (World->LineTraceSingleByChannel(
+				SurfaceHit,
+				ViewLocation,
+				ViewLocation + ViewRotation.Vector() * 700.0f,
+				ECC_Visibility,
+				SurfaceTraceQuery))
+		{
+			ABotanicusWorkSurfaceActor* WorkSurface =
+				Cast<ABotanicusWorkSurfaceActor>(
+					SurfaceHit.GetActor());
+			FTransform SurfaceTransform;
+			if (IsValid(WorkSurface) &&
+				SurfaceHit.ImpactNormal.Z >= 0.65f &&
+				WorkSurface->GetFreePlacementTransform(
+					ItemKey,
+					SurfaceHit.ImpactPoint,
+					RequestedYaw,
+					EffectiveBoxExtent,
+					SurfaceTransform))
+			{
+				OutTransform = SurfaceTransform;
+
+				FCollisionObjectQueryParams SurfaceObjectQuery;
+				SurfaceObjectQuery.AddObjectTypesToQuery(
+					ECC_WorldStatic);
+				SurfaceObjectQuery.AddObjectTypesToQuery(
+					ECC_WorldDynamic);
+				SurfaceObjectQuery.AddObjectTypesToQuery(
+					ECC_Pawn);
+				FCollisionQueryParams SurfaceOverlapQuery(
+					SCENE_QUERY_STAT(
+						BotanicusWorkSurfacePlacementOverlap),
+					false);
+				SurfaceOverlapQuery.AddIgnoredActor(
+					ControlledPawn);
+				SurfaceOverlapQuery.AddIgnoredActor(WorkSurface);
+				if (IsValid(LocalQuickBarItemPreview))
+				{
+					SurfaceOverlapQuery.AddIgnoredActor(
+						LocalQuickBarItemPreview);
+				}
+				if (IsValid(IgnoredWorldItem))
+				{
+					SurfaceOverlapQuery.AddIgnoredActor(
+						IgnoredWorldItem);
+				}
+				const FVector SurfaceTestExtent(
+					FMath::Max(
+						4.0f,
+						EffectiveBoxExtent.X - 3.0f),
+					FMath::Max(
+						4.0f,
+						EffectiveBoxExtent.Y - 3.0f),
+					FMath::Max(
+						4.0f,
+						EffectiveBoxExtent.Z - 3.0f));
+				TArray<FOverlapResult> SurfaceOverlaps;
+				return !World->OverlapMultiByObjectType(
+					SurfaceOverlaps,
+					SurfaceTransform.GetLocation(),
+					SurfaceTransform.GetRotation(),
+					SurfaceObjectQuery,
+					FCollisionShape::MakeBox(
+						SurfaceTestExtent),
+					SurfaceOverlapQuery);
+			}
+		}
 	}
 
 	if (ItemKey == TEXT("SelfCheckout"))
@@ -5472,10 +6072,10 @@ bool ABotanicusPlayerController::TryRefillHeldWateringCan()
 	const ABotanicusCharacter* BotanicusCharacter =
 		Cast<ABotanicusCharacter>(GetPawn());
 	const ABotanicusWateringCanActor* HeldCan =
-		BotanicusCharacter
-			? BotanicusCharacter->GetHeldWateringCan()
-			: nullptr;
-	if (!IsValid(HeldCan) || HeldCan->IsFull())
+		FindCarriedWateringCan(
+			GetWorld(),
+			BotanicusCharacter);
+	if (!IsValid(HeldCan))
 	{
 		return false;
 	}
@@ -5491,7 +6091,11 @@ bool ABotanicusPlayerController::TryRefillHeldWateringCan()
 			BotanicusCharacter->GetActorLocation(),
 			ReserveIt->GetActorLocation());
 		if (DistanceSquared <= BestDistanceSquared &&
-			IsLookingAtWorldItem(*ReserveIt, 400.0f))
+			(IsLookingAtWorldItem(*ReserveIt, 400.0f) ||
+			 CanCharacterUseWaterReserve(
+				 BotanicusCharacter,
+				 *ReserveIt,
+				 400.0f)))
 		{
 			BestDistanceSquared = DistanceSquared;
 			NearestReserve = *ReserveIt;
@@ -5503,6 +6107,7 @@ bool ABotanicusPlayerController::TryRefillHeldWateringCan()
 	}
 	LocalActiveWaterReserve = NearestReserve;
 	bWaterRefillActionHeld = true;
+	WaterRefillRequestAccumulator = 0.0f;
 	ServerRefillWateringCan(NearestReserve);
 	return true;
 }
@@ -5516,63 +6121,34 @@ void ABotanicusPlayerController::UpdateWateringCanRefill(
 		const ABotanicusCharacter* BotanicusCharacter =
 			Cast<ABotanicusCharacter>(GetPawn());
 		const ABotanicusWateringCanActor* HeldCan =
-			BotanicusCharacter
-				? BotanicusCharacter->GetHeldWateringCan()
-				: nullptr;
+			FindCarriedWateringCan(
+				GetWorld(),
+				BotanicusCharacter);
 		if (!IsValid(LocalActiveWaterReserve) ||
 			!IsValid(HeldCan) ||
-			HeldCan->IsFull() ||
-			!IsLookingAtWorldItem(
-				LocalActiveWaterReserve,
-				400.0f))
+			(!IsLookingAtWorldItem(
+				 LocalActiveWaterReserve,
+				 400.0f) &&
+			 !CanCharacterUseWaterReserve(
+				 BotanicusCharacter,
+				 LocalActiveWaterReserve,
+				 400.0f)))
 		{
 			EndWateringCanRefill(true);
 		}
-	}
-
-	if (!HasAuthority() ||
-		!IsValid(ServerActiveWaterReserve))
-	{
-		return;
-	}
-
-	ABotanicusCharacter* BotanicusCharacter =
-		Cast<ABotanicusCharacter>(GetPawn());
-	ABotanicusWateringCanActor* HeldCan =
-		BotanicusCharacter
-			? BotanicusCharacter->GetHeldWateringCan()
-			: nullptr;
-	const bool bCanContinue =
-		IsValid(BotanicusCharacter) &&
-		IsValid(HeldCan) &&
-		!HeldCan->IsFull() &&
-		IsLookingAtWorldItem(
-			ServerActiveWaterReserve,
-			450.0f);
-	if (!bCanContinue)
-	{
-		if (bServerWaterRefillChanged)
+		else
 		{
-			if (ABotanicusGameMode* GameMode =
-				GetWorld()->GetAuthGameMode<ABotanicusGameMode>())
+			WaterRefillRequestAccumulator +=
+				FMath::Max(0.0f, DeltaTime);
+			if (WaterRefillRequestAccumulator >= 0.1f)
 			{
-				GameMode->ScheduleInventoryAutosave();
+				WaterRefillRequestAccumulator =
+					FMath::Fmod(
+						WaterRefillRequestAccumulator,
+						0.1f);
+				ServerRefillWateringCan(
+					LocalActiveWaterReserve);
 			}
-		}
-		ServerActiveWaterReserve = nullptr;
-		bServerWaterRefillChanged = false;
-		return;
-	}
-
-	constexpr float WaterRefillPerSecond = 0.40f;
-	if (ServerActiveWaterReserve->TryRefill(
-			BotanicusCharacter,
-			WaterRefillPerSecond * FMath::Max(0.0f, DeltaTime)))
-	{
-		bServerWaterRefillChanged = true;
-		if (HeldCan->IsFull())
-		{
-			ClientMessage(TEXT("Arrosoir rempli : eau 100%."));
 		}
 	}
 }
@@ -5584,6 +6160,7 @@ void ABotanicusPlayerController::EndWateringCanRefill(
 		LocalActiveWaterReserve;
 	LocalActiveWaterReserve = nullptr;
 	bWaterRefillActionHeld = false;
+	WaterRefillRequestAccumulator = 0.0f;
 	if (bNotifyServer && IsValid(PreviousReserve))
 	{
 		ServerEndWateringCanRefill(PreviousReserve);
@@ -5818,28 +6395,7 @@ void ABotanicusPlayerController::UpdatePlaceableItemMoveCharge(
 		CarryProgressWidget->SetCarryProgress(0.0f);
 	}
 
-	bool bStoredOnShelf = false;
-	for (TActorIterator<ABotanicusStorageShelfActor> ShelfIt(
-			 GetWorld());
-		 ShelfIt;
-		 ++ShelfIt)
-	{
-		if (ShelfIt->FindStorageSlotIndexForItem(ItemToMove) !=
-			INDEX_NONE)
-		{
-			bStoredOnShelf = true;
-			break;
-		}
-	}
-	if (bStoredOnShelf ||
-		ItemToMove->GetItemKey() == TEXT("PottingSoil"))
-	{
-		BeginStorageCollectionQuantitySelection(ItemToMove);
-	}
-	else
-	{
-		BeginWorldItemMove(ItemToMove);
-	}
+	BeginStorageCollectionQuantitySelection(ItemToMove);
 }
 
 void ABotanicusPlayerController::CancelPlaceableItemMoveCharge()
@@ -5891,6 +6447,81 @@ void ABotanicusPlayerController::
 		WorldItem->GetItemKey(),
 		LocalStorageCollectionQuantity,
 		LocalStorageCollectionMaximum);
+}
+
+void ABotanicusPlayerController::
+	ClientBeginCollectedItemInspection_Implementation(
+		int32 SlotIndex,
+		FName ItemKey)
+{
+	PendingCollectedItemSlotIndex = SlotIndex;
+	PendingCollectedItemKey = ItemKey;
+	CollectedItemInspectionRetryCount = 0;
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(
+			CollectedItemInspectionRetryTimer);
+		World->GetTimerManager().SetTimer(
+			CollectedItemInspectionRetryTimer,
+			this,
+			&ABotanicusPlayerController::
+				TryBeginCollectedItemInspection,
+			0.05f,
+			true);
+	}
+	TryBeginCollectedItemInspection();
+}
+
+void ABotanicusPlayerController::
+	TryBeginCollectedItemInspection()
+{
+	ABotanicusCharacter* BotanicusCharacter =
+		Cast<ABotanicusCharacter>(GetPawn());
+	UBotanicusQuickBarComponent* QuickBar =
+		BotanicusCharacter
+			? BotanicusCharacter->GetQuickBarComponent()
+			: nullptr;
+	if (!QuickBar ||
+		PendingCollectedItemSlotIndex == INDEX_NONE ||
+		PendingCollectedItemKey.IsNone())
+	{
+		return;
+	}
+
+	const FBotanicusQuickBarSlot Slot =
+		QuickBar->GetSlot(PendingCollectedItemSlotIndex);
+	if (!Slot.IsEmpty() &&
+		Slot.ItemKey == PendingCollectedItemKey)
+	{
+		QuickBar->SelectSlot(PendingCollectedItemSlotIndex);
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(
+				CollectedItemInspectionRetryTimer);
+		}
+		PendingCollectedItemSlotIndex = INDEX_NONE;
+		PendingCollectedItemKey = NAME_None;
+		CollectedItemInspectionRetryCount = 0;
+		BeginQuickBarItemPlacement();
+		return;
+	}
+
+	++CollectedItemInspectionRetryCount;
+	if (CollectedItemInspectionRetryCount >= 40)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(
+				CollectedItemInspectionRetryTimer);
+		}
+		PendingCollectedItemSlotIndex = INDEX_NONE;
+		PendingCollectedItemKey = NAME_None;
+		CollectedItemInspectionRetryCount = 0;
+		ClientMessage(
+			TEXT(
+				"L'objet est dans la hotbar, mais son inspection automatique n'a pas pu demarrer."));
+	}
 }
 
 void ABotanicusPlayerController::
@@ -8170,6 +8801,22 @@ void ABotanicusPlayerController::
 		Workbench->SetMoveContentsWithFurniture(
 			bServerFurnitureMoveModeActive);
 	}
+	ABotanicusWorkSurfaceActor* WorkSurface =
+		Cast<ABotanicusWorkSurfaceActor>(Equipment);
+	if (WorkSurface &&
+		WorkSurface->HasSurfaceContents() &&
+		!bServerFurnitureMoveModeActive)
+	{
+		ClientMessage(
+			TEXT(
+				"Activez le mode meubles avec B pour deplacer ce plan de travail avec son contenu."));
+		return;
+	}
+	if (WorkSurface)
+	{
+		WorkSurface->SetMoveContentsWithFurniture(
+			bServerFurnitureMoveModeActive);
+	}
 
 	const bool bAlreadyCarried =
 		Equipment->GetCarrier() == ControlledPawn;
@@ -8210,6 +8857,10 @@ void ABotanicusPlayerController::
 	else if (Workbench)
 	{
 		Workbench->SetMoveContentsWithFurniture(false);
+	}
+	else if (WorkSurface)
+	{
+		WorkSurface->SetMoveContentsWithFurniture(false);
 	}
 }
 
@@ -8502,6 +9153,9 @@ void ABotanicusPlayerController::
 			 EBotanicusPlacementSurface::Floor) &&
 		 !ABotanicusStorageShelfActor::IsCatalogItemCompatible(
 			 this,
+			 ItemKey) &&
+		 !ABotanicusWorkSurfaceActor::IsCatalogItemCompatible(
+			 this,
 			 ItemKey)))
 	{
 		ClientMessage(
@@ -8617,6 +9271,7 @@ void ABotanicusPlayerController::
 	}
 
 	PlacedItem->InitializePlacedItem(ItemKey, Quantity);
+	ApplyCarriedItemState(Slot, PlacedItem);
 	if (!QuickBar->RemoveQuantity(SlotIndex, Quantity))
 	{
 		PlacedItem->Destroy();
@@ -8634,6 +9289,130 @@ void ABotanicusPlayerController::
 	{
 		GameMode->ScheduleInventoryAutosave();
 	}
+}
+
+void ABotanicusPlayerController::
+	ServerThrowQuickBarItem_Implementation(
+		int32 SlotIndex,
+		FGuid InstanceId,
+		FName ItemKey,
+		FVector_NetQuantizeNormal ThrowDirection,
+		float HoldDuration)
+{
+	ABotanicusCharacter* BotanicusCharacter =
+		Cast<ABotanicusCharacter>(GetPawn());
+	UBotanicusQuickBarComponent* QuickBar =
+		BotanicusCharacter
+			? BotanicusCharacter->GetQuickBarComponent()
+			: nullptr;
+	UWorld* World = GetWorld();
+	if (!BotanicusCharacter || !QuickBar || !World)
+	{
+		return;
+	}
+
+	const FBotanicusItemDefinition* Definition =
+		FindItemDefinition(this, ItemKey);
+	const bool bShelfCompatible =
+		ABotanicusStorageShelfActor::IsCatalogItemCompatible(
+			this,
+			ItemKey);
+	const bool bWorkSurfaceCompatible =
+		ABotanicusWorkSurfaceActor::IsCatalogItemCompatible(
+			this,
+			ItemKey);
+	if (!Definition ||
+		Definition->WeightClass !=
+			EBotanicusItemWeightClass::Hotbar ||
+		(!Definition->CanBePlacedOn(
+			 EBotanicusPlacementSurface::Floor) &&
+		 !bShelfCompatible &&
+		 !bWorkSurfaceCompatible))
+	{
+		ClientMessage(
+			TEXT("Lancer refuse : objet incompatible."));
+		return;
+	}
+
+	const FBotanicusQuickBarSlot Slot =
+		QuickBar->GetSlot(SlotIndex);
+	if (Slot.IsEmpty() ||
+		Slot.ItemKey != ItemKey ||
+		Slot.InstanceId != InstanceId)
+	{
+		ClientMessage(
+			TEXT("Lancer refuse : le contenu du slot a change."));
+		return;
+	}
+
+	FVector Direction(ThrowDirection);
+	if (Direction.ContainsNaN() || !Direction.Normalize())
+	{
+		ClientMessage(TEXT("Lancer refuse : direction invalide."));
+		return;
+	}
+
+	const float ClampedHoldDuration = FMath::Clamp(
+		HoldDuration,
+		QuickBarThrowHoldThreshold,
+		MaximumQuickBarThrowHoldDuration);
+	const float ChargeAlpha = FMath::GetRangePct(
+		FVector2D(
+			QuickBarThrowHoldThreshold,
+			MaximumQuickBarThrowHoldDuration),
+		ClampedHoldDuration);
+	const float ThrowSpeed = FMath::Lerp(
+		MinimumQuickBarThrowSpeed,
+		MaximumQuickBarThrowSpeed,
+		FMath::Clamp(ChargeAlpha, 0.0f, 1.0f));
+
+	UClass* ThrownItemClass =
+		Definition->WorldActorClass.LoadSynchronous();
+	if (!ThrownItemClass ||
+		!ThrownItemClass->IsChildOf(
+			ABotanicusPlaceableItemActor::StaticClass()))
+	{
+		ThrownItemClass =
+			ABotanicusPlaceableItemActor::StaticClass();
+	}
+
+	FVector EyeLocation;
+	FRotator EyeRotation;
+	BotanicusCharacter->GetActorEyesViewPoint(
+		EyeLocation,
+		EyeRotation);
+	const FVector ThrownItemSpawnLocation =
+		EyeLocation + Direction * 100.0f;
+	const FTransform SpawnTransform(
+		Direction.Rotation(),
+		ThrownItemSpawnLocation);
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	ABotanicusPlaceableItemActor* ThrownItem =
+		World->SpawnActor<ABotanicusPlaceableItemActor>(
+			ThrownItemClass,
+			SpawnTransform,
+			SpawnParameters);
+	if (!ThrownItem)
+	{
+		ClientMessage(
+			TEXT("Lancer refuse : impossible de creer l'objet."));
+		return;
+	}
+
+	ThrownItem->InitializePlacedItem(ItemKey, 1);
+	ApplyCarriedItemState(Slot, ThrownItem);
+	if (!QuickBar->RemoveQuantity(SlotIndex, 1))
+	{
+		ThrownItem->Destroy();
+		ClientMessage(
+			TEXT("Lancer refuse : quantite insuffisante."));
+		return;
+	}
+
+	ThrownItem->SetOwner(nullptr);
+	ThrownItem->LaunchItem(Direction * ThrowSpeed);
 }
 
 void ABotanicusPlayerController::
@@ -8710,30 +9489,6 @@ void ABotanicusPlayerController::
 		return;
 	}
 
-	ABotanicusStorageShelfActor* StorageShelf = nullptr;
-	for (TActorIterator<ABotanicusStorageShelfActor> ShelfIt(
-			 GetWorld());
-		 ShelfIt;
-		 ++ShelfIt)
-	{
-		if (ShelfIt->FindStorageSlotIndexForItem(WorldItem) !=
-			INDEX_NONE)
-		{
-			StorageShelf = *ShelfIt;
-			break;
-		}
-	}
-	const bool bCollectibleFromFloor =
-		WorldItem->GetItemKey() == TEXT("PottingSoil");
-	if (!StorageShelf && !bCollectibleFromFloor)
-	{
-		ClientMessage(
-			TEXT(
-				"Cet objet ne peut pas etre ajoute directement a la hotbar."));
-		ServerMovedPlaceableItem = nullptr;
-		return;
-	}
-
 	const FBotanicusItemDefinition* Definition =
 		FindItemDefinition(this, WorldItem->GetItemKey());
 	if (!Definition ||
@@ -8748,6 +9503,51 @@ void ABotanicusPlayerController::
 	}
 
 	int32 AddedSlotIndex = INDEX_NONE;
+	FBotanicusCarriedItemState CarriedState;
+	if (const ABotanicusMultiPlantPotActor* MultiPlanter =
+		Cast<ABotanicusMultiPlantPotActor>(WorldItem))
+	{
+		CarriedState.bHasMultiPlanterState = true;
+		CarriedState.MultiPlanterSoilUnits =
+			MultiPlanter->GetSoilUnits();
+		for (const FBotanicusMultiPlantSlotState& Slot :
+			MultiPlanter->GetPlantSlots())
+		{
+			CarriedState.MultiPlanterPlantKeys.Add(
+				Slot.PlantKey);
+			CarriedState.MultiPlanterWaterLevels.Add(
+				Slot.WaterLevel);
+			CarriedState.MultiPlanterGrowthProgress.Add(
+				Slot.GrowthProgress);
+			CarriedState.MultiPlanterCareScores.Add(
+				Slot.CareScore);
+			CarriedState.MultiPlanterWateringCounts.Add(
+				Slot.WateringCount);
+		}
+	}
+	else if (const ABotanicusPlantPotActor* PlantPot =
+		Cast<ABotanicusPlantPotActor>(WorldItem))
+	{
+		CarriedState.bHasPlantPotState = true;
+		CarriedState.bPlantPotHasSoil = PlantPot->HasSoil();
+		CarriedState.PlantKey = PlantPot->GetPlantKey();
+		CarriedState.WaterLevel = PlantPot->GetWaterLevel();
+		CarriedState.GrowthProgress =
+			PlantPot->GetGrowthProgress();
+		CarriedState.CareScore = PlantPot->GetCareScore();
+		CarriedState.WateringCount =
+			PlantPot->GetWateringCount();
+	}
+	else if (const ABotanicusSalePotActor* SalePot =
+		Cast<ABotanicusSalePotActor>(WorldItem))
+	{
+		CarriedState.bHasSalePotState = true;
+		CarriedState.SaleSoilItemKey =
+			SalePot->GetSoilItemKey();
+		CarriedState.SalePlantItemKey =
+			SalePot->GetPlantItemKey();
+	}
+
 	if (!QuickBar->AddItem(
 			WorldItem->GetItemKey(),
 			Quantity,
@@ -8759,9 +9559,14 @@ void ABotanicusPlayerController::
 		ServerMovedPlaceableItem = nullptr;
 		return;
 	}
+	QuickBar->SetCarriedItemState(
+		AddedSlotIndex,
+		CarriedState);
 
 	const FString ItemName =
 		Definition->DisplayName.ToString();
+	const FName CollectedItemKey =
+		WorldItem->GetItemKey();
 	const int32 RemainingQuantity =
 		WorldItem->GetQuantity() - Quantity;
 	ServerMovedPlaceableItem = nullptr;
@@ -8778,6 +9583,10 @@ void ABotanicusPlayerController::
 		WorldItem->FlushNetDormancy();
 		WorldItem->ForceNetUpdate();
 	}
+	QuickBar->SelectSlotAuthoritative(AddedSlotIndex);
+	ClientBeginCollectedItemInspection(
+		AddedSlotIndex,
+		CollectedItemKey);
 	ClientMessage(
 		*FString::Printf(
 			TEXT("%s x%d ajoute a la hotbar."),
@@ -9120,15 +9929,60 @@ void ABotanicusPlayerController::
 {
 	ABotanicusCharacter* BotanicusCharacter =
 		Cast<ABotanicusCharacter>(GetPawn());
-	if (!BotanicusCharacter || !IsValid(WaterReserve) ||
-		!IsLookingAtWorldItem(WaterReserve, 450.0f) ||
-		!IsValid(BotanicusCharacter->GetHeldWateringCan()) ||
-		BotanicusCharacter->GetHeldWateringCan()->IsFull())
+	ABotanicusWateringCanActor* HeldCan =
+		FindCarriedWateringCan(
+			GetWorld(),
+			BotanicusCharacter);
+	if (!BotanicusCharacter || !IsValid(HeldCan))
 	{
+		ClientMessage(
+			TEXT(
+				"Remplissage impossible : prenez d'abord l'arrosoir en main."));
+		return;
+	}
+	if (!CanCharacterUseWaterReserve(
+			BotanicusCharacter,
+			WaterReserve,
+			450.0f))
+	{
+		ClientMessage(
+			TEXT(
+				"Remplissage impossible : regardez la reserve et rapprochez-vous."));
+		return;
+	}
+	if (HeldCan->IsFull())
+	{
+		ClientMessage(TEXT("L'arrosoir est deja plein."));
 		return;
 	}
 	ServerActiveWaterReserve = WaterReserve;
-	bServerWaterRefillChanged = false;
+	const double CurrentServerTime =
+		GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+	const double ElapsedSincePulse =
+		CurrentServerTime - LastServerWaterRefillPulseTime;
+	if (ElapsedSincePulse < 0.075)
+	{
+		return;
+	}
+
+	const float RefillDeltaTime =
+		LastServerWaterRefillPulseTime < -100.0
+			? 0.1f
+			: FMath::Clamp(
+				static_cast<float>(ElapsedSincePulse),
+				0.075f,
+				0.15f);
+	LastServerWaterRefillPulseTime = CurrentServerTime;
+	constexpr float WaterRefillPerSecond = 0.40f;
+	if (HeldCan->AddWater(
+			WaterRefillPerSecond * RefillDeltaTime))
+	{
+		bServerWaterRefillChanged = true;
+		if (HeldCan->IsFull())
+		{
+			ClientMessage(TEXT("Arrosoir rempli : eau 100%."));
+		}
+	}
 }
 
 void ABotanicusPlayerController::
@@ -9149,6 +10003,7 @@ void ABotanicusPlayerController::
 	}
 	ServerActiveWaterReserve = nullptr;
 	bServerWaterRefillChanged = false;
+	LastServerWaterRefillPulseTime = -1000.0;
 }
 
 void ABotanicusPlayerController::

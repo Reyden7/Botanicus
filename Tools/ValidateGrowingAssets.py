@@ -36,6 +36,9 @@ for required_key in (
     "SalesDisplay",
     "SalePot",
     "PreparationWorkbench",
+    "WorkSurfaceSmall",
+    "WorkSurfaceMedium",
+    "WorkSurfaceLarge",
     "StorageShelfFloorSmall",
     "StorageShelfFloorLarge",
     "StorageShelfWallSmall",
@@ -48,6 +51,9 @@ for required_key in (
         raise RuntimeError(f"Missing item definition {required_key}")
     if required_key in (
         "PreparationWorkbench",
+        "WorkSurfaceSmall",
+        "WorkSurfaceMedium",
+        "WorkSurfaceLarge",
         "StorageShelfFloorSmall",
         "StorageShelfFloorLarge",
         "StorageShelfWallSmall",
@@ -97,6 +103,42 @@ for storage_shelf_key in (
     ):
         raise RuntimeError(
             f"{storage_shelf_key} has an invalid placement surface"
+        )
+
+work_surface_expectations = {
+    "WorkSurfaceSmall": ((1.2, 0.6, 0.9), 180),
+    "WorkSurfaceMedium": ((2.0, 0.7, 0.9), 280),
+    "WorkSurfaceLarge": ((3.0, 0.8, 0.9), 420),
+}
+for surface_key, (expected_scale, expected_price) in (
+    work_surface_expectations.items()
+):
+    surface = items[surface_key]
+    if (
+        surface.get_editor_property("weight_class")
+        != unreal.BotanicusItemWeightClass.ONE_PLAYER_CARRY
+    ):
+        raise RuntimeError(f"{surface_key} must be movable furniture")
+    if int(surface.get_editor_property("allowed_placement_surfaces")) != 1:
+        raise RuntimeError(f"{surface_key} must be floor-placeable")
+    if surface.get_editor_property("price") != expected_price:
+        raise RuntimeError(f"{surface_key} price is invalid")
+    scale = surface.get_editor_property("world_scale")
+    if any(
+        abs(actual - expected) > 0.001
+        for actual, expected in zip(
+            (scale.x, scale.y, scale.z),
+            expected_scale,
+        )
+    ):
+        raise RuntimeError(f"{surface_key} dimensions are invalid")
+    surface_class = surface.get_editor_property("world_actor_class")
+    if (
+        surface_class is None
+        or "BotanicusWorkSurfaceActor" not in str(surface_class)
+    ):
+        raise RuntimeError(
+            f"{surface_key} does not resolve to BotanicusWorkSurfaceActor"
         )
 
 for base_harvest_key in (
@@ -160,6 +202,9 @@ tab_expectations = {
     "SalePot": 8,
     "SalesDisplay": 8,
     "PreparationWorkbench": 4,
+    "WorkSurfaceSmall": 4,
+    "WorkSurfaceMedium": 4,
+    "WorkSurfaceLarge": 4,
     "StorageShelfFloorSmall": 4,
     "StorageShelfFloorLarge": 4,
     "StorageShelfWallSmall": 4,
@@ -379,6 +424,7 @@ for runtime_class_name in (
     "BotanicusClockWidget",
     "BotanicusVisitorSpeechBubbleWidget",
     "BotanicusPreparationWorkbenchActor",
+    "BotanicusWorkSurfaceActor",
     "BotanicusStorageShelfActor",
     "BotanicusComputerActor",
     "BotanicusCashRegisterActor",

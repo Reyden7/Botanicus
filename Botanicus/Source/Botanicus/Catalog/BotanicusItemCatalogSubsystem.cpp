@@ -3,9 +3,11 @@
 #include "Catalog/BotanicusItemCatalogSubsystem.h"
 
 #include "Growing/BotanicusPlantPotActor.h"
+#include "Growing/BotanicusMultiPlantPotActor.h"
 #include "Growing/BotanicusWateringCanActor.h"
 #include "Growing/BotanicusWaterReserveActor.h"
 #include "Preparation/BotanicusPreparationWorkbenchActor.h"
+#include "Preparation/BotanicusWorkSurfaceActor.h"
 #include "Preparation/BotanicusComputerActor.h"
 #include "Sales/BotanicusSalesDisplayActor.h"
 #include "Sales/BotanicusSalePotActor.h"
@@ -95,6 +97,65 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	PlantPot.Price = 75;
 	PlantPot.DeliveryQuantity = 1;
 	PlantPot.DeliveryDelaySeconds = 2.0f;
+
+	const auto AddPreparationPlanter =
+		[this](
+			FName ItemKey,
+			const FText& DisplayName,
+			int32 Capacity,
+			int32 Price)
+		{
+			FBotanicusItemDefinition& Planter =
+				NativeFallbackItems.AddDefaulted_GetRef();
+			Planter.ItemKey = ItemKey;
+			Planter.DisplayName = DisplayName;
+			Planter.Category =
+				EBotanicusItemCategory::Decoration;
+			Planter.CatalogTabs =
+				static_cast<int32>(
+					EBotanicusCatalogTab::Preparation);
+			Planter.WorldMesh = TSoftObjectPtr<UStaticMesh>(
+				FSoftObjectPath(
+					TEXT("/Engine/BasicShapes/Cube.Cube")));
+			Planter.WorldScale = FVector(
+				0.45f + static_cast<float>(Capacity) * 0.3f,
+				0.42f,
+				0.3f);
+			Planter.CollisionHalfExtentOverride =
+				Planter.WorldScale * 50.0f;
+			Planter.WorldActorClass =
+				ABotanicusMultiPlantPotActor::StaticClass();
+			Planter.MaximumStack = 1;
+			Planter.WeightClass =
+				EBotanicusItemWeightClass::Hotbar;
+			Planter.Price = Price;
+			Planter.DeliveryQuantity = 1;
+			Planter.DeliveryDelaySeconds = 3.0f;
+		};
+	AddPreparationPlanter(
+		TEXT("PreparationPlanter2"),
+		NSLOCTEXT(
+			"BotanicusCatalog",
+			"PreparationPlanter2",
+			"Jardiniere de preparation - 2 fleurs"),
+		2,
+		130);
+	AddPreparationPlanter(
+		TEXT("PreparationPlanter3"),
+		NSLOCTEXT(
+			"BotanicusCatalog",
+			"PreparationPlanter3",
+			"Jardiniere de preparation - 3 fleurs"),
+		3,
+		180);
+	AddPreparationPlanter(
+		TEXT("PreparationPlanter4"),
+		NSLOCTEXT(
+			"BotanicusCatalog",
+			"PreparationPlanter4",
+			"Jardiniere de preparation - 4 fleurs"),
+		4,
+		230);
 
 	FBotanicusItemDefinition& PottingSoil =
 		NativeFallbackItems.AddDefaulted_GetRef();
@@ -485,6 +546,69 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	PreparationWorkbench.DeliveryQuantity = 1;
 	PreparationWorkbench.DeliveryDelaySeconds = 4.0f;
 	PreparationWorkbench.bPurchasable = false;
+
+	const auto AddWorkSurface =
+		[this](
+			FName ItemKey,
+			const FText& DisplayName,
+			const FVector& WorldScale,
+			const FVector& CollisionExtent,
+			int32 Price)
+		{
+			FBotanicusItemDefinition& Surface =
+				NativeFallbackItems.AddDefaulted_GetRef();
+			Surface.ItemKey = ItemKey;
+			Surface.DisplayName = DisplayName;
+			Surface.Category = EBotanicusItemCategory::Equipment;
+			Surface.CatalogTabs =
+				static_cast<int32>(
+					EBotanicusCatalogTab::Preparation);
+			Surface.WorldMesh = TSoftObjectPtr<UStaticMesh>(
+				FSoftObjectPath(
+					TEXT("/Engine/BasicShapes/Cube.Cube")));
+			Surface.WorldScale = WorldScale;
+			Surface.WorldActorClass =
+				ABotanicusWorkSurfaceActor::StaticClass();
+			Surface.MaximumStack = 1;
+			Surface.WeightClass =
+				EBotanicusItemWeightClass::OnePlayerCarry;
+			Surface.CarryMovementSpeedMultiplier = 0.70f;
+			Surface.Price = Price;
+			Surface.DeliveryQuantity = 1;
+			Surface.DeliveryDelaySeconds = 3.0f;
+			Surface.AllowedPlacementSurfaces =
+				static_cast<int32>(
+					EBotanicusPlacementSurface::Floor);
+			Surface.CollisionHalfExtentOverride =
+				CollisionExtent;
+		};
+	AddWorkSurface(
+		TEXT("WorkSurfaceSmall"),
+		NSLOCTEXT(
+			"BotanicusCatalog",
+			"WorkSurfaceSmall",
+			"Petit plan de travail"),
+		FVector(1.2f, 0.6f, 0.9f),
+		FVector(60.0f, 30.0f, 45.0f),
+		180);
+	AddWorkSurface(
+		TEXT("WorkSurfaceMedium"),
+		NSLOCTEXT(
+			"BotanicusCatalog",
+			"WorkSurfaceMedium",
+			"Plan de travail moyen"),
+		FVector(2.0f, 0.7f, 0.9f),
+		FVector(100.0f, 35.0f, 45.0f),
+		280);
+	AddWorkSurface(
+		TEXT("WorkSurfaceLarge"),
+		NSLOCTEXT(
+			"BotanicusCatalog",
+			"WorkSurfaceLarge",
+			"Grand plan de travail"),
+		FVector(3.0f, 0.8f, 0.9f),
+		FVector(150.0f, 40.0f, 45.0f),
+		420);
 
 	auto AddStorageShelf =
 		[this](

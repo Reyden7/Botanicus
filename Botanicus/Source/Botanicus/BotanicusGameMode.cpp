@@ -14,6 +14,7 @@
 #include "Delivery/BotanicusPlaceableItemActor.h"
 #include "Economy/BotanicusRefundZoneActor.h"
 #include "Growing/BotanicusPlantPotActor.h"
+#include "Growing/BotanicusMultiPlantPotActor.h"
 #include "Growing/BotanicusWateringCanActor.h"
 #include "Sales/BotanicusSalesDisplayActor.h"
 #include "Sales/BotanicusSalePotActor.h"
@@ -437,7 +438,26 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		SavedItem.Transform = ItemIt->GetActorTransform();
 		SavedItem.ItemKey = ItemIt->GetItemKey();
 		SavedItem.Quantity = ItemIt->GetQuantity();
-		if (const ABotanicusPlantPotActor* PlantPot =
+		if (const ABotanicusMultiPlantPotActor* MultiPlanter =
+			Cast<ABotanicusMultiPlantPotActor>(*ItemIt))
+		{
+			SavedItem.MultiPlanterSoilUnits =
+				MultiPlanter->GetSoilUnits();
+			for (const FBotanicusMultiPlantSlotState& Slot :
+				MultiPlanter->GetPlantSlots())
+			{
+				SavedItem.MultiPlanterPlantKeys.Add(Slot.PlantKey);
+				SavedItem.MultiPlanterWaterLevels.Add(
+					Slot.WaterLevel);
+				SavedItem.MultiPlanterGrowthProgress.Add(
+					Slot.GrowthProgress);
+				SavedItem.MultiPlanterCareScores.Add(
+					Slot.CareScore);
+				SavedItem.MultiPlanterWateringCounts.Add(
+					Slot.WateringCount);
+			}
+		}
+		else if (const ABotanicusPlantPotActor* PlantPot =
 			Cast<ABotanicusPlantPotActor>(*ItemIt))
 		{
 			SavedItem.bPlantPotHasSoil = PlantPot->HasSoil();
@@ -1110,7 +1130,49 @@ void ABotanicusGameMode::RestoreWorldState()
 			PlacedItem->InitializePlacedItem(
 				SavedItem.ItemKey,
 				SavedItem.Quantity);
-			if (ABotanicusPlantPotActor* PlantPot =
+			if (ABotanicusMultiPlantPotActor* MultiPlanter =
+				Cast<ABotanicusMultiPlantPotActor>(PlacedItem))
+			{
+				TArray<FBotanicusMultiPlantSlotState> Slots;
+				for (int32 Index = 0;
+					 Index <
+					 SavedItem.MultiPlanterPlantKeys.Num();
+					 ++Index)
+				{
+					FBotanicusMultiPlantSlotState& Slot =
+						Slots.AddDefaulted_GetRef();
+					Slot.PlantKey =
+						SavedItem.MultiPlanterPlantKeys[Index];
+					Slot.WaterLevel =
+						SavedItem.MultiPlanterWaterLevels.
+							IsValidIndex(Index)
+							? SavedItem.
+								MultiPlanterWaterLevels[Index]
+							: 0.0f;
+					Slot.GrowthProgress =
+						SavedItem.MultiPlanterGrowthProgress.
+							IsValidIndex(Index)
+							? SavedItem.
+								MultiPlanterGrowthProgress[Index]
+							: 0.0f;
+					Slot.CareScore =
+						SavedItem.MultiPlanterCareScores.
+							IsValidIndex(Index)
+							? SavedItem.
+								MultiPlanterCareScores[Index]
+							: 0.0f;
+					Slot.WateringCount =
+						SavedItem.MultiPlanterWateringCounts.
+							IsValidIndex(Index)
+							? SavedItem.
+								MultiPlanterWateringCounts[Index]
+							: 0;
+				}
+				MultiPlanter->RestoreMultiPlantState(
+					SavedItem.MultiPlanterSoilUnits,
+					Slots);
+			}
+			else if (ABotanicusPlantPotActor* PlantPot =
 				Cast<ABotanicusPlantPotActor>(PlacedItem))
 			{
 				PlantPot->RestoreGrowingState(

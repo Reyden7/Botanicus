@@ -1,0 +1,756 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+#include "Growing/BotanicusMultiPlantPotActor.h"
+
+#include "BotanicusCharacter.h"
+#include "Camera/PlayerCameraManager.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/TextRenderComponent.h"
+#include "Engine/GameInstance.h"
+#include "Engine/StaticMesh.h"
+#include "GameFramework/PlayerController.h"
+#include "Growing/BotanicusPlantSubsystem.h"
+#include "Growing/BotanicusWateringCanActor.h"
+#include "Net/UnrealNetwork.h"
+#include "QuickBar/BotanicusQuickBarComponent.h"
+#include "UObject/ConstructorHelpers.h"
+
+ABotanicusMultiPlantPotActor::ABotanicusMultiPlantPotActor()
+{
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.TickInterval = 0.1f;
+	InteractionName =
+		NSLOCTEXT(
+			"BotanicusGrowing",
+			"MultiPlantPot",
+			"Jardiniere de preparation");
+
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(
+		TEXT("/Engine/BasicShapes/Cube.Cube"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderFinder(
+		TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereFinder(
+		TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+
+	TArray<UTextRenderComponent*> InheritedTexts;
+	GetComponents(InheritedTexts);
+	for (UTextRenderComponent* Text : InheritedTexts)
+	{
+		if (Text)
+		{
+			Text->SetVisibility(false);
+		}
+	}
+	TArray<UStaticMeshComponent*> InheritedMeshes;
+	GetComponents(InheritedMeshes);
+	for (UStaticMeshComponent* Component : InheritedMeshes)
+	{
+		if (Component && Component != Mesh)
+		{
+			Component->SetVisibility(false);
+		}
+	}
+
+	if (CubeFinder.Succeeded())
+	{
+		Mesh->SetStaticMesh(CubeFinder.Object);
+		Mesh->SetRelativeScale3D(FVector(0.75f, 0.42f, 0.3f));
+	}
+
+	MultiSoilMesh =
+		CreateDefaultSubobject<UStaticMeshComponent>(
+			TEXT("MultiSoil"));
+	MultiSoilMesh->SetupAttachment(SceneRoot);
+	MultiSoilMesh->SetStaticMesh(
+		CubeFinder.Succeeded() ? CubeFinder.Object : nullptr);
+	MultiSoilMesh->SetCollisionEnabled(
+		ECollisionEnabled::NoCollision);
+
+	for (int32 Index = 0; Index < 4; ++Index)
+	{
+		UStaticMeshComponent* Stem =
+			CreateDefaultSubobject<UStaticMeshComponent>(
+				*FString::Printf(TEXT("MultiStem_%d"), Index));
+		Stem->SetupAttachment(SceneRoot);
+		Stem->SetStaticMesh(
+			CylinderFinder.Succeeded()
+				? CylinderFinder.Object
+				: nullptr);
+		Stem->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		MultiStemMeshes.Add(Stem);
+
+		UStaticMeshComponent* Flower =
+			CreateDefaultSubobject<UStaticMeshComponent>(
+				*FString::Printf(TEXT("MultiFlower_%d"), Index));
+		Flower->SetupAttachment(SceneRoot);
+		Flower->SetStaticMesh(
+			SphereFinder.Succeeded() ? SphereFinder.Object : nullptr);
+		Flower->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		MultiFlowerMeshes.Add(Flower);
+	}
+
+	MultiStatusText =
+		CreateDefaultSubobject<UTextRenderComponent>(
+			TEXT("MultiPlantStatus"));
+	MultiStatusText->SetupAttachment(SceneRoot);
+	MultiStatusText->SetRelativeLocation(FVector(0.0f, 0.0f, 125.0f));
+	MultiStatusText->SetHorizontalAlignment(EHTA_Center);
+	MultiStatusText->SetVerticalAlignment(EVRTA_TextCenter);
+	MultiStatusText->SetWorldSize(13.0f);
+	MultiStatusText->SetTextRenderColor(FColor(110, 220, 255));
+	MultiStatusText->SetCollisionEnabled(
+		ECollisionEnabled::NoCollision);
+
+	PlantSlots.SetNum(4);
+	RefreshVisuals();
+}
+
+int32 ABotanicusMultiPlantPotActor::GetPlantCapacity() const
+{
+	if (GetItemKey() == TEXT("PreparationPlanter4"))
+	{
+		return 4;
+	}
+	if (GetItemKey() == TEXT("PreparationPlanter3"))
+	{
+		return 3;
+	}
+	return 2;
+}
+
+void ABotanicusMultiPlantPotActor::Tick(float DeltaSeconds)
+{
+	// Skip the one-plant simulation implemented by the parent class.
+	ABotanicusPlaceableItemActor::Tick(DeltaSeconds);
+
+	if (MultiStatusText)
+	{
+		if (const UWorld* World = GetWorld())
+		{
+			if (const APlayerController* Controller =
+				World->GetFirstPlayerController())
+			{
+				if (Controller->PlayerCameraManager)
+				{
+					MultiStatusText->SetWorldRotation(
+						(Controller->PlayerCameraManager->
+							GetCameraLocation() -
+						 MultiStatusText->GetComponentLocation()).
+							Rotation());
+				}
+			}
+		}
+	}
+
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	bool bChanged = UpdateActiveUse(DeltaSeconds);
+	const int32 Capacity = GetPlantCapacity();
+	for (int32 Index = 0; Index < Capacity; ++Index)
+	{
+		FBotanicusMultiPlantSlotState& Slot = PlantSlots[Index];
+		if (Slot.PlantKey.IsNone())
+		{
+			continue;
+		}
+		const FBotanicusPlantDefinition* Definition =
+			FindPlant(Slot.PlantKey);
+		if (!Definition)
+		{
+			continue;
+		}
+
+		const float PreviousWater = Slot.WaterLevel;
+		const float PreviousGrowth = Slot.GrowthProgress;
+		Slot.WaterLevel = FMath::Clamp(
+			Slot.WaterLevel -
+				FMath::Max(
+					0.0f,
+					Definition->WaterConsumptionPerSecond) *
+					DeltaSeconds,
+			0.0f,
+			1.0f);
+		if (Slot.WaterLevel >= Definition->MinimumHealthyWater &&
+			Slot.WaterLevel <= Definition->MaximumHealthyWater &&
+			Slot.GrowthProgress < 1.0f)
+		{
+			const float GrowthAdded =
+				DeltaSeconds /
+				FMath::Max(
+					1.0f,
+					Definition->GrowthDurationSeconds);
+			Slot.GrowthProgress = FMath::Clamp(
+				Slot.GrowthProgress + GrowthAdded,
+				0.0f,
+				1.0f);
+			Slot.CareScore = FMath::Clamp(
+				Slot.CareScore + GrowthAdded,
+				0.0f,
+				1.0f);
+		}
+		bChanged |=
+			!FMath::IsNearlyEqual(
+				PreviousWater,
+				Slot.WaterLevel,
+				0.0001f) ||
+			!FMath::IsNearlyEqual(
+				PreviousGrowth,
+				Slot.GrowthProgress,
+				0.0001f);
+	}
+
+	if (bChanged)
+	{
+		RefreshVisuals();
+		ForceNetUpdate();
+	}
+}
+
+void ABotanicusMultiPlantPotActor::GetLifetimeReplicatedProps(
+	TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(ABotanicusMultiPlantPotActor, SoilUnits);
+	DOREPLIFETIME(ABotanicusMultiPlantPotActor, PlantSlots);
+}
+
+FBotanicusInteractionPrompt
+ABotanicusMultiPlantPotActor::
+	GetInteractionPrompt_Implementation(
+		AActor* Interactor) const
+{
+	FBotanicusInteractionPrompt Prompt;
+	Prompt.TargetName = InteractionName;
+	const int32 SlotIndex = ResolveAimedSlot(Interactor);
+	const int32 Capacity = GetPlantCapacity();
+	if (SoilUnits < Capacity)
+	{
+		Prompt.ActionText =
+			GetSelectedItemKey(Interactor) == TEXT("PottingSoil")
+				? FText::FromString(
+					FString::Printf(
+						TEXT("Maintenir clic gauche : terreau %d/%d"),
+						SoilUnits,
+						Capacity))
+				: FText::FromString(TEXT("Selectionner du terreau"));
+	}
+	else if (PlantSlots.IsValidIndex(SlotIndex) &&
+		PlantSlots[SlotIndex].PlantKey.IsNone())
+	{
+		Prompt.ActionText =
+			FText::FromString(
+				FString::Printf(
+					TEXT("Planter dans l'emplacement %d"),
+					SlotIndex + 1));
+	}
+	else if (IsMature(SlotIndex))
+	{
+		Prompt.ActionText = CanHarvest(SlotIndex, Interactor)
+			? FText::FromString(
+				FString::Printf(
+					TEXT(
+						"Maintenir clic gauche : recolter la plante %d"),
+					SlotIndex + 1))
+			: FText::FromString(
+				TEXT("Petite pelle requise pour recolter"));
+	}
+	else
+	{
+		Prompt.ActionText =
+			FText::FromString(
+				FString::Printf(
+					TEXT("Arroser / observer l'emplacement %d"),
+					SlotIndex + 1));
+	}
+	Prompt.bCanInteract = false;
+	return Prompt;
+}
+
+bool ABotanicusMultiPlantPotActor::CanInteract_Implementation(
+	AActor* Interactor) const
+{
+	return CanHarvest(ResolveAimedSlot(Interactor), Interactor);
+}
+
+void ABotanicusMultiPlantPotActor::BeginPrimaryUse(
+	AActor* Interactor)
+{
+	if (!HasAuthority() || ActiveUser.IsValid())
+	{
+		return;
+	}
+	ABotanicusCharacter* Character =
+		Cast<ABotanicusCharacter>(Interactor);
+	UBotanicusQuickBarComponent* QuickBar =
+		Character ? Character->GetQuickBarComponent() : nullptr;
+	if (!Character || !QuickBar)
+	{
+		return;
+	}
+
+	const int32 Capacity = GetPlantCapacity();
+	const FName SelectedKey =
+		QuickBar->GetSelectedSlot().ItemKey;
+	if (SoilUnits < Capacity)
+	{
+		if (SelectedKey != TEXT("PottingSoil"))
+		{
+			SendMessage(
+				Interactor,
+				TEXT("Selectionnez une dose de terreau."));
+			return;
+		}
+		ActiveUser = Character;
+		ActiveUseMode = EUseMode::FillSoil;
+		ActiveProgress = 0.0f;
+		return;
+	}
+
+	const int32 SlotIndex = ResolveAimedSlot(Interactor);
+	if (!PlantSlots.IsValidIndex(SlotIndex))
+	{
+		return;
+	}
+	FBotanicusMultiPlantSlotState& Slot = PlantSlots[SlotIndex];
+	if (Slot.PlantKey.IsNone())
+	{
+		const UGameInstance* GameInstance = GetGameInstance();
+		const UBotanicusPlantSubsystem* Plants =
+			GameInstance
+				? GameInstance->GetSubsystem<
+					UBotanicusPlantSubsystem>()
+				: nullptr;
+		const FBotanicusPlantDefinition* Definition =
+			Plants ? Plants->FindPlantBySeed(SelectedKey) : nullptr;
+		if (!Definition || !QuickBar->ConsumeSelectedItem(1))
+		{
+			SendMessage(
+				Interactor,
+				TEXT("Selectionnez des graines compatibles."));
+			return;
+		}
+		Slot.PlantKey = Definition->PlantKey;
+		Slot.GrowthProgress = 0.02f;
+		Slot.CareScore = 0.01f;
+		SendMessage(
+			Interactor,
+			FString::Printf(
+				TEXT("%s plante dans l'emplacement %d."),
+				*Definition->DisplayName.ToString(),
+				SlotIndex + 1));
+		RefreshVisuals();
+		ForceNetUpdate();
+		return;
+	}
+
+	if (CanHarvest(SlotIndex, Interactor))
+	{
+		ActiveUser = Character;
+		ActiveUseMode = EUseMode::Harvest;
+		ActiveSlotIndex = SlotIndex;
+		ActiveProgress = 0.0f;
+		return;
+	}
+	if (ABotanicusWateringCanActor* WateringCan =
+		Character->GetHeldWateringCan())
+	{
+		if (!WateringCan->HasWater())
+		{
+			SendMessage(Interactor, TEXT("L'arrosoir est vide."));
+			return;
+		}
+		ActiveUser = Character;
+		ActiveUseMode = EUseMode::Water;
+		ActiveSlotIndex = SlotIndex;
+		++Slot.WateringCount;
+		return;
+	}
+	SendMessage(
+		Interactor,
+		FString::Printf(
+			TEXT("Plante %d : croissance %d%%, eau %d%%."),
+			SlotIndex + 1,
+			FMath::RoundToInt(Slot.GrowthProgress * 100.0f),
+			FMath::RoundToInt(Slot.WaterLevel * 100.0f)));
+}
+
+void ABotanicusMultiPlantPotActor::EndPrimaryUse(
+	AActor* Interactor)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	ActiveUser.Reset();
+	ActiveUseMode = EUseMode::None;
+	ActiveSlotIndex = INDEX_NONE;
+	ActiveProgress = 0.0f;
+	RefreshVisuals();
+	ForceNetUpdate();
+}
+
+bool ABotanicusMultiPlantPotActor::UpdateActiveUse(
+	float DeltaSeconds)
+{
+	if (ActiveUseMode == EUseMode::None)
+	{
+		return false;
+	}
+	ABotanicusCharacter* Character = ActiveUser.Get();
+	if (!IsValid(Character))
+	{
+		EndPrimaryUse(Character);
+		return true;
+	}
+
+	if (ActiveUseMode == EUseMode::FillSoil)
+	{
+		if (GetSelectedItemKey(Character) != TEXT("PottingSoil") ||
+			!IsInteractorStillTargeting(
+				Character,
+				ResolveAimedSlot(Character)))
+		{
+			EndPrimaryUse(Character);
+			return true;
+		}
+		ActiveProgress += DeltaSeconds;
+		if (ActiveProgress >= 1.0f)
+		{
+			ActiveProgress = 0.0f;
+			if (Character->GetQuickBarComponent()->
+				ConsumeSelectedItem(1))
+			{
+				SoilUnits = FMath::Min(
+					SoilUnits + 1,
+					GetPlantCapacity());
+				SendMessage(
+					Character,
+					FString::Printf(
+						TEXT("Terreau : %d/%d."),
+						SoilUnits,
+						GetPlantCapacity()));
+			}
+			if (SoilUnits >= GetPlantCapacity())
+			{
+				EndPrimaryUse(Character);
+			}
+		}
+		return true;
+	}
+
+	if (!PlantSlots.IsValidIndex(ActiveSlotIndex) ||
+		!IsInteractorStillTargeting(
+			Character,
+			ActiveSlotIndex))
+	{
+		EndPrimaryUse(Character);
+		return true;
+	}
+	FBotanicusMultiPlantSlotState& Slot =
+		PlantSlots[ActiveSlotIndex];
+	const FBotanicusPlantDefinition* Definition =
+		FindPlant(Slot.PlantKey);
+	if (!Definition)
+	{
+		EndPrimaryUse(Character);
+		return true;
+	}
+
+	if (ActiveUseMode == EUseMode::Water)
+	{
+		ABotanicusWateringCanActor* WateringCan =
+			Character->GetHeldWateringCan();
+		if (!IsValid(WateringCan) || !WateringCan->HasWater())
+		{
+			EndPrimaryUse(Character);
+			return true;
+		}
+		Slot.WaterLevel = FMath::Clamp(
+			Slot.WaterLevel +
+				Definition->WaterAddedPerUse * DeltaSeconds,
+			0.0f,
+			1.0f);
+		WateringCan->ConsumeWater(0.12f * DeltaSeconds);
+		return true;
+	}
+
+	if (!CanHarvest(ActiveSlotIndex, Character))
+	{
+		EndPrimaryUse(Character);
+		return true;
+	}
+	ActiveProgress +=
+		DeltaSeconds /
+			FMath::Max(0.1f, Definition->HarvestDurationSeconds);
+	if (ActiveProgress >= 1.0f)
+	{
+		int32 AddedSlotIndex = INDEX_NONE;
+		if (!Character->GetQuickBarComponent()->AddItem(
+				GetHarvestItemKey(ActiveSlotIndex, *Definition),
+				FMath::Max(1, Definition->HarvestQuantity),
+				AddedSlotIndex))
+		{
+			SendMessage(
+				Character,
+				TEXT("Liberez une place dans la hotbar."));
+			EndPrimaryUse(Character);
+			return true;
+		}
+		Slot = FBotanicusMultiPlantSlotState();
+		EndPrimaryUse(Character);
+	}
+	return true;
+}
+
+int32 ABotanicusMultiPlantPotActor::ResolveAimedSlot(
+	AActor* Interactor) const
+{
+	const APawn* Pawn = Cast<APawn>(Interactor);
+	const APlayerController* Controller =
+		Pawn
+			? Cast<APlayerController>(Pawn->GetController())
+			: nullptr;
+	if (!Controller)
+	{
+		return 0;
+	}
+	const FVector ViewLocation = Pawn->GetPawnViewLocation();
+	const FRotator ViewRotation =
+		Controller->GetControlRotation();
+	FHitResult Hit;
+	FCollisionQueryParams Params(
+		SCENE_QUERY_STAT(BotanicusMultiPlanterAim),
+		false,
+		Pawn);
+	FVector TargetLocation = GetActorLocation();
+	if (GetWorld()->LineTraceSingleByChannel(
+			Hit,
+			ViewLocation,
+			ViewLocation + ViewRotation.Vector() * 500.0f,
+			ECC_Visibility,
+			Params) &&
+		Hit.GetActor() == this)
+	{
+		TargetLocation = Hit.ImpactPoint;
+	}
+	const FVector Local =
+		GetActorTransform().InverseTransformPosition(TargetLocation);
+	int32 BestIndex = 0;
+	float BestDistance = MAX_flt;
+	for (int32 Index = 0; Index < GetPlantCapacity(); ++Index)
+	{
+		const float Distance =
+			FMath::Abs(
+				Local.X - GetSlotLocalLocation(Index).X);
+		if (Distance < BestDistance)
+		{
+			BestDistance = Distance;
+			BestIndex = Index;
+		}
+	}
+	return BestIndex;
+}
+
+FVector ABotanicusMultiPlantPotActor::GetSlotLocalLocation(
+	int32 SlotIndex) const
+{
+	return FVector(
+		(static_cast<float>(SlotIndex) -
+		 (static_cast<float>(GetPlantCapacity() - 1) * 0.5f)) *
+			55.0f,
+		0.0f,
+		18.0f);
+}
+
+const FBotanicusPlantDefinition*
+ABotanicusMultiPlantPotActor::FindPlant(FName InPlantKey) const
+{
+	const UGameInstance* GameInstance = GetGameInstance();
+	const UBotanicusPlantSubsystem* Plants =
+		GameInstance
+			? GameInstance->GetSubsystem<UBotanicusPlantSubsystem>()
+			: nullptr;
+	return Plants ? Plants->FindPlant(InPlantKey) : nullptr;
+}
+
+bool ABotanicusMultiPlantPotActor::IsMature(
+	int32 SlotIndex) const
+{
+	return PlantSlots.IsValidIndex(SlotIndex) &&
+		!PlantSlots[SlotIndex].PlantKey.IsNone() &&
+		PlantSlots[SlotIndex].GrowthProgress >= 0.999f;
+}
+
+bool ABotanicusMultiPlantPotActor::CanHarvest(
+	int32 SlotIndex,
+	AActor* Interactor) const
+{
+	if (!IsMature(SlotIndex))
+	{
+		return false;
+	}
+	const FBotanicusPlantDefinition* Definition =
+		FindPlant(PlantSlots[SlotIndex].PlantKey);
+	return Definition &&
+		GetSelectedItemKey(Interactor) ==
+			Definition->HarvestToolItemKey;
+}
+
+FName ABotanicusMultiPlantPotActor::GetSelectedItemKey(
+	AActor* Interactor) const
+{
+	const ABotanicusCharacter* Character =
+		Cast<ABotanicusCharacter>(Interactor);
+	const UBotanicusQuickBarComponent* QuickBar =
+		Character ? Character->GetQuickBarComponent() : nullptr;
+	return QuickBar
+		? QuickBar->GetSelectedSlot().ItemKey
+		: NAME_None;
+}
+
+FName ABotanicusMultiPlantPotActor::GetHarvestItemKey(
+	int32 SlotIndex,
+	const FBotanicusPlantDefinition& Definition) const
+{
+	FString Key = Definition.HarvestItemKey.ToString();
+	const FBotanicusMultiPlantSlotState& Slot =
+		PlantSlots[SlotIndex];
+	const float Rating =
+		Slot.CareScore /
+			FMath::Max(0.02f, Slot.GrowthProgress);
+	if (Rating >= 0.8f)
+	{
+		Key += TEXT("_Exceptional");
+	}
+	else if (Rating >= 0.5f)
+	{
+		Key += TEXT("_Beautiful");
+	}
+	return FName(*Key);
+}
+
+bool ABotanicusMultiPlantPotActor::IsInteractorStillTargeting(
+	AActor* Interactor,
+	int32 SlotIndex) const
+{
+	return ResolveAimedSlot(Interactor) == SlotIndex &&
+		FVector::DistSquared(
+			Interactor->GetActorLocation(),
+			GetActorLocation()) <= FMath::Square(450.0f);
+}
+
+void ABotanicusMultiPlantPotActor::RefreshVisuals()
+{
+	const int32 Capacity = GetPlantCapacity();
+	const float LengthScale =
+		0.45f + static_cast<float>(Capacity) * 0.3f;
+	Mesh->SetRelativeScale3D(
+		FVector(LengthScale, 0.42f, 0.3f));
+	MultiSoilMesh->SetRelativeLocation(
+		FVector(0.0f, 0.0f, 16.0f));
+	MultiSoilMesh->SetRelativeScale3D(
+		FVector(
+			LengthScale * 0.88f,
+			0.34f,
+			0.035f));
+	MultiSoilMesh->SetVisibility(SoilUnits > 0);
+
+	int32 PlantedCount = 0;
+	for (int32 Index = 0; Index < 4; ++Index)
+	{
+		const bool bActive = Index < Capacity;
+		const FBotanicusMultiPlantSlotState& Slot =
+			PlantSlots.IsValidIndex(Index)
+				? PlantSlots[Index]
+				: FBotanicusMultiPlantSlotState();
+		const bool bPlanted =
+			bActive && !Slot.PlantKey.IsNone();
+		PlantedCount += bPlanted ? 1 : 0;
+		const float Growth =
+			FMath::Clamp(Slot.GrowthProgress, 0.02f, 1.0f);
+		const FVector BaseLocation = GetSlotLocalLocation(Index);
+		MultiStemMeshes[Index]->SetVisibility(bPlanted);
+		MultiFlowerMeshes[Index]->SetVisibility(bPlanted);
+		MultiStemMeshes[Index]->SetRelativeLocation(
+			BaseLocation + FVector(0.0f, 0.0f, 9.0f * Growth));
+		MultiStemMeshes[Index]->SetRelativeScale3D(
+			FVector(0.045f, 0.045f, 0.18f * Growth));
+		MultiFlowerMeshes[Index]->SetRelativeLocation(
+			BaseLocation +
+				FVector(0.0f, 0.0f, 18.0f * Growth + 8.0f));
+		MultiFlowerMeshes[Index]->SetRelativeScale3D(
+			FVector(0.16f * Growth));
+	}
+	if (MultiStatusText)
+	{
+		MultiStatusText->SetText(
+			FText::FromString(
+				FString::Printf(
+					TEXT(
+						"JARDINIERE %d PLACES\nTERREAU : %d/%d\nPLANTES : %d/%d"),
+					Capacity,
+					SoilUnits,
+					Capacity,
+					PlantedCount,
+					Capacity)));
+	}
+}
+
+void ABotanicusMultiPlantPotActor::SendMessage(
+	AActor* Interactor,
+	const FString& Message) const
+{
+	const APawn* Pawn = Cast<APawn>(Interactor);
+	if (APlayerController* Controller =
+		Pawn
+			? Cast<APlayerController>(Pawn->GetController())
+			: nullptr)
+	{
+		Controller->ClientMessage(Message);
+	}
+}
+
+void ABotanicusMultiPlantPotActor::RestoreMultiPlantState(
+	int32 InSoilUnits,
+	const TArray<FBotanicusMultiPlantSlotState>& InSlots)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	SoilUnits = FMath::Clamp(
+		InSoilUnits,
+		0,
+		GetPlantCapacity());
+	PlantSlots.SetNum(4);
+	for (int32 Index = 0;
+		 Index < FMath::Min(4, InSlots.Num());
+		 ++Index)
+	{
+		PlantSlots[Index] = InSlots[Index];
+	}
+	RefreshVisuals();
+	ForceNetUpdate();
+}
+
+void ABotanicusMultiPlantPotActor::OnRep_MultiPlantState()
+{
+	if (PlantSlots.Num() < 4)
+	{
+		PlantSlots.SetNum(4);
+	}
+	RefreshVisuals();
+}
+
+void ABotanicusMultiPlantPotActor::ConfigureAsLocalPreview(
+	bool bIsValid)
+{
+	ABotanicusPlaceableItemActor::ConfigureAsLocalPreview(bIsValid);
+	if (MultiStatusText)
+	{
+		MultiStatusText->SetVisibility(false);
+	}
+}

@@ -14,6 +14,12 @@ ABotanicusPlaceableItemActor::ABotanicusPlaceableItemActor()
 {
 	bAlwaysRelevant = true;
 	SetReplicateMovement(true);
+	PrimaryActorTick.bCanEverTick = true;
+	// Derived placeable actors use Tick for continuous gameplay actions
+	// (watering, filling soil, shelf feedback, checkout state, etc.).
+	// Keep it enabled even when this base class is not currently simulating
+	// a thrown item.
+	PrimaryActorTick.bStartWithTickEnabled = true;
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(
 		TEXT("/Engine/BasicShapes/Cube.Cube"));
@@ -41,6 +47,44 @@ ABotanicusPlaceableItemActor::ABotanicusPlaceableItemActor()
 
 	InteractionAction = FText::GetEmpty();
 	InteractionName = FText::GetEmpty();
+}
+
+void ABotanicusPlaceableItemActor::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	if (!HasAuthority() || !Mesh || !Mesh->IsSimulatingPhysics())
+	{
+		return;
+	}
+
+	ThrowElapsedTime += DeltaSeconds;
+	const bool bHasSettled =
+		ThrowElapsedTime >= 0.35f &&
+		(Mesh->IsAnyRigidBodyAwake() == false ||
+		 Mesh->GetPhysicsLinearVelocity().SizeSquared() <
+			 FMath::Square(8.0f));
+	if (!bHasSettled && ThrowElapsedTime < 12.0f)
+	{
+		return;
+	}
+
+	const FTransform SettledMeshTransform =
+		Mesh->GetComponentTransform();
+	Mesh->SetSimulatePhysics(false);
+	SetActorLocationAndRotation(
+		SettledMeshTransform.GetLocation(),
+		SettledMeshTransform.GetRotation(),
+		false,
+		nullptr,
+		ETeleportType::TeleportPhysics);
+	Mesh->AttachToComponent(
+		SceneRoot,
+		FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+	Mesh->SetRelativeLocationAndRotation(
+		FVector::ZeroVector,
+		FRotator::ZeroRotator);
+	ForceNetUpdate();
 }
 
 void ABotanicusPlaceableItemActor::GetLifetimeReplicatedProps(
@@ -80,6 +124,37 @@ void ABotanicusPlaceableItemActor::ConfigureAsLocalPreview(
 		bIsValid
 			? ValidPlacementMaterial
 			: InvalidPlacementMaterial);
+}
+
+void ABotanicusPlaceableItemActor::ConfigureAsLocalInspection()
+{
+	SetReplicates(false);
+	SetActorEnableCollision(false);
+	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Mesh->SetOverlayMaterial(nullptr);
+}
+
+void ABotanicusPlaceableItemActor::LaunchItem(
+	const FVector& InitialVelocity)
+{
+	if (!HasAuthority() || !Mesh ||
+		InitialVelocity.IsNearlyZero())
+	{
+		return;
+	}
+
+	SetNetDormancy(DORM_Awake);
+	FlushNetDormancy();
+	Mesh->SetIsReplicated(true);
+	Mesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	Mesh->SetCollisionProfileName(TEXT("PhysicsActor"));
+	Mesh->SetSimulatePhysics(true);
+	Mesh->WakeAllRigidBodies();
+	Mesh->SetPhysicsLinearVelocity(InitialVelocity);
+	Mesh->SetPhysicsAngularVelocityInDegrees(
+		FVector(0.0f, 180.0f, 120.0f));
+	ThrowElapsedTime = 0.0f;
+	ForceNetUpdate();
 }
 
 FVector ABotanicusPlaceableItemActor::GetPlacementBoxExtent() const

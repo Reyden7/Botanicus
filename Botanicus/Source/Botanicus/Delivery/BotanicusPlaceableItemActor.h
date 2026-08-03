@@ -18,6 +18,7 @@ class BOTANICUS_API ABotanicusPlaceableItemActor
 public:
 	ABotanicusPlaceableItemActor();
 
+	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual bool CanInteract_Implementation(
@@ -25,6 +26,8 @@ public:
 
 	void InitializePlacedItem(FName InItemKey, int32 InQuantity = 1);
 	virtual void ConfigureAsLocalPreview(bool bIsValid);
+	void ConfigureAsLocalInspection();
+	void LaunchItem(const FVector& InitialVelocity);
 	FVector GetPlacementBoxExtent() const;
 
 	FName GetItemKey() const { return ItemKey; }
@@ -47,4 +50,6 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UMaterialInterface> InvalidPlacementMaterial;
+
+	float ThrowElapsedTime = 0.0f;
 };

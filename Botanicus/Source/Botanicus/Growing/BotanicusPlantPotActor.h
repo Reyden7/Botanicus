@@ -32,10 +32,10 @@ public:
 	virtual void ConfigureAsLocalPreview(bool bIsValid) override;
 
 	/** Starts the left-mouse action selected by the player's quickbar item. */
-	void BeginPrimaryUse(AActor* Interactor);
+	virtual void BeginPrimaryUse(AActor* Interactor);
 
 	/** Stops a held soil-filling or watering action. */
-	void EndPrimaryUse(AActor* Interactor);
+	virtual void EndPrimaryUse(AActor* Interactor);
 
 	void RestoreGrowingState(
 		bool bInHasSoil,

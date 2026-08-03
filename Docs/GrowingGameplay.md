@@ -396,15 +396,14 @@ cannot be refunded.
 The Preparation catalogue contains four physical storage fixtures: floor
 shelves with four or eight slots and wall shelves with three or six slots.
 Floor models are placed on the ground; wall models snap to the vertical surface
-the carrying player is looking at. A shelf must be empty before it can be
-moved.
+the carrying player is looking at.
 
 Selecting a compatible supply, pot or small decoration while approaching a
-shelf reveals its available placeholders in green. Items that cannot normally
-be placed on the floor, such as seed packets and soil doses, can be placed
-directly into these slots. Tools, finished plants and large equipment remain
-incompatible. Stored actors, occupied slots and shelf transforms use the normal
-replicated world-item save path.
+shelf reveals its available placeholders in green. Seed packets can be placed
+directly into these slots. Soil doses keep their floor-only rule. Tools,
+finished plants and large equipment remain incompatible. Stored actors,
+occupied slots and shelf transforms use the normal replicated world-item save
+path.
 
 Pressing `B` toggles furniture-move mode. Every supported fixture receives the
 project's yellow selection outline. A player can then hold `E` on a highlighted
@@ -412,6 +411,21 @@ storage shelf or preparation workbench and move it normally; stored items or
 prepared pots retain their exact relative transforms throughout the preview,
 server confirmation or cancellation. Outside this mode, occupied furniture
 must be emptied before it can be lifted.
+
+## Free work surfaces
+
+The Preparation catalogue also contains three rectangular work surfaces:
+
+- small: 120 x 60 x 90 cm, 180 credits;
+- medium: 200 x 70 x 90 cm, 280 credits;
+- large: 300 x 80 x 90 cm, 420 credits.
+
+Their entire top is a continuous placement area with no placeholders. Pots,
+seed packets, tools and whole harvested plants can be positioned freely without
+overlap. Potting soil keeps its floor-only rule. Outside furniture mode,
+holding `E` on an item resting on a work surface returns it to the hotbar. In
+furniture mode, moving the surface preserves every item's exact relative
+position.
 
 ## Automatic checkouts
 

@@ -170,6 +170,24 @@ struct BOTANICUS_API FBotanicusSavedWorldItem
 	int32 PlantWateringCount = 0;
 
 	UPROPERTY()
+	int32 MultiPlanterSoilUnits = 0;
+
+	UPROPERTY()
+	TArray<FName> MultiPlanterPlantKeys;
+
+	UPROPERTY()
+	TArray<float> MultiPlanterWaterLevels;
+
+	UPROPERTY()
+	TArray<float> MultiPlanterGrowthProgress;
+
+	UPROPERTY()
+	TArray<float> MultiPlanterCareScores;
+
+	UPROPERTY()
+	TArray<int32> MultiPlanterWateringCounts;
+
+	UPROPERTY()
 	FName DisplayedPlantItemKey = NAME_None;
 
 	UPROPERTY()

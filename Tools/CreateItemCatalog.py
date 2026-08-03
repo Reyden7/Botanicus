@@ -512,6 +512,61 @@ preparation_workbench = make_definition(
     catalog_tabs=4,
     purchasable=False,
 )
+work_surface_class = unreal.load_class(
+    None,
+    "/Script/Botanicus.BotanicusWorkSurfaceActor",
+)
+if work_surface_class is None:
+    raise RuntimeError("Could not load BotanicusWorkSurfaceActor")
+
+
+def make_work_surface(key, name, scale, extent, price):
+    surface = make_definition(
+        key,
+        name,
+        unreal.BotanicusItemCategory.EQUIPMENT,
+        unreal.BotanicusItemWeightClass.ONE_PLAYER_CARRY,
+        scale,
+        1,
+        1,
+        0.70,
+        price,
+        3.0,
+        allowed_surfaces=1,
+        world_mesh="/Engine/BasicShapes/Cube",
+        world_actor_class=work_surface_class,
+        catalog_tabs=4,
+    )
+    surface.set_editor_property(
+        "collision_half_extent_override",
+        extent,
+    )
+    return surface
+
+
+work_surfaces = [
+    make_work_surface(
+        "WorkSurfaceSmall",
+        "Petit plan de travail",
+        unreal.Vector(1.2, 0.6, 0.9),
+        unreal.Vector(60.0, 30.0, 45.0),
+        180,
+    ),
+    make_work_surface(
+        "WorkSurfaceMedium",
+        "Plan de travail moyen",
+        unreal.Vector(2.0, 0.7, 0.9),
+        unreal.Vector(100.0, 35.0, 45.0),
+        280,
+    ),
+    make_work_surface(
+        "WorkSurfaceLarge",
+        "Grand plan de travail",
+        unreal.Vector(3.0, 0.8, 0.9),
+        unreal.Vector(150.0, 40.0, 45.0),
+        420,
+    ),
+]
 storage_shelf_class = unreal.load_class(
     None,
     "/Script/Botanicus.BotanicusStorageShelfActor",
@@ -675,6 +730,7 @@ asset.set_editor_property(
         sales_display,
         sale_pot,
         preparation_workbench,
+        *work_surfaces,
         *storage_shelves,
         command_computer,
         cash_register,

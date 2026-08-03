@@ -22,6 +22,7 @@ class UBotanicusDaySummaryWidget;
 class UBotanicusClockWidget;
 class UBotanicusStorageQuantityWidget;
 class UBotanicusInteractionTargetWidget;
+class UBotanicusThrowPowerWidget;
 class ABotanicusGameState;
 class ACameraActor;
 class AActor;
@@ -33,6 +34,7 @@ class ABotanicusLargeEquipmentActor;
 class ABotanicusPlaceableItemActor;
 class ABotanicusPlantPotActor;
 class ABotanicusSalesDisplayActor;
+struct FBotanicusQuickBarSlot;
 class ABotanicusSalePotActor;
 class ABotanicusCashRegisterActor;
 class ABotanicusWateringCanActor;
@@ -324,6 +326,7 @@ protected:
 	TObjectPtr<UBotanicusQuickBarWidget> QuickBarWidget;
 
 	bool bEbsDemoHudHidden = false;
+	bool bQuickBarReorganizationMode = false;
 
 	/** If true, the player will use UMG touch controls even if not playing on mobile platforms */
 	UPROPERTY(EditAnywhere, Config, Category = "Input|Touch Controls")
@@ -353,6 +356,7 @@ protected:
 	void ExitBuildingTopDownView();
 	void ForceFirstPersonView();
 	void InitializeQuickBarWidget();
+	void ToggleQuickBarReorganizationMode();
 	void InitializeSharedFundsWidget();
 	void InitializeShopObjectivesWidget();
 	void InitializeDaySummaryWidget();
@@ -459,6 +463,14 @@ protected:
 		float RequestedYaw,
 		FTransform& OutTransform) const;
 	void BeginQuickBarItemPlacement();
+	void ReleaseQuickBarThrowCharge();
+	void ThrowSelectedQuickBarItem(float HoldDuration);
+	void InitializeThrowPowerWidget();
+	void UpdateThrowPowerWidget();
+	void HideThrowPowerWidget();
+	void ApplyCarriedItemState(
+		const FBotanicusQuickBarSlot& Slot,
+		ABotanicusPlaceableItemActor* Item) const;
 	void BeginWorldItemMove(
 		ABotanicusPlaceableItemActor* WorldItem);
 	void UpdateQuickBarItemPlacement(float DeltaTime);
@@ -471,6 +483,7 @@ protected:
 	void CancelQuickBarItemPlacement();
 	void BeginStorageCollectionQuantitySelection(
 		ABotanicusPlaceableItemActor* WorldItem);
+	void TryBeginCollectedItemInspection();
 	void AdjustStorageCollectionQuantity(int32 Direction);
 	void ConfirmStorageCollectionQuantitySelection();
 	void CancelStorageCollectionQuantitySelection(
@@ -688,6 +701,14 @@ protected:
 		int32 Quantity);
 
 	UFUNCTION(Server, Reliable)
+	void ServerThrowQuickBarItem(
+		int32 SlotIndex,
+		FGuid InstanceId,
+		FName ItemKey,
+		FVector_NetQuantizeNormal ThrowDirection,
+		float HoldDuration);
+
+	UFUNCTION(Server, Reliable)
 	void ServerBeginPlaceableItemMove(
 		ABotanicusPlaceableItemActor* WorldItem);
 
@@ -695,6 +716,11 @@ protected:
 	void ServerCollectStorageItem(
 		ABotanicusPlaceableItemActor* WorldItem,
 		int32 Quantity);
+
+	UFUNCTION(Client, Reliable)
+	void ClientBeginCollectedItemInspection(
+		int32 SlotIndex,
+		FName ItemKey);
 
 	UFUNCTION(Server, Reliable)
 	void ServerConfirmPlaceableItemMove(
@@ -912,6 +938,18 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Item Placement", meta=(ClampMin="100.0"))
 	float MaximumQuickBarItemPlacementDistance = 600.0f;
 
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Item Throw", meta=(ClampMin="0.1", ClampMax="1.0"))
+	float QuickBarThrowHoldThreshold = 0.3f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Item Throw", meta=(ClampMin="0.5", ClampMax="5.0"))
+	float MaximumQuickBarThrowHoldDuration = 3.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Item Throw", meta=(ClampMin="100.0"))
+	float MinimumQuickBarThrowSpeed = 450.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Item Throw", meta=(ClampMin="100.0"))
+	float MaximumQuickBarThrowSpeed = 2200.0f;
+
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Path", meta=(ClampMin="25.0"))
 	float BuildingEntranceSnapDistance = 350.0f;
 
@@ -973,8 +1011,16 @@ protected:
 		InteractionTargetWidget;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UBotanicusThrowPowerWidget>
+		ThrowPowerWidget;
+
+	UPROPERTY(Transient)
 	TObjectPtr<ABotanicusPlaceableItemActor>
 		LocalQuickBarItemPreview;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ABotanicusPlaceableItemActor>
+		LocalInspectedQuickBarItem;
 
 	UPROPERTY(Transient)
 	TObjectPtr<ABotanicusPlaceableItemActor>
@@ -1050,14 +1096,18 @@ protected:
 	float LargeEquipmentPreviewUpdateAccumulator = 0.0f;
 	float QuickBarItemPlacementYaw = 0.0f;
 	float QuickBarItemPreviewUpdateAccumulator = 0.0f;
+	double QuickBarThrowChargeStartTime = 0.0;
 	float EquipmentCarryChargeElapsed = 0.0f;
 	float PlaceableItemMoveChargeElapsed = 0.0f;
 	float ParcelMoveChargeElapsed = 0.0f;
+	float WaterRefillRequestAccumulator = 0.0f;
+	double LastServerWaterRefillPulseTime = -1000.0;
 	float ParcelPlacementYaw = 0.0f;
 	float ParcelPreviewUpdateAccumulator = 0.0f;
 	float TopDownRoofRefreshAccumulator = 0.0f;
 	bool bLocalLargeEquipmentPlacementValid = false;
 	bool bLocalQuickBarItemPlacementValid = false;
+	bool bQuickBarThrowChargeActive = false;
 	bool bLocalParcelPlacementValid = false;
 	bool bEquipmentCarryHoldActivated = false;
 	bool bEquipmentCarryKeyHeld = false;
@@ -1101,6 +1151,10 @@ protected:
 	TArray<FName> PendingPurchasedBuildingActorNames;
 	TArray<FTransform> PendingPurchasedBuildingTransforms;
 	FTimerHandle PurchasedBuildingSnapshotRetryTimer;
+	FTimerHandle CollectedItemInspectionRetryTimer;
 	TMap<FGuid, FTimerHandle> PendingOrderTimers;
 	int32 PurchasedBuildingSnapshotRetryCount = 0;
+	int32 PendingCollectedItemSlotIndex = INDEX_NONE;
+	int32 CollectedItemInspectionRetryCount = 0;
+	FName PendingCollectedItemKey = NAME_None;
 };

@@ -8,6 +8,93 @@
 
 class UItemDataAsset;
 
+USTRUCT(BlueprintType)
+struct BOTANICUS_API FBotanicusCarriedItemState
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	bool bHasPlantPotState = false;
+
+	UPROPERTY()
+	bool bPlantPotHasSoil = false;
+
+	UPROPERTY()
+	FName PlantKey = NAME_None;
+
+	UPROPERTY()
+	float WaterLevel = 0.0f;
+
+	UPROPERTY()
+	float GrowthProgress = 0.0f;
+
+	UPROPERTY()
+	float CareScore = 0.0f;
+
+	UPROPERTY()
+	int32 WateringCount = 0;
+
+	UPROPERTY()
+	bool bHasSalePotState = false;
+
+	UPROPERTY()
+	FName SaleSoilItemKey = NAME_None;
+
+	UPROPERTY()
+	FName SalePlantItemKey = NAME_None;
+
+	UPROPERTY()
+	bool bHasMultiPlanterState = false;
+
+	UPROPERTY()
+	int32 MultiPlanterSoilUnits = 0;
+
+	UPROPERTY()
+	TArray<FName> MultiPlanterPlantKeys;
+
+	UPROPERTY()
+	TArray<float> MultiPlanterWaterLevels;
+
+	UPROPERTY()
+	TArray<float> MultiPlanterGrowthProgress;
+
+	UPROPERTY()
+	TArray<float> MultiPlanterCareScores;
+
+	UPROPERTY()
+	TArray<int32> MultiPlanterWateringCounts;
+
+	bool operator==(const FBotanicusCarriedItemState& Other) const
+	{
+		return bHasPlantPotState == Other.bHasPlantPotState &&
+			bPlantPotHasSoil == Other.bPlantPotHasSoil &&
+			PlantKey == Other.PlantKey &&
+			FMath::IsNearlyEqual(WaterLevel, Other.WaterLevel) &&
+			FMath::IsNearlyEqual(
+				GrowthProgress,
+				Other.GrowthProgress) &&
+			FMath::IsNearlyEqual(CareScore, Other.CareScore) &&
+			WateringCount == Other.WateringCount &&
+			bHasSalePotState == Other.bHasSalePotState &&
+			SaleSoilItemKey == Other.SaleSoilItemKey &&
+			SalePlantItemKey == Other.SalePlantItemKey &&
+			bHasMultiPlanterState ==
+				Other.bHasMultiPlanterState &&
+			MultiPlanterSoilUnits ==
+				Other.MultiPlanterSoilUnits &&
+			MultiPlanterPlantKeys ==
+				Other.MultiPlanterPlantKeys &&
+			MultiPlanterWaterLevels ==
+				Other.MultiPlanterWaterLevels &&
+			MultiPlanterGrowthProgress ==
+				Other.MultiPlanterGrowthProgress &&
+			MultiPlanterCareScores ==
+				Other.MultiPlanterCareScores &&
+			MultiPlanterWateringCounts ==
+				Other.MultiPlanterWateringCounts;
+	}
+};
+
 /**
  * One private inventory/hotbar slot backed by Item Data Framework.
  *
@@ -29,6 +116,9 @@ struct BOTANICUS_API FBotanicusQuickBarSlot
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Quick Bar")
 	FGuid InstanceId;
 
+	UPROPERTY()
+	FBotanicusCarriedItemState CarriedState;
+
 	bool IsEmpty() const
 	{
 		return ItemKey.IsNone() || Quantity <= 0;
@@ -38,7 +128,8 @@ struct BOTANICUS_API FBotanicusQuickBarSlot
 	{
 		return ItemKey == Other.ItemKey &&
 			Quantity == Other.Quantity &&
-			InstanceId == Other.InstanceId;
+			InstanceId == Other.InstanceId &&
+			CarriedState == Other.CarriedState;
 	}
 };
 
@@ -108,6 +199,10 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Botanicus|Inventory")
 	bool RemoveQuantity(int32 SlotIndex, int32 Quantity);
 
+	bool SetCarriedItemState(
+		int32 SlotIndex,
+		const FBotanicusCarriedItemState& State);
+
 	/** Convenience operation used by seed packets and consumable tools. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Botanicus|Inventory")
 	bool ConsumeSelectedItem(int32 Quantity = 1);
@@ -129,6 +224,11 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Quick Bar")
 	void SelectPreviousSlot();
+
+	/** Selects a slot directly from authoritative pickup gameplay. */
+	void SelectSlotAuthoritative(int32 SlotIndex);
+
+	void RequestSwapSlots(int32 SourceSlotIndex, int32 TargetSlotIndex);
 
 	/** Requests activation of the selected item. Gameplay listeners run on the server. */
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Quick Bar")
@@ -184,5 +284,8 @@ private:
 
 	UFUNCTION(Server, Reliable)
 	void ServerActivateSelectedSlot();
+
+	UFUNCTION(Server, Reliable)
+	void ServerSwapSlots(int32 SourceSlotIndex, int32 TargetSlotIndex);
 
 };

@@ -15,6 +15,8 @@
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Blueprint/WidgetTree.h"
+#include "Blueprint/WidgetBlueprintLibrary.h"
+#include "Input/Reply.h"
 #include "ItemDataAsset.h"
 #include "Growing/BotanicusWateringCanActor.h"
 #include "Styling/CoreStyle.h"
@@ -27,6 +29,103 @@ namespace
 	const FLinearColor SelectedSlotColor(0.95f, 0.62f, 0.04f, 0.95f);
 	const FLinearColor PrimaryTextColor(0.93f, 0.96f, 0.91f, 1.0f);
 	const FLinearColor SecondaryTextColor(1.0f, 0.80f, 0.15f, 1.0f);
+}
+
+void UBotanicusQuickBarSlotWidget::InitializeDragSlot(
+	UBotanicusQuickBarWidget* InOwnerWidget,
+	int32 InSlotIndex)
+{
+	OwnerWidget = InOwnerWidget;
+	SlotIndex = InSlotIndex;
+}
+
+void UBotanicusQuickBarSlotWidget::NativeOnInitialized()
+{
+	Super::NativeOnInitialized();
+
+	if (WidgetTree && !WidgetTree->RootWidget)
+	{
+		Background = WidgetTree->ConstructWidget<UBorder>();
+		Background->SetPadding(FMargin(6.0f, 4.0f));
+		ContentContainer =
+			WidgetTree->ConstructWidget<UVerticalBox>();
+		Background->SetContent(ContentContainer);
+		WidgetTree->RootWidget = Background;
+	}
+}
+
+FReply UBotanicusQuickBarSlotWidget::NativeOnMouseButtonDown(
+	const FGeometry& InGeometry,
+	const FPointerEvent& InMouseEvent)
+{
+	if (InMouseEvent.GetEffectingButton() ==
+			EKeys::LeftMouseButton &&
+		OwnerWidget &&
+		OwnerWidget->CanDragSlot(SlotIndex))
+	{
+		return UWidgetBlueprintLibrary::DetectDragIfPressed(
+			InMouseEvent,
+			this,
+			EKeys::LeftMouseButton).NativeReply;
+	}
+	return Super::NativeOnMouseButtonDown(
+		InGeometry,
+		InMouseEvent);
+}
+
+void UBotanicusQuickBarSlotWidget::NativeOnDragDetected(
+	const FGeometry& InGeometry,
+	const FPointerEvent& InMouseEvent,
+	UDragDropOperation*& OutOperation)
+{
+	Super::NativeOnDragDetected(
+		InGeometry,
+		InMouseEvent,
+		OutOperation);
+	if (!OwnerWidget ||
+		!OwnerWidget->CanDragSlot(SlotIndex))
+	{
+		return;
+	}
+
+	UBotanicusQuickBarDragOperation* Operation =
+		NewObject<UBotanicusQuickBarDragOperation>(this);
+	Operation->SourceSlotIndex = SlotIndex;
+	Operation->Pivot = EDragPivot::CenterCenter;
+
+	UTextBlock* DragLabel = NewObject<UTextBlock>(Operation);
+	DragLabel->SetText(
+		FText::FromString(TEXT("DEPLACER")));
+	DragLabel->SetColorAndOpacity(
+		FLinearColor(0.25f, 0.8f, 1.0f, 1.0f));
+	DragLabel->SetFont(FSlateFontInfo(
+		FCoreStyle::GetDefaultFont(),
+		14,
+		TEXT("Bold")));
+	Operation->DefaultDragVisual = DragLabel;
+	OutOperation = Operation;
+}
+
+bool UBotanicusQuickBarSlotWidget::NativeOnDrop(
+	const FGeometry& InGeometry,
+	const FDragDropEvent& InDragDropEvent,
+	UDragDropOperation* InOperation)
+{
+	const UBotanicusQuickBarDragOperation* Operation =
+		Cast<UBotanicusQuickBarDragOperation>(InOperation);
+	if (!OwnerWidget || !Operation ||
+		!OwnerWidget->IsReorganizationModeActive())
+	{
+		return Super::NativeOnDrop(
+			InGeometry,
+			InDragDropEvent,
+			InOperation);
+	}
+
+	OwnerWidget->HandleSlotDropped(
+		Operation->SourceSlotIndex,
+		SlotIndex);
+	return true;
 }
 
 void UBotanicusQuickBarWidget::InitializeWithQuickBar(
@@ -100,6 +199,29 @@ void UBotanicusQuickBarWidget::BuildPrototypeLayout()
 	RowCanvasSlot->SetPosition(FVector2D(0.0f, -112.0f));
 	RowCanvasSlot->SetAutoSize(true);
 
+	ReorganizationHelpText =
+		WidgetTree->ConstructWidget<UTextBlock>();
+	ReorganizationHelpText->SetText(
+		FText::FromString(
+			TEXT(
+				"ORGANISATION DE LA HOTBAR  |  GLISSEZ-DEPOSEZ LES OBJETS  |  TAB POUR FERMER")));
+	ReorganizationHelpText->SetJustification(
+		ETextJustify::Center);
+	ReorganizationHelpText->SetColorAndOpacity(
+		FLinearColor(0.3f, 0.82f, 1.0f, 1.0f));
+	ReorganizationHelpText->SetFont(FSlateFontInfo(
+		FCoreStyle::GetDefaultFont(),
+		15,
+		TEXT("Bold")));
+	UCanvasPanelSlot* HelpCanvasSlot =
+		RootCanvas->AddChildToCanvas(ReorganizationHelpText);
+	HelpCanvasSlot->SetAnchors(FAnchors(0.5f, 1.0f));
+	HelpCanvasSlot->SetAlignment(FVector2D(0.5f, 1.0f));
+	HelpCanvasSlot->SetPosition(FVector2D(0.0f, -198.0f));
+	HelpCanvasSlot->SetAutoSize(true);
+	ReorganizationHelpText->SetVisibility(
+		ESlateVisibility::Collapsed);
+
 	USizeBox* WaterStatusSize =
 		WidgetTree->ConstructWidget<USizeBox>();
 	WaterStatusSize->SetWidthOverride(300.0f);
@@ -166,15 +288,19 @@ void UBotanicusQuickBarWidget::BuildPrototypeLayout()
 			SlotRow->AddChildToHorizontalBox(SlotSizeBox);
 		HorizontalSlot->SetPadding(FMargin(3.0f));
 
-		UBorder* Background =
-			WidgetTree->ConstructWidget<UBorder>();
-		Background->SetPadding(FMargin(6.0f, 4.0f));
-		Background->SetBrushColor(EmptySlotColor);
-		SlotSizeBox->SetContent(Background);
-
+		UBotanicusQuickBarSlotWidget* SlotWidget =
+			WidgetTree->ConstructWidget<
+				UBotanicusQuickBarSlotWidget>();
+		SlotWidget->InitializeDragSlot(this, SlotIndex);
+		SlotSizeBox->SetContent(SlotWidget);
+		UBorder* Background = SlotWidget->GetBackground();
 		UVerticalBox* Content =
-			WidgetTree->ConstructWidget<UVerticalBox>();
-		Background->SetContent(Content);
+			SlotWidget->GetContentContainer();
+		if (!Background || !Content)
+		{
+			continue;
+		}
+		Background->SetBrushColor(EmptySlotColor);
 
 		UTextBlock* KeyLabel =
 			WidgetTree->ConstructWidget<UTextBlock>();
@@ -220,6 +346,47 @@ void UBotanicusQuickBarWidget::BuildPrototypeLayout()
 	}
 
 	Refresh();
+}
+
+void UBotanicusQuickBarWidget::SetReorganizationMode(
+	bool bEnabled)
+{
+	bReorganizationMode = bEnabled;
+	if (WidgetTree && WidgetTree->RootWidget)
+	{
+		WidgetTree->RootWidget->SetVisibility(
+			bEnabled
+				? ESlateVisibility::SelfHitTestInvisible
+				: ESlateVisibility::HitTestInvisible);
+	}
+	if (ReorganizationHelpText)
+	{
+		ReorganizationHelpText->SetVisibility(
+			bEnabled
+				? ESlateVisibility::HitTestInvisible
+				: ESlateVisibility::Collapsed);
+	}
+	Refresh();
+}
+
+bool UBotanicusQuickBarWidget::CanDragSlot(
+	int32 SlotIndex) const
+{
+	return bReorganizationMode &&
+		QuickBar &&
+		!QuickBar->GetSlot(SlotIndex).IsEmpty();
+}
+
+void UBotanicusQuickBarWidget::HandleSlotDropped(
+	int32 SourceSlotIndex,
+	int32 TargetSlotIndex)
+{
+	if (bReorganizationMode && QuickBar)
+	{
+		QuickBar->RequestSwapSlots(
+			SourceSlotIndex,
+			TargetSlotIndex);
+	}
 }
 
 void UBotanicusQuickBarWidget::RefreshWateringCanStatus()
@@ -280,11 +447,15 @@ void UBotanicusQuickBarWidget::Refresh()
 		UTextBlock* QuantityLabel = QuantityLabels[SlotIndex];
 
 		Background->SetBrushColor(
-			SlotIndex == SelectedSlotIndex
+			bReorganizationMode
+				? (InventorySlot.IsEmpty()
+					? FLinearColor(0.03f, 0.08f, 0.10f, 0.95f)
+					: FLinearColor(0.05f, 0.28f, 0.38f, 0.98f))
+				: (SlotIndex == SelectedSlotIndex
 				? SelectedSlotColor
 				: (InventorySlot.IsEmpty()
 					? EmptySlotColor
-					: OccupiedSlotColor));
+					: OccupiedSlotColor)));
 
 		if (InventorySlot.IsEmpty())
 		{

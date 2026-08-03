@@ -804,17 +804,17 @@ bool ABotanicusPlantPotActor::IsInteractorStillTargeting(
 	AActor* Interactor) const
 {
 	const APawn* Pawn = Cast<APawn>(Interactor);
-	const APlayerController* Controller =
-		Pawn ? Cast<APlayerController>(Pawn->GetController()) : nullptr;
-	UWorld* World = GetWorld();
-	if (!Pawn || !Controller || !World)
+	if (!Pawn)
 	{
 		return false;
 	}
 
-	FVector ViewLocation;
-	FRotator ViewRotation;
-	Controller->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	const AController* Controller = Pawn->GetController();
+	const FVector ViewLocation = Pawn->GetPawnViewLocation();
+	const FVector ViewDirection =
+		Controller
+			? Controller->GetControlRotation().Vector()
+			: Pawn->GetActorForwardVector();
 	FVector TargetOrigin;
 	FVector TargetExtent;
 	GetActorBounds(true, TargetOrigin, TargetExtent);
@@ -823,25 +823,14 @@ bool ABotanicusPlantPotActor::IsInteractorStillTargeting(
 	if (Distance <= KINDA_SMALL_NUMBER ||
 		Distance > 450.0f ||
 		FVector::DotProduct(
-			ViewRotation.Vector(),
+			ViewDirection,
 			ToTarget / Distance) <
-			FMath::Cos(FMath::DegreesToRadians(22.0f)))
+			FMath::Cos(FMath::DegreesToRadians(45.0f)))
 	{
 		return false;
 	}
 
-	FCollisionQueryParams QueryParams(
-		SCENE_QUERY_STAT(BotanicusPlantPotHeldAction),
-		false);
-	QueryParams.AddIgnoredActor(Pawn);
-	FHitResult Hit;
-	return World->LineTraceSingleByChannel(
-			Hit,
-			ViewLocation,
-			TargetOrigin,
-			ECC_Visibility,
-			QueryParams) &&
-		Hit.GetActor() == this;
+	return true;
 }
 
 void ABotanicusPlantPotActor::RefreshLocalContextAction()
