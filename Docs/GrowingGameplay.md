@@ -36,8 +36,12 @@ of the player.
 - Water is added continuously while left click is held; release stops it.
 - Watering consumes the held watering can's finite water level.
 - The purchasable `Reserve d'eau` costs 250 credits. Place it from the hotbar
-  with `A`, hold the watering can, look at the reserve and left-click to refill
-  it to 100%. The prototype reserve is a permanent source.
+  with `A`, hold the watering can, look at the reserve and hold left click.
+  Water transfers continuously while the button remains held and stops on
+  release, when looking away or when moving out of range. The prototype
+  reserve is a permanent source. While the watering can is held, its replicated
+  water gauge appears above the centre of the hotbar; no percentage is rendered
+  on the world mesh.
 - A mature plant can only be harvested with its configured harvest tool.
 - Harvest requires one uninterrupted second of left-click hold.
 - Looking away, moving out of range, changing tools or releasing early cancels

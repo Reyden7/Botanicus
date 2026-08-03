@@ -21,6 +21,7 @@ class UBotanicusShopObjectivesWidget;
 class UBotanicusDaySummaryWidget;
 class UBotanicusClockWidget;
 class UBotanicusStorageQuantityWidget;
+class UBotanicusInteractionTargetWidget;
 class ABotanicusGameState;
 class ACameraActor;
 class AActor;
@@ -357,6 +358,7 @@ protected:
 	void InitializeDaySummaryWidget();
 	void InitializeClockWidget();
 	void InitializeStorageQuantityWidget();
+	void InitializeInteractionTargetWidget();
 	void InitializeTopDownToolbarWidget();
 	void InitializeOrderCatalogWidget();
 	void InitializeDevelopmentPanelWidget();
@@ -412,6 +414,8 @@ protected:
 		FTransform& OutTransform) const;
 	bool TryHandleNearbyWateringCan();
 	bool TryRefillHeldWateringCan();
+	void UpdateWateringCanRefill(float DeltaTime);
+	void EndWateringCanRefill(bool bNotifyServer);
 	bool TryUseNearbyComputer();
 	bool TryMoveNearbyPlaceableItem();
 	void BeginPlaceableItemMoveCharge(
@@ -437,6 +441,7 @@ protected:
 		AActor* Actor,
 		bool bHighlighted) const;
 	void RefreshInteractionTargetHighlight();
+	void RefreshInteractionTargetName(AActor* TargetActor);
 	void SetInteractionTargetHighlighted(
 		AActor* Actor,
 		bool bHighlighted) const;
@@ -573,6 +578,10 @@ protected:
 
 	UFUNCTION(Server, Reliable)
 	void ServerRefillWateringCan(
+		ABotanicusWaterReserveActor* WaterReserve);
+
+	UFUNCTION(Server, Reliable)
+	void ServerEndWateringCanRefill(
 		ABotanicusWaterReserveActor* WaterReserve);
 
 	UFUNCTION(Server, Reliable)
@@ -960,6 +969,10 @@ protected:
 		StorageQuantityWidget;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UBotanicusInteractionTargetWidget>
+		InteractionTargetWidget;
+
+	UPROPERTY(Transient)
 	TObjectPtr<ABotanicusPlaceableItemActor>
 		LocalQuickBarItemPreview;
 
@@ -982,6 +995,14 @@ protected:
 	UPROPERTY(Transient)
 	TObjectPtr<ABotanicusPlantPotActor>
 		LocalActivePlantPot;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ABotanicusWaterReserveActor>
+		LocalActiveWaterReserve;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ABotanicusWaterReserveActor>
+		ServerActiveWaterReserve;
 
 	UPROPERTY(Transient)
 	TObjectPtr<ABotanicusSalePotActor>
@@ -1041,6 +1062,8 @@ protected:
 	bool bEquipmentCarryHoldActivated = false;
 	bool bEquipmentCarryKeyHeld = false;
 	bool bPlantPotActionHeld = false;
+	bool bWaterRefillActionHeld = false;
+	bool bServerWaterRefillChanged = false;
 	bool bParcelCutActionHeld = false;
 	bool bCatalogOrderStateRestored = false;
 	bool bOrderCatalogOpenedFromComputer = false;

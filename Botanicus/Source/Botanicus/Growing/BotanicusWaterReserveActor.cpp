@@ -23,7 +23,7 @@ ABotanicusWaterReserveActor::ABotanicusWaterReserveActor()
 		NSLOCTEXT(
 			"BotanicusGrowing",
 			"WaterReserveLabel",
-			"RESERVE D'EAU\nCLIC GAUCHE : REMPLIR L'ARROSOIR"));
+			"RESERVE D'EAU\nMAINTENIR CLIC GAUCHE : REMPLIR"));
 	ReserveText->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
 
@@ -51,9 +51,11 @@ void ABotanicusWaterReserveActor::ConfigureAsLocalPreview(bool bIsValid)
 }
 
 bool ABotanicusWaterReserveActor::TryRefill(
-	ABotanicusCharacter* Character)
+	ABotanicusCharacter* Character,
+	float WaterAmount)
 {
-	if (!HasAuthority() || !IsValid(Character))
+	if (!HasAuthority() || !IsValid(Character) ||
+		WaterAmount <= 0.0f)
 	{
 		return false;
 	}
@@ -63,6 +65,5 @@ bool ABotanicusWaterReserveActor::TryRefill(
 	{
 		return false;
 	}
-	WateringCan->Refill();
-	return true;
+	return WateringCan->AddWater(WaterAmount);
 }

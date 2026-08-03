@@ -2,11 +2,13 @@
 
 #include "UI/BotanicusQuickBarWidget.h"
 
+#include "BotanicusCharacter.h"
 #include "Components/Border.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
+#include "Components/ProgressBar.h"
 #include "Components/SizeBox.h"
 #include "Components/Spacer.h"
 #include "Components/TextBlock.h"
@@ -14,6 +16,7 @@
 #include "Components/VerticalBoxSlot.h"
 #include "Blueprint/WidgetTree.h"
 #include "ItemDataAsset.h"
+#include "Growing/BotanicusWateringCanActor.h"
 #include "Styling/CoreStyle.h"
 
 namespace
@@ -63,6 +66,14 @@ void UBotanicusQuickBarWidget::NativeDestruct()
 	Super::NativeDestruct();
 }
 
+void UBotanicusQuickBarWidget::NativeTick(
+	const FGeometry& MyGeometry,
+	float InDeltaTime)
+{
+	Super::NativeTick(MyGeometry, InDeltaTime);
+	RefreshWateringCanStatus();
+}
+
 void UBotanicusQuickBarWidget::BuildPrototypeLayout()
 {
 	if (!WidgetTree || WidgetTree->RootWidget)
@@ -88,6 +99,56 @@ void UBotanicusQuickBarWidget::BuildPrototypeLayout()
 	// Kept above EBS' temporary three-tool strip during the prototype phase.
 	RowCanvasSlot->SetPosition(FVector2D(0.0f, -112.0f));
 	RowCanvasSlot->SetAutoSize(true);
+
+	USizeBox* WaterStatusSize =
+		WidgetTree->ConstructWidget<USizeBox>();
+	WaterStatusSize->SetWidthOverride(300.0f);
+	WaterStatusSize->SetHeightOverride(52.0f);
+	UCanvasPanelSlot* WaterStatusCanvasSlot =
+		RootCanvas->AddChildToCanvas(WaterStatusSize);
+	WaterStatusCanvasSlot->SetAnchors(FAnchors(0.5f, 1.0f));
+	WaterStatusCanvasSlot->SetAlignment(FVector2D(0.5f, 1.0f));
+	WaterStatusCanvasSlot->SetPosition(FVector2D(0.0f, -188.0f));
+	WaterStatusCanvasSlot->SetAutoSize(true);
+
+	WateringCanStatus =
+		WidgetTree->ConstructWidget<UBorder>();
+	WateringCanStatus->SetPadding(FMargin(12.0f, 6.0f));
+	WateringCanStatus->SetBrushColor(
+		FLinearColor(0.02f, 0.10f, 0.14f, 0.94f));
+	WaterStatusSize->SetContent(WateringCanStatus);
+
+	UVerticalBox* WaterStatusContent =
+		WidgetTree->ConstructWidget<UVerticalBox>();
+	WateringCanStatus->SetContent(WaterStatusContent);
+
+	WateringCanText =
+		WidgetTree->ConstructWidget<UTextBlock>();
+	WateringCanText->SetJustification(ETextJustify::Center);
+	WateringCanText->SetColorAndOpacity(
+		FLinearColor(0.45f, 0.88f, 1.0f, 1.0f));
+	WateringCanText->SetFont(FSlateFontInfo(
+		FCoreStyle::GetDefaultFont(),
+		15,
+		TEXT("Bold")));
+	UVerticalBoxSlot* WaterTextSlot =
+		WaterStatusContent->AddChildToVerticalBox(
+			WateringCanText);
+	WaterTextSlot->SetHorizontalAlignment(HAlign_Fill);
+
+	WateringCanProgress =
+		WidgetTree->ConstructWidget<UProgressBar>();
+	WateringCanProgress->SetFillColorAndOpacity(
+		FLinearColor(0.08f, 0.60f, 1.0f, 1.0f));
+	WateringCanProgress->SetPercent(1.0f);
+	UVerticalBoxSlot* WaterProgressSlot =
+		WaterStatusContent->AddChildToVerticalBox(
+			WateringCanProgress);
+	WaterProgressSlot->SetPadding(FMargin(0.0f, 4.0f, 0.0f, 0.0f));
+	WaterProgressSlot->SetHorizontalAlignment(HAlign_Fill);
+
+	WateringCanStatus->SetVisibility(
+		ESlateVisibility::Collapsed);
 
 	SlotBackgrounds.Reserve(UBotanicusQuickBarComponent::SlotCount);
 	ItemLabels.Reserve(UBotanicusQuickBarComponent::SlotCount);
@@ -159,6 +220,44 @@ void UBotanicusQuickBarWidget::BuildPrototypeLayout()
 	}
 
 	Refresh();
+}
+
+void UBotanicusQuickBarWidget::RefreshWateringCanStatus()
+{
+	if (!WateringCanStatus ||
+		!WateringCanProgress ||
+		!WateringCanText)
+	{
+		return;
+	}
+
+	const ABotanicusCharacter* BotanicusCharacter =
+		Cast<ABotanicusCharacter>(GetOwningPlayerPawn());
+	const ABotanicusWateringCanActor* WateringCan =
+		BotanicusCharacter
+			? BotanicusCharacter->GetHeldWateringCan()
+			: nullptr;
+	if (!IsValid(WateringCan))
+	{
+		WateringCanStatus->SetVisibility(
+			ESlateVisibility::Collapsed);
+		return;
+	}
+
+	const float WaterLevel =
+		FMath::Clamp(WateringCan->GetWaterLevel(), 0.0f, 1.0f);
+	WateringCanStatus->SetVisibility(
+		ESlateVisibility::HitTestInvisible);
+	WateringCanProgress->SetPercent(WaterLevel);
+	WateringCanProgress->SetFillColorAndOpacity(
+		WaterLevel > 0.2f
+			? FLinearColor(0.08f, 0.60f, 1.0f, 1.0f)
+			: FLinearColor(1.0f, 0.24f, 0.08f, 1.0f));
+	WateringCanText->SetText(
+		FText::FromString(
+			FString::Printf(
+				TEXT("ARROSOIR  |  EAU : %d%%"),
+				FMath::RoundToInt(WaterLevel * 100.0f))));
 }
 
 void UBotanicusQuickBarWidget::Refresh()

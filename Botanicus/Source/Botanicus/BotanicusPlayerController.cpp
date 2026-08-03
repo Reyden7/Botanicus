@@ -63,6 +63,7 @@
 #include "UI/BotanicusDaySummaryWidget.h"
 #include "UI/BotanicusClockWidget.h"
 #include "UI/BotanicusStorageQuantityWidget.h"
+#include "UI/BotanicusInteractionTargetWidget.h"
 #include "UI/BotanicusTopDownToolbarWidget.h"
 #include "Visitors/BotanicusVisitorZoneActor.h"
 #include "Net/UnrealNetwork.h"
@@ -673,6 +674,9 @@ void ABotanicusPlayerController::BeginPlay()
 		&ABotanicusPlayerController::InitializeStorageQuantityWidget);
 	GetWorldTimerManager().SetTimerForNextTick(
 		this,
+		&ABotanicusPlayerController::InitializeInteractionTargetWidget);
+	GetWorldTimerManager().SetTimerForNextTick(
+		this,
 		&ABotanicusPlayerController::
 			InitializeDevelopmentPanelWidget);
 	
@@ -707,10 +711,15 @@ void ABotanicusPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReaso
 		LocalInteractionHighlightActor.Get(),
 		false);
 	LocalInteractionHighlightActor.Reset();
+	if (InteractionTargetWidget)
+	{
+		InteractionTargetWidget->ClearTarget();
+	}
 	CancelEquipmentCarryCharge(true);
 	CancelPlaceableItemMoveCharge();
 	CancelStorageCollectionQuantitySelection(true);
 	CancelParcelMoveCharge();
+	EndWateringCanRefill(true);
 	EndPlantPotAction();
 	CancelQuickBarItemPlacement();
 	CancelDeliveryParcelPlacement();
@@ -785,6 +794,11 @@ void ABotanicusPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReaso
 		StorageQuantityWidget->RemoveFromParent();
 		StorageQuantityWidget = nullptr;
 	}
+	if (InteractionTargetWidget)
+	{
+		InteractionTargetWidget->RemoveFromParent();
+		InteractionTargetWidget = nullptr;
+	}
 	if (CarryProgressWidget)
 	{
 		CarryProgressWidget->RemoveFromParent();
@@ -831,6 +845,10 @@ void ABotanicusPlayerController::PlayerTick(float DeltaTime)
 	if (IsLocalPlayerController() && !StorageQuantityWidget)
 	{
 		InitializeStorageQuantityWidget();
+	}
+	if (IsLocalPlayerController() && !InteractionTargetWidget)
+	{
+		InitializeInteractionTargetWidget();
 	}
 	if (LocalStorageCollectionItem &&
 		!IsValid(LocalStorageCollectionItem))
@@ -894,6 +912,7 @@ void ABotanicusPlayerController::PlayerTick(float DeltaTime)
 	UpdateEquipmentCarryCharge(DeltaTime);
 	UpdatePlaceableItemMoveCharge(DeltaTime);
 	UpdateParcelMoveCharge(DeltaTime);
+	UpdateWateringCanRefill(DeltaTime);
 	UpdateLargeEquipmentPlacement(DeltaTime);
 	UpdateQuickBarItemPlacement(DeltaTime);
 	UpdateDeliveryParcelPlacement(DeltaTime);
@@ -1423,6 +1442,12 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 			return true;
 		}
 		if (Params.Event == IE_Released &&
+			bWaterRefillActionHeld)
+		{
+			EndWateringCanRefill(true);
+			return true;
+		}
+		if (Params.Event == IE_Released &&
 			bParcelCutActionHeld)
 		{
 			EndParcelCut();
@@ -1692,12 +1717,75 @@ void ABotanicusPlayerController::RefreshInteractionTargetHighlight()
 		LocalInteractionHighlightActor.Get();
 	if (PreviousTarget == NewTarget)
 	{
+		RefreshInteractionTargetName(NewTarget);
 		return;
 	}
 
 	SetInteractionTargetHighlighted(PreviousTarget, false);
 	LocalInteractionHighlightActor = NewTarget;
 	SetInteractionTargetHighlighted(NewTarget, true);
+	RefreshInteractionTargetName(NewTarget);
+}
+
+void ABotanicusPlayerController::RefreshInteractionTargetName(
+	AActor* TargetActor)
+{
+	InitializeInteractionTargetWidget();
+	if (!InteractionTargetWidget)
+	{
+		return;
+	}
+	if (!IsValid(TargetActor))
+	{
+		InteractionTargetWidget->ClearTarget();
+		return;
+	}
+
+	FName ItemKey = NAME_None;
+	bool bIsParcel = false;
+	if (const ABotanicusPlaceableItemActor* PlaceableItem =
+		Cast<ABotanicusPlaceableItemActor>(TargetActor))
+	{
+		ItemKey = PlaceableItem->GetItemKey();
+	}
+	else if (const ABotanicusLargeEquipmentActor* Equipment =
+		Cast<ABotanicusLargeEquipmentActor>(TargetActor))
+	{
+		ItemKey = Equipment->GetItemKey();
+	}
+	else if (const ABotanicusDeliveryParcelActor* Parcel =
+		Cast<ABotanicusDeliveryParcelActor>(TargetActor))
+	{
+		ItemKey = Parcel->GetItemKey();
+		bIsParcel = true;
+	}
+
+	FText TargetName;
+	if (!ItemKey.IsNone())
+	{
+		const FBotanicusItemDefinition* Definition =
+			FindItemDefinition(this, ItemKey);
+		TargetName =
+			Definition && !Definition->DisplayName.IsEmpty()
+				? Definition->DisplayName
+				: FText::FromName(ItemKey);
+	}
+	else
+	{
+		TargetName =
+			TargetActor->GetClass()->GetDisplayNameText();
+	}
+
+	if (bIsParcel)
+	{
+		TargetName = FText::Format(
+			NSLOCTEXT(
+				"BotanicusInteraction",
+				"ParcelTargetName",
+				"Colis : {0}"),
+			TargetName);
+	}
+	InteractionTargetWidget->SetTargetName(TargetName);
 }
 
 void ABotanicusPlayerController::EnterBuildingTopDownView()
@@ -2008,6 +2096,37 @@ void ABotanicusPlayerController::InitializeStorageQuantityWidget()
 		true);
 	StorageQuantityWidget->SetVisibility(
 		ESlateVisibility::Collapsed);
+}
+
+void ABotanicusPlayerController::InitializeInteractionTargetWidget()
+{
+	if (!IsLocalPlayerController() || InteractionTargetWidget)
+	{
+		return;
+	}
+	InteractionTargetWidget =
+		CreateWidget<UBotanicusInteractionTargetWidget>(
+			this,
+			UBotanicusInteractionTargetWidget::StaticClass());
+	if (!InteractionTargetWidget)
+	{
+		return;
+	}
+	InteractionTargetWidget->AddToPlayerScreen(48);
+	InteractionTargetWidget->SetAlignmentInViewport(
+		FVector2D(0.5f, 0.5f));
+	InteractionTargetWidget->SetDesiredSizeInViewport(
+		FVector2D(340.0f, 40.0f));
+
+	int32 ViewportWidth = 0;
+	int32 ViewportHeight = 0;
+	GetViewportSize(ViewportWidth, ViewportHeight);
+	InteractionTargetWidget->SetPositionInViewport(
+		FVector2D(
+			static_cast<float>(ViewportWidth) * 0.5f,
+			static_cast<float>(ViewportHeight) * 0.5f - 62.0f),
+		true);
+	InteractionTargetWidget->ClearTarget();
 }
 
 void ABotanicusPlayerController::InitializeTopDownToolbarWidget()
@@ -5382,8 +5501,93 @@ bool ABotanicusPlayerController::TryRefillHeldWateringCan()
 	{
 		return false;
 	}
+	LocalActiveWaterReserve = NearestReserve;
+	bWaterRefillActionHeld = true;
 	ServerRefillWateringCan(NearestReserve);
 	return true;
+}
+
+void ABotanicusPlayerController::UpdateWateringCanRefill(
+	float DeltaTime)
+{
+	if (IsLocalPlayerController() &&
+		bWaterRefillActionHeld)
+	{
+		const ABotanicusCharacter* BotanicusCharacter =
+			Cast<ABotanicusCharacter>(GetPawn());
+		const ABotanicusWateringCanActor* HeldCan =
+			BotanicusCharacter
+				? BotanicusCharacter->GetHeldWateringCan()
+				: nullptr;
+		if (!IsValid(LocalActiveWaterReserve) ||
+			!IsValid(HeldCan) ||
+			HeldCan->IsFull() ||
+			!IsLookingAtWorldItem(
+				LocalActiveWaterReserve,
+				400.0f))
+		{
+			EndWateringCanRefill(true);
+		}
+	}
+
+	if (!HasAuthority() ||
+		!IsValid(ServerActiveWaterReserve))
+	{
+		return;
+	}
+
+	ABotanicusCharacter* BotanicusCharacter =
+		Cast<ABotanicusCharacter>(GetPawn());
+	ABotanicusWateringCanActor* HeldCan =
+		BotanicusCharacter
+			? BotanicusCharacter->GetHeldWateringCan()
+			: nullptr;
+	const bool bCanContinue =
+		IsValid(BotanicusCharacter) &&
+		IsValid(HeldCan) &&
+		!HeldCan->IsFull() &&
+		IsLookingAtWorldItem(
+			ServerActiveWaterReserve,
+			450.0f);
+	if (!bCanContinue)
+	{
+		if (bServerWaterRefillChanged)
+		{
+			if (ABotanicusGameMode* GameMode =
+				GetWorld()->GetAuthGameMode<ABotanicusGameMode>())
+			{
+				GameMode->ScheduleInventoryAutosave();
+			}
+		}
+		ServerActiveWaterReserve = nullptr;
+		bServerWaterRefillChanged = false;
+		return;
+	}
+
+	constexpr float WaterRefillPerSecond = 0.40f;
+	if (ServerActiveWaterReserve->TryRefill(
+			BotanicusCharacter,
+			WaterRefillPerSecond * FMath::Max(0.0f, DeltaTime)))
+	{
+		bServerWaterRefillChanged = true;
+		if (HeldCan->IsFull())
+		{
+			ClientMessage(TEXT("Arrosoir rempli : eau 100%."));
+		}
+	}
+}
+
+void ABotanicusPlayerController::EndWateringCanRefill(
+	bool bNotifyServer)
+{
+	ABotanicusWaterReserveActor* PreviousReserve =
+		LocalActiveWaterReserve;
+	LocalActiveWaterReserve = nullptr;
+	bWaterRefillActionHeld = false;
+	if (bNotifyServer && IsValid(PreviousReserve))
+	{
+		ServerEndWateringCanRefill(PreviousReserve);
+	}
 }
 
 bool ABotanicusPlayerController::TryUseNearbyComputer()
@@ -5627,7 +5831,8 @@ void ABotanicusPlayerController::UpdatePlaceableItemMoveCharge(
 			break;
 		}
 	}
-	if (bStoredOnShelf)
+	if (bStoredOnShelf ||
+		ItemToMove->GetItemKey() == TEXT("PottingSoil"))
 	{
 		BeginStorageCollectionQuantitySelection(ItemToMove);
 	}
@@ -5663,9 +5868,20 @@ void ABotanicusPlayerController::
 	{
 		return;
 	}
-	LocalStorageCollectionItem = WorldItem;
-	LocalStorageCollectionMaximum =
+	const int32 AvailableQuantity =
 		FMath::Max(1, WorldItem->GetQuantity());
+	if (AvailableQuantity == 1)
+	{
+		if (StorageQuantityWidget)
+		{
+			StorageQuantityWidget->SetVisibility(
+				ESlateVisibility::Collapsed);
+		}
+		ServerCollectStorageItem(WorldItem, 1);
+		return;
+	}
+	LocalStorageCollectionItem = WorldItem;
+	LocalStorageCollectionMaximum = AvailableQuantity;
 	// Keep the former "take the stack" behavior as the fast default;
 	// the wheel lets the player reduce it before validating.
 	LocalStorageCollectionQuantity =
@@ -8507,10 +8723,13 @@ void ABotanicusPlayerController::
 			break;
 		}
 	}
-	if (!StorageShelf)
+	const bool bCollectibleFromFloor =
+		WorldItem->GetItemKey() == TEXT("PottingSoil");
+	if (!StorageShelf && !bCollectibleFromFloor)
 	{
 		ClientMessage(
-			TEXT("Cet objet n'est plus range dans une etagere."));
+			TEXT(
+				"Cet objet ne peut pas etre ajoute directement a la hotbar."));
 		ServerMovedPlaceableItem = nullptr;
 		return;
 	}
@@ -8902,14 +9121,34 @@ void ABotanicusPlayerController::
 	ABotanicusCharacter* BotanicusCharacter =
 		Cast<ABotanicusCharacter>(GetPawn());
 	if (!BotanicusCharacter || !IsValid(WaterReserve) ||
-		!IsLookingAtWorldItem(WaterReserve, 450.0f))
+		!IsLookingAtWorldItem(WaterReserve, 450.0f) ||
+		!IsValid(BotanicusCharacter->GetHeldWateringCan()) ||
+		BotanicusCharacter->GetHeldWateringCan()->IsFull())
 	{
 		return;
 	}
-	if (WaterReserve->TryRefill(BotanicusCharacter))
+	ServerActiveWaterReserve = WaterReserve;
+	bServerWaterRefillChanged = false;
+}
+
+void ABotanicusPlayerController::
+	ServerEndWateringCanRefill_Implementation(
+		ABotanicusWaterReserveActor* WaterReserve)
+{
+	if (ServerActiveWaterReserve != WaterReserve)
 	{
-		ClientMessage(TEXT("Arrosoir rempli : eau 100%."));
+		return;
 	}
+	if (bServerWaterRefillChanged)
+	{
+		if (ABotanicusGameMode* GameMode =
+			GetWorld()->GetAuthGameMode<ABotanicusGameMode>())
+		{
+			GameMode->ScheduleInventoryAutosave();
+		}
+	}
+	ServerActiveWaterReserve = nullptr;
+	bServerWaterRefillChanged = false;
 }
 
 void ABotanicusPlayerController::

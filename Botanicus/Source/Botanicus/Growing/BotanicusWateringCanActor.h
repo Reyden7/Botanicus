@@ -7,7 +7,6 @@
 #include "BotanicusWateringCanActor.generated.h"
 
 class ABotanicusCharacter;
-class UTextRenderComponent;
 
 /** Replicated physical watering can that must stay in a player's hand to water. */
 UCLASS()
@@ -19,7 +18,6 @@ class BOTANICUS_API ABotanicusWateringCanActor
 public:
 	ABotanicusWateringCanActor();
 
-	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void ConfigureAsLocalPreview(bool bIsValid) override;
@@ -27,6 +25,7 @@ public:
 	bool TryPickUp(ABotanicusCharacter* Character);
 	void Drop();
 	bool ConsumeWater(float Amount);
+	bool AddWater(float Amount);
 	void Refill();
 	void RestoreWaterLevel(float InWaterLevel);
 
@@ -39,18 +38,11 @@ private:
 	UFUNCTION()
 	void OnRep_Carrier();
 
-	UFUNCTION()
-	void OnRep_WaterLevel();
-
 	void ApplyCarrierState();
-	void RefreshWaterDisplay();
-
-	UPROPERTY(VisibleAnywhere, Category="Components")
-	TObjectPtr<UTextRenderComponent> WaterLevelText;
 
 	UPROPERTY(ReplicatedUsing=OnRep_Carrier)
 	TObjectPtr<ABotanicusCharacter> Carrier;
 
-	UPROPERTY(ReplicatedUsing=OnRep_WaterLevel)
+	UPROPERTY(Replicated)
 	float WaterLevel = 1.0f;
 };

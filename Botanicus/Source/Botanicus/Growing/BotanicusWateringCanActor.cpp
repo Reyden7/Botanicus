@@ -5,38 +5,11 @@
 #include "BotanicusCharacter.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/TextRenderComponent.h"
-#include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
 #include "Net/UnrealNetwork.h"
 
 ABotanicusWateringCanActor::ABotanicusWateringCanActor()
 {
-	PrimaryActorTick.bCanEverTick = true;
-	WaterLevelText = CreateDefaultSubobject<UTextRenderComponent>(
-		TEXT("Water Level"));
-	WaterLevelText->SetupAttachment(SceneRoot);
-	WaterLevelText->SetRelativeLocation(FVector(0.0f, 0.0f, 55.0f));
-	WaterLevelText->SetHorizontalAlignment(EHTA_Center);
-	WaterLevelText->SetVerticalAlignment(EVRTA_TextCenter);
-	WaterLevelText->SetWorldSize(18.0f);
-	WaterLevelText->SetTextRenderColor(FColor(80, 220, 255));
-	WaterLevelText->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	RefreshWaterDisplay();
-}
-
-void ABotanicusWateringCanActor::Tick(float DeltaSeconds)
-{
-	Super::Tick(DeltaSeconds);
-	const UWorld* World = GetWorld();
-	const APlayerController* Controller =
-		World ? World->GetFirstPlayerController() : nullptr;
-	if (WaterLevelText && Controller && Controller->PlayerCameraManager)
-	{
-		WaterLevelText->SetWorldRotation(
-			(Controller->PlayerCameraManager->GetCameraLocation() -
-			 WaterLevelText->GetComponentLocation()).Rotation());
-	}
+	PrimaryActorTick.bCanEverTick = false;
 }
 
 void ABotanicusWateringCanActor::GetLifetimeReplicatedProps(
@@ -50,10 +23,6 @@ void ABotanicusWateringCanActor::GetLifetimeReplicatedProps(
 void ABotanicusWateringCanActor::ConfigureAsLocalPreview(bool bIsValid)
 {
 	Super::ConfigureAsLocalPreview(bIsValid);
-	if (WaterLevelText)
-	{
-		WaterLevelText->SetVisibility(false);
-	}
 }
 
 bool ABotanicusWateringCanActor::TryPickUp(
@@ -107,7 +76,17 @@ bool ABotanicusWateringCanActor::ConsumeWater(float Amount)
 		return false;
 	}
 	WaterLevel = FMath::Clamp(WaterLevel - Amount, 0.0f, 1.0f);
-	RefreshWaterDisplay();
+	ForceNetUpdate();
+	return true;
+}
+
+bool ABotanicusWateringCanActor::AddWater(float Amount)
+{
+	if (!HasAuthority() || Amount <= 0.0f || IsFull())
+	{
+		return false;
+	}
+	WaterLevel = FMath::Clamp(WaterLevel + Amount, 0.0f, 1.0f);
 	ForceNetUpdate();
 	return true;
 }
@@ -119,7 +98,6 @@ void ABotanicusWateringCanActor::Refill()
 		return;
 	}
 	WaterLevel = 1.0f;
-	RefreshWaterDisplay();
 	ForceNetUpdate();
 }
 
@@ -130,18 +108,12 @@ void ABotanicusWateringCanActor::RestoreWaterLevel(float InWaterLevel)
 		return;
 	}
 	WaterLevel = FMath::Clamp(InWaterLevel, 0.0f, 1.0f);
-	RefreshWaterDisplay();
 	ForceNetUpdate();
 }
 
 void ABotanicusWateringCanActor::OnRep_Carrier()
 {
 	ApplyCarrierState();
-}
-
-void ABotanicusWateringCanActor::OnRep_WaterLevel()
-{
-	RefreshWaterDisplay();
 }
 
 void ABotanicusWateringCanActor::ApplyCarrierState()
@@ -161,21 +133,4 @@ void ABotanicusWateringCanActor::ApplyCarrierState()
 		DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 		SetActorEnableCollision(true);
 	}
-}
-
-void ABotanicusWateringCanActor::RefreshWaterDisplay()
-{
-	if (!WaterLevelText)
-	{
-		return;
-	}
-	WaterLevelText->SetText(
-		FText::FromString(
-			FString::Printf(
-				TEXT("EAU : %d%%"),
-				FMath::RoundToInt(WaterLevel * 100.0f))));
-	WaterLevelText->SetTextRenderColor(
-		WaterLevel > 0.2f
-			? FColor(80, 220, 255)
-			: FColor(255, 120, 80));
 }

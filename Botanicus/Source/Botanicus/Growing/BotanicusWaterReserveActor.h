@@ -21,7 +21,9 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void ConfigureAsLocalPreview(bool bIsValid) override;
 
-	bool TryRefill(ABotanicusCharacter* Character);
+	bool TryRefill(
+		ABotanicusCharacter* Character,
+		float WaterAmount);
 
 private:
 	UPROPERTY(VisibleAnywhere, Category="Components")

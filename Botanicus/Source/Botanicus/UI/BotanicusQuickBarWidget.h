@@ -8,6 +8,7 @@
 #include "BotanicusQuickBarWidget.generated.h"
 
 class UBorder;
+class UProgressBar;
 class UTextBlock;
 
 /**
@@ -28,10 +29,14 @@ public:
 protected:
 	virtual void NativeOnInitialized() override;
 	virtual void NativeDestruct() override;
+	virtual void NativeTick(
+		const FGeometry& MyGeometry,
+		float InDeltaTime) override;
 
 private:
 	void BuildPrototypeLayout();
 	void Refresh();
+	void RefreshWateringCanStatus();
 	void UnbindQuickBar();
 
 	UFUNCTION()
@@ -53,4 +58,13 @@ private:
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UTextBlock>> QuantityLabels;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBorder> WateringCanStatus;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UProgressBar> WateringCanProgress;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> WateringCanText;
 };

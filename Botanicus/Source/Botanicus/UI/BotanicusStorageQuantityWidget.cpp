@@ -98,7 +98,7 @@ void UBotanicusStorageQuantityWidget::SetQuantitySelection(
 			FText::FromString(
 				bStoring
 					? TEXT("RANGER DANS L'ETAGERE")
-					: TEXT("PRENDRE DANS L'ETAGERE")));
+					: TEXT("PRENDRE L'OBJET")));
 	}
 	if (ItemText)
 	{
