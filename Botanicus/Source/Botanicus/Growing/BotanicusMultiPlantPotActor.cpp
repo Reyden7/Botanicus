@@ -468,12 +468,42 @@ bool ABotanicusMultiPlantPotActor::UpdateActiveUse(
 			EndPrimaryUse(Character);
 			return true;
 		}
+		if (Slot.WaterLevel >= 1.0f - KINDA_SMALL_NUMBER)
+		{
+			SendMessage(
+				Character,
+				TEXT(
+					"Cette plante est suffisamment arrosee : eau 100%."));
+			EndPrimaryUse(Character);
+			return true;
+		}
+		const float RequestedWater =
+			FMath::Max(
+				0.0f,
+				Definition->WaterAddedPerUse) *
+				DeltaSeconds;
+		const float PreviousWaterLevel = Slot.WaterLevel;
 		Slot.WaterLevel = FMath::Clamp(
-			Slot.WaterLevel +
-				Definition->WaterAddedPerUse * DeltaSeconds,
+			Slot.WaterLevel + RequestedWater,
 			0.0f,
 			1.0f);
-		WateringCan->ConsumeWater(0.12f * DeltaSeconds);
+		const float WaterActuallyAdded =
+			Slot.WaterLevel - PreviousWaterLevel;
+		if (WaterActuallyAdded > KINDA_SMALL_NUMBER &&
+			RequestedWater > KINDA_SMALL_NUMBER)
+		{
+			WateringCan->ConsumeWater(
+				0.12f * DeltaSeconds *
+					(WaterActuallyAdded / RequestedWater));
+		}
+		if (Slot.WaterLevel >= 1.0f - KINDA_SMALL_NUMBER)
+		{
+			SendMessage(
+				Character,
+				TEXT(
+					"Cette plante est suffisamment arrosee : eau 100%."));
+			EndPrimaryUse(Character);
+		}
 		return true;
 	}
 

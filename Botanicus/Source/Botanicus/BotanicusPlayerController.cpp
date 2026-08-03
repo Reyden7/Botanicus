@@ -78,7 +78,8 @@
 
 namespace
 {
-	const FName PurchasedBuildingTag(TEXT("BotanicusPurchasedBuilding"));
+	const FName PlayerPurchasedBuildingTag(
+		TEXT("BotanicusPurchasedBuilding"));
 
 	bool CanCharacterUseWaterReserve(
 		const ABotanicusCharacter* Character,
@@ -7854,7 +7855,7 @@ void ABotanicusPlayerController::ServerPurchaseCatalogBuilding_Implementation(
 	{
 		AActor* Candidate = *ActorIt;
 		if (IsStructuralBuildingActor(Candidate) &&
-			!Candidate->ActorHasTag(PurchasedBuildingTag) &&
+			!Candidate->ActorHasTag(PlayerPurchasedBuildingTag) &&
 			Candidate->ActorHasTag(Definition->TemplateTag))
 		{
 			TemplateSeed = Candidate;
@@ -7877,7 +7878,7 @@ void ABotanicusPlayerController::ServerPurchaseCatalogBuilding_Implementation(
 		{
 			AActor* Candidate = *ActorIt;
 			if (!IsStructuralBuildingActor(Candidate) ||
-				Candidate->ActorHasTag(PurchasedBuildingTag) ||
+				Candidate->ActorHasTag(PlayerPurchasedBuildingTag) ||
 				VisitedTemplateActors.Contains(Candidate))
 			{
 				continue;
@@ -7978,7 +7979,7 @@ void ABotanicusPlayerController::ServerPurchaseCatalogBuilding_Implementation(
 			SpawnParameters);
 		if (PurchasedPrefab)
 		{
-			PurchasedPrefab->Tags.AddUnique(PurchasedBuildingTag);
+			PurchasedPrefab->Tags.AddUnique(PlayerPurchasedBuildingTag);
 			ConfigurePurchasedActorForNetworking(PurchasedPrefab);
 			PurchasedGroup.Add(PurchasedPrefab);
 			PurchasedPivot = PrefabSpawnLocation;
@@ -8021,7 +8022,7 @@ void ABotanicusPlayerController::ServerPurchaseCatalogBuilding_Implementation(
 
 			PurchasedActor->Tags = TemplateActor->Tags;
 			PurchasedActor->Tags.Remove(Definition->TemplateTag);
-			PurchasedActor->Tags.AddUnique(PurchasedBuildingTag);
+			PurchasedActor->Tags.AddUnique(PlayerPurchasedBuildingTag);
 			ConfigurePurchasedActorForNetworking(PurchasedActor);
 			PurchasedGroup.Add(PurchasedActor);
 		}
