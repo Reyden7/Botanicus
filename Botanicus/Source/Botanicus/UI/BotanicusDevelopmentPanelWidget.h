@@ -10,7 +10,7 @@ class ABotanicusPlayerController;
 class UButton;
 class UTextBlock;
 
-/** Separate development-only command panel toggled with Tab. */
+/** Separate development-only command panel toggled with N. */
 UCLASS()
 class BOTANICUS_API UBotanicusDevelopmentPanelWidget
 	: public UUserWidget

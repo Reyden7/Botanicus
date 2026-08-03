@@ -254,6 +254,38 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 			"Graines de violette"),
 		38,
 		5);
+	AddSeedDefinition(
+		TEXT("SeedPacket_FireBloom"),
+		NSLOCTEXT(
+			"BotanicusCatalog",
+			"FireBloomSeeds",
+			"Graines de fleur de braise"),
+		80,
+		3);
+	AddSeedDefinition(
+		TEXT("SeedPacket_WaterLily"),
+		NSLOCTEXT(
+			"BotanicusCatalog",
+			"WaterLilySeeds",
+			"Graines de fleur de source"),
+		80,
+		3);
+	AddSeedDefinition(
+		TEXT("SeedPacket_FrostFlower"),
+		NSLOCTEXT(
+			"BotanicusCatalog",
+			"FrostFlowerSeeds",
+			"Graines de fleur de givre"),
+		90,
+		3);
+	AddSeedDefinition(
+		TEXT("SeedPacket_ShadowOrchid"),
+		NSLOCTEXT(
+			"BotanicusCatalog",
+			"ShadowOrchidSeeds",
+			"Graines d'orchidee des tenebres"),
+		100,
+		3);
 
 	FBotanicusItemDefinition& WateringCan =
 		NativeFallbackItems.AddDefaulted_GetRef();
@@ -421,6 +453,46 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 		TEXT("Purple"),
 		TEXT("Flowering"),
 		78);
+	AddHarvestDefinition(
+		TEXT("Harvest_FireBloom"),
+		NSLOCTEXT(
+			"BotanicusCatalog",
+			"FireBloomHarvest",
+			"Fleur de braise"),
+		180,
+		TEXT("Red"),
+		TEXT("ElementalFire"),
+		88);
+	AddHarvestDefinition(
+		TEXT("Harvest_WaterLily"),
+		NSLOCTEXT(
+			"BotanicusCatalog",
+			"WaterLilyHarvest",
+			"Fleur de source"),
+		180,
+		TEXT("Blue"),
+		TEXT("ElementalWater"),
+		88);
+	AddHarvestDefinition(
+		TEXT("Harvest_FrostFlower"),
+		NSLOCTEXT(
+			"BotanicusCatalog",
+			"FrostFlowerHarvest",
+			"Fleur de givre"),
+		210,
+		TEXT("White"),
+		TEXT("ElementalIce"),
+		90);
+	AddHarvestDefinition(
+		TEXT("Harvest_ShadowOrchid"),
+		NSLOCTEXT(
+			"BotanicusCatalog",
+			"ShadowOrchidHarvest",
+			"Orchidee des tenebres"),
+		240,
+		TEXT("Black"),
+		TEXT("ElementalShadow"),
+		92);
 
 	const auto AddQualityVariants =
 		[this](FName BaseItemKey)
@@ -479,6 +551,10 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	AddQualityVariants(TEXT("Harvest_Monstera"));
 	AddQualityVariants(TEXT("Harvest_Lavender"));
 	AddQualityVariants(TEXT("Harvest_Violet"));
+	AddQualityVariants(TEXT("Harvest_FireBloom"));
+	AddQualityVariants(TEXT("Harvest_WaterLily"));
+	AddQualityVariants(TEXT("Harvest_FrostFlower"));
+	AddQualityVariants(TEXT("Harvest_ShadowOrchid"));
 
 	FBotanicusItemDefinition& SalesDisplay =
 		NativeFallbackItems.AddDefaulted_GetRef();

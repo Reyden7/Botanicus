@@ -10,6 +10,7 @@ class UStaticMeshComponent;
 class UTextRenderComponent;
 class UMaterialInstanceDynamic;
 struct FBotanicusPlantDefinition;
+enum class EBotanicusPlantElement : uint8;
 
 UCLASS()
 class BOTANICUS_API ABotanicusPlantPotActor
@@ -42,7 +43,8 @@ public:
 		FName InPlantKey,
 		float InWaterLevel,
 		float InGrowthProgress,
-		float InCareScore);
+		float InCareScore,
+		bool bInElementalDead = false);
 
 	bool HasSoil() const { return bHasSoil; }
 	FName GetPlantKey() const { return PlantKey; }
@@ -50,9 +52,13 @@ public:
 	float GetGrowthProgress() const { return GrowthProgress; }
 	float GetCareScore() const { return CareScore; }
 	int32 GetWateringCount() const { return WateringCount; }
+	bool IsElementalDead() const { return bElementalDead; }
 	bool IsMature() const { return !PlantKey.IsNone() && GrowthProgress >= 0.999f; }
 
 	void RestoreWateringCount(int32 InWateringCount);
+	void ApplyElementalInfluence(
+		EBotanicusPlantElement SourceElement,
+		const FVector& SourceLocation);
 
 private:
 	FName GetSelectedItemKey(AActor* Interactor) const;
@@ -65,6 +71,10 @@ private:
 	bool CanHarvestWithInteractor(AActor* Interactor) const;
 	bool IsInteractorStillTargeting(AActor* Interactor) const;
 	bool UpdatePrimaryUse(float DeltaSeconds);
+	bool IsInCompatibleGreenhouse(
+		const FBotanicusPlantDefinition& Definition) const;
+	bool ProcessElementalInteractions(
+		const FBotanicusPlantDefinition& Definition);
 	void RefreshLocalContextAction();
 	void RefreshVisuals();
 	void SendInteractorMessage(
@@ -109,6 +119,9 @@ private:
 
 	UPROPERTY(ReplicatedUsing=OnRep_GrowingState)
 	int32 WateringCount = 0;
+
+	UPROPERTY(ReplicatedUsing=OnRep_GrowingState)
+	bool bElementalDead = false;
 
 	UPROPERTY(ReplicatedUsing=OnRep_GrowingState)
 	float SoilFillProgress = 0.0f;

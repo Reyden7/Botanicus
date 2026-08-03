@@ -3,11 +3,13 @@
 #include "Growing/BotanicusMultiPlantPotActor.h"
 
 #include "BotanicusCharacter.h"
+#include "Building/BotanicusElementalGreenhouseActor.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/StaticMesh.h"
+#include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "Growing/BotanicusPlantSubsystem.h"
 #include "Growing/BotanicusWateringCanActor.h"
@@ -148,6 +150,7 @@ void ABotanicusMultiPlantPotActor::Tick(float DeltaSeconds)
 	}
 
 	bool bChanged = UpdateActiveUse(DeltaSeconds);
+	bChanged |= ProcessElementalInteractions();
 	const int32 Capacity = GetPlantCapacity();
 	for (int32 Index = 0; Index < Capacity; ++Index)
 	{
@@ -162,6 +165,10 @@ void ABotanicusMultiPlantPotActor::Tick(float DeltaSeconds)
 		{
 			continue;
 		}
+		if (Slot.bElementalDead)
+		{
+			continue;
+		}
 
 		const float PreviousWater = Slot.WaterLevel;
 		const float PreviousGrowth = Slot.GrowthProgress;
@@ -173,7 +180,8 @@ void ABotanicusMultiPlantPotActor::Tick(float DeltaSeconds)
 					DeltaSeconds,
 			0.0f,
 			1.0f);
-		if (Slot.WaterLevel >= Definition->MinimumHealthyWater &&
+		if (IsInCompatibleGreenhouse(*Definition) &&
+			Slot.WaterLevel >= Definition->MinimumHealthyWater &&
 			Slot.WaterLevel <= Definition->MaximumHealthyWater &&
 			Slot.GrowthProgress < 1.0f)
 		{
@@ -315,6 +323,13 @@ void ABotanicusMultiPlantPotActor::BeginPrimaryUse(
 		return;
 	}
 	FBotanicusMultiPlantSlotState& Slot = PlantSlots[SlotIndex];
+	if (Slot.bElementalDead)
+	{
+		SendMessage(
+			Interactor,
+			TEXT("Cette plante est morte a cause d'une reaction elementaire."));
+		return;
+	}
 	if (Slot.PlantKey.IsNone())
 	{
 		const UGameInstance* GameInstance = GetGameInstance();
@@ -333,6 +348,7 @@ void ABotanicusMultiPlantPotActor::BeginPrimaryUse(
 			return;
 		}
 		Slot.PlantKey = Definition->PlantKey;
+		Slot.bElementalDead = false;
 		Slot.GrowthProgress = 0.02f;
 		Slot.CareScore = 0.01f;
 		SendMessage(
@@ -689,6 +705,8 @@ void ABotanicusMultiPlantPotActor::RefreshVisuals()
 	MultiSoilMesh->SetVisibility(SoilUnits > 0);
 
 	int32 PlantedCount = 0;
+	int32 DeadCount = 0;
+	bool bWrongGreenhouse = false;
 	for (int32 Index = 0; Index < 4; ++Index)
 	{
 		const bool bActive = Index < Capacity;
@@ -699,6 +717,16 @@ void ABotanicusMultiPlantPotActor::RefreshVisuals()
 		const bool bPlanted =
 			bActive && !Slot.PlantKey.IsNone();
 		PlantedCount += bPlanted ? 1 : 0;
+		DeadCount += Slot.bElementalDead ? 1 : 0;
+		if (bPlanted && !Slot.bElementalDead)
+		{
+			if (const FBotanicusPlantDefinition* Definition =
+				FindPlant(Slot.PlantKey))
+			{
+				bWrongGreenhouse |=
+					!IsInCompatibleGreenhouse(*Definition);
+			}
+		}
 		const float Growth =
 			FMath::Clamp(Slot.GrowthProgress, 0.02f, 1.0f);
 		const FVector BaseLocation = GetSlotLocalLocation(Index);
@@ -720,13 +748,140 @@ void ABotanicusMultiPlantPotActor::RefreshVisuals()
 			FText::FromString(
 				FString::Printf(
 					TEXT(
-						"JARDINIERE %d PLACES\nTERREAU : %d/%d\nPLANTES : %d/%d"),
+						"JARDINIERE %d PLACES\nTERREAU : %d/%d\nPLANTES : %d/%d\nMORTES : %d\nENVIRONNEMENT : %s"),
 					Capacity,
 					SoilUnits,
 					Capacity,
 					PlantedCount,
-					Capacity)));
+					Capacity,
+					DeadCount,
+					bWrongGreenhouse
+						? TEXT("MAUVAISE SERRE")
+						: TEXT("OK"))));
 	}
+}
+
+void ABotanicusMultiPlantPotActor::ApplyElementalInfluence(
+	EBotanicusPlantElement SourceElement,
+	const FVector& SourceLocation)
+{
+	if (!HasAuthority() ||
+		FVector::DistSquared(
+			GetActorLocation(),
+			SourceLocation) > FMath::Square(500.0f))
+	{
+		return;
+	}
+	bool bChanged = false;
+	for (FBotanicusMultiPlantSlotState& Slot : PlantSlots)
+	{
+		if (Slot.bElementalDead || Slot.PlantKey.IsNone())
+		{
+			continue;
+		}
+		const FBotanicusPlantDefinition* Definition =
+			FindPlant(Slot.PlantKey);
+		if (!Definition)
+		{
+			continue;
+		}
+		const bool bBurnedByFire =
+			SourceElement == EBotanicusPlantElement::Fire &&
+			Definition->Element == EBotanicusPlantElement::Normal;
+		const bool bExtinguishedByWater =
+			SourceElement == EBotanicusPlantElement::Water &&
+			Definition->Element == EBotanicusPlantElement::Fire;
+		if (bBurnedByFire || bExtinguishedByWater)
+		{
+			Slot.bElementalDead = true;
+			bChanged = true;
+		}
+	}
+	if (bChanged)
+	{
+		EndPrimaryUse(ActiveUser.Get());
+		RefreshVisuals();
+		ForceNetUpdate();
+	}
+}
+
+bool ABotanicusMultiPlantPotActor::ProcessElementalInteractions()
+{
+	TArray<EBotanicusPlantElement> Sources;
+	for (const FBotanicusMultiPlantSlotState& Slot : PlantSlots)
+	{
+		if (Slot.bElementalDead || Slot.PlantKey.IsNone())
+		{
+			continue;
+		}
+		const FBotanicusPlantDefinition* Definition =
+			FindPlant(Slot.PlantKey);
+		if (Definition &&
+			(Definition->Element == EBotanicusPlantElement::Fire ||
+			 Definition->Element == EBotanicusPlantElement::Water))
+		{
+			Sources.AddUnique(Definition->Element);
+		}
+	}
+	if (Sources.Num() == 0)
+	{
+		return false;
+	}
+
+	int32 DeadBefore = 0;
+	for (const FBotanicusMultiPlantSlotState& Slot : PlantSlots)
+	{
+		DeadBefore += Slot.bElementalDead ? 1 : 0;
+	}
+	const FVector SourceLocation = GetActorLocation();
+	for (EBotanicusPlantElement Source : Sources)
+	{
+		ApplyElementalInfluence(Source, SourceLocation);
+		for (TActorIterator<ABotanicusPlantPotActor> It(GetWorld());
+			 It;
+			 ++It)
+		{
+			if (*It == this ||
+				FVector::DistSquared(
+					It->GetActorLocation(),
+					SourceLocation) > FMath::Square(500.0f))
+			{
+				continue;
+			}
+			if (ABotanicusMultiPlantPotActor* OtherMulti =
+				Cast<ABotanicusMultiPlantPotActor>(*It))
+			{
+				OtherMulti->ApplyElementalInfluence(
+					Source,
+					SourceLocation);
+			}
+			else
+			{
+				It->ApplyElementalInfluence(
+					Source,
+					SourceLocation);
+			}
+		}
+	}
+	int32 DeadAfter = 0;
+	for (const FBotanicusMultiPlantSlotState& Slot : PlantSlots)
+	{
+		DeadAfter += Slot.bElementalDead ? 1 : 0;
+	}
+	return DeadAfter != DeadBefore;
+}
+
+bool ABotanicusMultiPlantPotActor::IsInCompatibleGreenhouse(
+	const FBotanicusPlantDefinition& Definition) const
+{
+	if (Definition.Element == EBotanicusPlantElement::Normal)
+	{
+		return true;
+	}
+	return ABotanicusElementalGreenhouseActor::
+		FindGreenhouseElementAtLocation(
+			GetWorld(),
+			GetActorLocation()) == Definition.Element;
 }
 
 void ABotanicusMultiPlantPotActor::SendMessage(

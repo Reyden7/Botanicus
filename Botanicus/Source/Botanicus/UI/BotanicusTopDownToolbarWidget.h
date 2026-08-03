@@ -24,7 +24,8 @@ public:
 		bool bCanConfirm,
 		bool bPathDeletionActive,
 		bool bVisitorRouteMode,
-		int32 ActiveVisitorZoneType);
+		int32 ActiveVisitorZoneType,
+		bool bDoorEditingActive);
 
 protected:
 	virtual void NativeOnInitialized() override;
@@ -60,6 +61,9 @@ private:
 	void HandleDeletePathClicked();
 
 	UFUNCTION()
+	void HandleDoorEditingClicked();
+
+	UFUNCTION()
 	void HandleCancelClicked();
 
 	UPROPERTY(Transient)
@@ -91,6 +95,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UButton> DeletePathButton;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UButton> DoorEditingButton;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UButton> CancelButton;

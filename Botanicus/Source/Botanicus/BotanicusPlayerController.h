@@ -22,6 +22,7 @@ class UBotanicusDaySummaryWidget;
 class UBotanicusClockWidget;
 class UBotanicusStorageQuantityWidget;
 class UBotanicusInteractionTargetWidget;
+class UTextRenderComponent;
 class UBotanicusThrowPowerWidget;
 class ABotanicusGameState;
 class ACameraActor;
@@ -169,6 +170,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Path")
 	void CancelPathDeletion();
 	void CancelVisitorZonePlacement();
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Building")
+	void BeginDoorEditing();
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Building")
+	void CancelDoorEditing();
 
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Building")
 	void ToggleBuildingCatalog();
@@ -373,10 +380,22 @@ protected:
 	void HideEbsDemoHud();
 	void RefreshTopDownRoofVisibility();
 	void RestoreTopDownRoofVisibility();
+	void RefreshTopDownBuildingLabels(bool bShowLabels);
+	void HideTopDownBuildingLabels();
+	float GetTopDownBuildingViewDistance() const;
+	FText ResolveTopDownBuildingName(AActor* BuildingActor) const;
 	void AdvanceEbsViewMode();
 	void MoveBuildingCameraForward(float AxisValue);
 	void MoveBuildingCameraRight(float AxisValue);
 	void ZoomBuildingCamera(float Direction);
+	void BeginBuildingCameraOrbit();
+	void EndBuildingCameraOrbit();
+	void UpdateBuildingCameraOrbit();
+	void InitializeBuildingCameraOrbitFromCurrentView();
+	void ApplyBuildingCameraOrbit();
+	void BeginBuildingCameraFreeLook();
+	void EndBuildingCameraFreeLook();
+	void UpdateBuildingCameraFreeLook();
 	void AddPathPointAtCursor();
 	void RemoveLastPathPoint();
 	void UpdatePathPreview();
@@ -534,6 +553,7 @@ protected:
 		AActor*& OutExistingWall) const;
 	bool BuildCommunicationDoorCandidates(
 		const TArray<AActor*>& PurchasedGroup);
+	bool BuildManualDoorCandidates(AActor* SelectedActor);
 	bool IsPlainBuildingWall(const AActor* Actor) const;
 	bool TryPlacePing();
 	bool IsEbsConstructionModeActive(UActorComponent*& OutBuildingComponent) const;
@@ -736,6 +756,9 @@ protected:
 	void ServerConfirmCommunicationDoor(int32 CandidateIndex);
 
 	UFUNCTION(Server, Reliable)
+	void ServerBeginManualDoorPlacement(AActor* SelectedActor);
+
+	UFUNCTION(Server, Reliable)
 	void ServerCancelCommunicationDoor();
 
 	UFUNCTION(Client, Reliable)
@@ -841,6 +864,11 @@ protected:
 	TSet<TWeakObjectPtr<UPrimitiveComponent>>
 		TopDownHiddenRoofComponents;
 
+	TMap<
+		TWeakObjectPtr<AActor>,
+		TWeakObjectPtr<UTextRenderComponent>>
+		TopDownBuildingLabels;
+
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="500.0"))
 	float BuildingCameraHeight = 1800.0f;
 
@@ -848,10 +876,28 @@ protected:
 	float MinimumBuildingCameraHeight = 600.0f;
 
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="100.0"))
-	float MaximumBuildingCameraHeight = 5000.0f;
+	float MaximumBuildingCameraHeight = 25000.0f;
 
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="10.0"))
 	float BuildingCameraZoomStep = 250.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="0.01"))
+	float BuildingCameraOrbitSensitivity = 0.22f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="100.0"))
+	float BuildingDetailViewDistance = 10000.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="1.0", ClampMax="89.0"))
+	float MinimumBuildingCameraOrbitPitch = 15.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="1.0", ClampMax="89.0"))
+	float MaximumBuildingCameraOrbitPitch = 85.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="-89.0", ClampMax="-1.0"))
+	float MinimumBuildingCameraFreeLookPitch = -89.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="-89.0", ClampMax="-1.0"))
+	float MaximumBuildingCameraFreeLookPitch = -10.0f;
 
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="100.0"))
 	float BuildingCameraPanSpeed = 1400.0f;
@@ -1078,6 +1124,8 @@ protected:
 	TArray<FTransform> ServerBuildingOriginalTransforms;
 	TObjectPtr<AActor> ServerSnappedMovingWall;
 	TObjectPtr<AActor> ServerSnappedExistingWall;
+	TObjectPtr<ABotanicusCommunicationDoorActor>
+		ServerManualDoorToMove;
 	TArray<TObjectPtr<AActor>> ServerDoorCandidatePurchasedWalls;
 	TArray<TObjectPtr<AActor>> ServerDoorCandidateExistingWalls;
 	TArray<FVector_NetQuantize10> ServerDoorCandidateLocations;
@@ -1092,6 +1140,14 @@ protected:
 	float LocalBuildingGroundOffset = 0.0f;
 	float ServerBuildingGroundOffset = 0.0f;
 	float BuildingPreviewUpdateAccumulator = 0.0f;
+	float BuildingCameraOrbitYaw = 0.0f;
+	float BuildingCameraOrbitPitch = 85.0f;
+	float BuildingCameraOrbitDistance = 1800.0f;
+	float BuildingOrbitSavedMouseX = 0.0f;
+	float BuildingOrbitSavedMouseY = 0.0f;
+	bool bBuildingCameraOrbitActive = false;
+	bool bBuildingCameraOrbitInitialized = false;
+	bool bBuildingCameraFreeLookActive = false;
 	float LargeEquipmentPlacementYaw = 0.0f;
 	float LargeEquipmentPreviewUpdateAccumulator = 0.0f;
 	float QuickBarItemPlacementYaw = 0.0f;
@@ -1142,6 +1198,8 @@ protected:
 		EBotanicusPathType::Standard;
 	int32 PendingVisitorZoneType = INDEX_NONE;
 	bool bCommunicationDoorPlacementActive = false;
+	bool bDoorEditSelectionActive = false;
+	bool bServerManualDoorPlacement = false;
 	bool bAzertyForwardPressed = false;
 	bool bAzertyBackwardPressed = false;
 	bool bAzertyLeftPressed = false;

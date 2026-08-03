@@ -23,6 +23,9 @@ struct BOTANICUS_API FBotanicusSavedBuildingActor
 
 	UPROPERTY()
 	bool bRuntimeSpawned = false;
+
+	UPROPERTY()
+	int32 ElementalGreenhouseLevel = 1;
 };
 
 USTRUCT()
@@ -170,6 +173,9 @@ struct BOTANICUS_API FBotanicusSavedWorldItem
 	int32 PlantWateringCount = 0;
 
 	UPROPERTY()
+	bool bPlantElementalDead = false;
+
+	UPROPERTY()
 	int32 MultiPlanterSoilUnits = 0;
 
 	UPROPERTY()
@@ -186,6 +192,9 @@ struct BOTANICUS_API FBotanicusSavedWorldItem
 
 	UPROPERTY()
 	TArray<int32> MultiPlanterWateringCounts;
+
+	UPROPERTY()
+	TArray<bool> MultiPlanterElementalDead;
 
 	UPROPERTY()
 	FName DisplayedPlantItemKey = NAME_None;
@@ -211,7 +220,7 @@ class BOTANICUS_API UBotanicusWorldSaveGame : public USaveGame
 
 public:
 	UPROPERTY()
-	int32 SaveVersion = 22;
+	int32 SaveVersion = 23;
 
 	UPROPERTY()
 	FString MapName;

@@ -42,7 +42,7 @@ void UBotanicusTopDownToolbarWidget::InitializeWithController(
 	ABotanicusPlayerController* InController)
 {
 	BotanicusController = InController;
-	RefreshPathState(false, false, false, false, INDEX_NONE);
+	RefreshPathState(false, false, false, false, INDEX_NONE, false);
 }
 
 void UBotanicusTopDownToolbarWidget::RefreshPathState(
@@ -50,7 +50,8 @@ void UBotanicusTopDownToolbarWidget::RefreshPathState(
 	bool bCanConfirm,
 	bool bPathDeletionActive,
 	bool bVisitorRouteMode,
-	int32 ActiveVisitorZoneType)
+	int32 ActiveVisitorZoneType,
+	bool bDoorEditingActive)
 {
 	if (PathButton)
 	{
@@ -122,6 +123,13 @@ void UBotanicusTopDownToolbarWidget::RefreshPathState(
 				? FLinearColor(0.85f, 0.08f, 0.04f, 1.0f)
 				: FLinearColor(0.12f, 0.14f, 0.12f, 0.96f));
 	}
+	if (DoorEditingButton)
+	{
+		DoorEditingButton->SetBackgroundColor(
+			bDoorEditingActive
+				? FLinearColor(0.15f, 0.55f, 0.95f, 1.0f)
+				: FLinearColor(0.12f, 0.14f, 0.12f, 0.96f));
+	}
 	if (DeletePathButtonLabel)
 	{
 		DeletePathButtonLabel->SetText(
@@ -140,6 +148,7 @@ void UBotanicusTopDownToolbarWidget::RefreshPathState(
 		CancelButton->SetVisibility(
 			bPathModeActive ||
 				bPathDeletionActive ||
+				bDoorEditingActive ||
 				ActiveVisitorZoneType != INDEX_NONE
 				? ESlateVisibility::Visible
 				: ESlateVisibility::Collapsed);
@@ -200,6 +209,7 @@ void UBotanicusTopDownToolbarWidget::BuildLayout()
 	UTextBlock* VisitorCheckoutLabel = nullptr;
 	UTextBlock* RefundZoneLabel = nullptr;
 	UTextBlock* DeliveryZoneLabel = nullptr;
+	UTextBlock* DoorEditingLabel = nullptr;
 	PathButton = AddToolbarButton(
 		WidgetTree,
 		Row,
@@ -217,6 +227,11 @@ void UBotanicusTopDownToolbarWidget::BuildLayout()
 		NSLOCTEXT("Botanicus", "DeletePathButton", "SUPPRIMER ROUTE"),
 		DeletePathLabel);
 	DeletePathButtonLabel = DeletePathLabel;
+	DoorEditingButton = AddToolbarButton(
+		WidgetTree,
+		Row,
+		NSLOCTEXT("Botanicus", "DoorEditingButton", "PORTES"),
+		DoorEditingLabel);
 	CancelButton = AddToolbarButton(
 		WidgetTree,
 		Row,
@@ -286,10 +301,13 @@ void UBotanicusTopDownToolbarWidget::BuildLayout()
 	DeletePathButton->OnClicked.AddDynamic(
 		this,
 		&UBotanicusTopDownToolbarWidget::HandleDeletePathClicked);
+	DoorEditingButton->OnClicked.AddDynamic(
+		this,
+		&UBotanicusTopDownToolbarWidget::HandleDoorEditingClicked);
 	CancelButton->OnClicked.AddDynamic(
 		this,
 		&UBotanicusTopDownToolbarWidget::HandleCancelClicked);
-	RefreshPathState(false, false, false, false, INDEX_NONE);
+	RefreshPathState(false, false, false, false, INDEX_NONE, false);
 }
 
 void UBotanicusTopDownToolbarWidget::HandlePathClicked()
@@ -364,6 +382,14 @@ void UBotanicusTopDownToolbarWidget::HandleDeletePathClicked()
 	}
 }
 
+void UBotanicusTopDownToolbarWidget::HandleDoorEditingClicked()
+{
+	if (BotanicusController)
+	{
+		BotanicusController->BeginDoorEditing();
+	}
+}
+
 void UBotanicusTopDownToolbarWidget::HandleCancelClicked()
 {
 	if (BotanicusController)
@@ -371,5 +397,6 @@ void UBotanicusTopDownToolbarWidget::HandleCancelClicked()
 		BotanicusController->CancelPathPlacement();
 		BotanicusController->CancelPathDeletion();
 		BotanicusController->CancelVisitorZonePlacement();
+		BotanicusController->CancelDoorEditing();
 	}
 }

@@ -30,6 +30,9 @@ struct BOTANICUS_API FBotanicusMultiPlantSlotState
 
 	UPROPERTY()
 	int32 WateringCount = 0;
+
+	UPROPERTY()
+	bool bElementalDead = false;
 };
 
 /** Rectangular preparation planter containing two to four independent plants. */
@@ -61,6 +64,9 @@ public:
 	void RestoreMultiPlantState(
 		int32 InSoilUnits,
 		const TArray<FBotanicusMultiPlantSlotState>& InSlots);
+	void ApplyElementalInfluence(
+		EBotanicusPlantElement SourceElement,
+		const FVector& SourceLocation);
 
 private:
 	enum class EUseMode : uint8
@@ -87,6 +93,9 @@ private:
 		AActor* Interactor,
 		int32 SlotIndex) const;
 	bool UpdateActiveUse(float DeltaSeconds);
+	bool ProcessElementalInteractions();
+	bool IsInCompatibleGreenhouse(
+		const FBotanicusPlantDefinition& Definition) const;
 	void RefreshVisuals();
 	void SendMessage(
 		AActor* Interactor,

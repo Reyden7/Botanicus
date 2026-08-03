@@ -42,7 +42,9 @@ void UBotanicusPlantSubsystem::Initialize(
 			float MaximumWater,
 			float WaterPerUse,
 			float WaterConsumption,
-			const FLinearColor& MatureColor)
+			const FLinearColor& MatureColor,
+			EBotanicusPlantElement Element =
+				EBotanicusPlantElement::Normal)
 		{
 			FBotanicusPlantDefinition& Plant =
 				NativeFallbackPlants.AddDefaulted_GetRef();
@@ -60,6 +62,7 @@ void UBotanicusPlantSubsystem::Initialize(
 			Plant.WaterAddedPerUse = WaterPerUse;
 			Plant.WaterConsumptionPerSecond = WaterConsumption;
 			Plant.MatureColor = MatureColor;
+			Plant.Element = Element;
 		};
 	AddPlant(
 		TEXT("Orchid"),
@@ -105,6 +108,66 @@ void UBotanicusPlantSubsystem::Initialize(
 		0.25f,
 		0.0025f,
 		FLinearColor(0.38f, 0.12f, 0.72f, 1.0f));
+	AddPlant(
+		TEXT("FireBloom"),
+		TEXT("SeedPacket_FireBloom"),
+		NSLOCTEXT(
+			"BotanicusGrowing",
+			"FireBloomName",
+			"Fleur de braise"),
+		TEXT("Harvest_FireBloom"),
+		260.0f,
+		0.20f,
+		0.60f,
+		0.25f,
+		0.002f,
+		FLinearColor(1.0f, 0.12f, 0.01f, 1.0f),
+		EBotanicusPlantElement::Fire);
+	AddPlant(
+		TEXT("WaterLily"),
+		TEXT("SeedPacket_WaterLily"),
+		NSLOCTEXT(
+			"BotanicusGrowing",
+			"WaterLilyName",
+			"Fleur de source"),
+		TEXT("Harvest_WaterLily"),
+		260.0f,
+		0.55f,
+		0.95f,
+		0.30f,
+		0.003f,
+		FLinearColor(0.02f, 0.45f, 1.0f, 1.0f),
+		EBotanicusPlantElement::Water);
+	AddPlant(
+		TEXT("FrostFlower"),
+		TEXT("SeedPacket_FrostFlower"),
+		NSLOCTEXT(
+			"BotanicusGrowing",
+			"FrostFlowerName",
+			"Fleur de givre"),
+		TEXT("Harvest_FrostFlower"),
+		280.0f,
+		0.30f,
+		0.72f,
+		0.25f,
+		0.002f,
+		FLinearColor(0.45f, 0.9f, 1.0f, 1.0f),
+		EBotanicusPlantElement::Ice);
+	AddPlant(
+		TEXT("ShadowOrchid"),
+		TEXT("SeedPacket_ShadowOrchid"),
+		NSLOCTEXT(
+			"BotanicusGrowing",
+			"ShadowOrchidName",
+			"Orchidee des tenebres"),
+		TEXT("Harvest_ShadowOrchid"),
+		300.0f,
+		0.25f,
+		0.68f,
+		0.22f,
+		0.0018f,
+		FLinearColor(0.16f, 0.01f, 0.28f, 1.0f),
+		EBotanicusPlantElement::Shadow);
 }
 
 const FBotanicusPlantDefinition*

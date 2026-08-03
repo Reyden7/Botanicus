@@ -8,6 +8,7 @@
 #include "BotanicusPlayerController.h"
 #include "Building/BotanicusCatalogBuildingActor.h"
 #include "Building/BotanicusCommunicationDoorActor.h"
+#include "Building/BotanicusElementalGreenhouseActor.h"
 #include "Delivery/BotanicusDeliveryParcelActor.h"
 #include "Delivery/BotanicusDeliveryZoneActor.h"
 #include "Delivery/BotanicusLargeEquipmentActor.h"
@@ -228,7 +229,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 
 	CurrentSaveGame->MapName =
 		UGameplayStatics::GetCurrentLevelName(this, true);
-	CurrentSaveGame->SaveVersion = 22;
+	CurrentSaveGame->SaveVersion = 23;
 	if (const ABotanicusGameState* BotanicusGameState =
 		World->GetGameState<ABotanicusGameState>())
 	{
@@ -302,6 +303,12 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		SavedActor.Transform = Actor->GetActorTransform();
 		SavedActor.bRuntimeSpawned =
 			Actor->ActorHasTag(PurchasedBuildingTag);
+		if (const ABotanicusElementalGreenhouseActor* Greenhouse =
+			Cast<ABotanicusElementalGreenhouseActor>(Actor))
+		{
+			SavedActor.ElementalGreenhouseLevel =
+				Greenhouse->GetGreenhouseLevel();
+		}
 	}
 
 	for (TActorIterator<ABotanicusPathActor> PathIt(World);
@@ -455,6 +462,8 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 					Slot.CareScore);
 				SavedItem.MultiPlanterWateringCounts.Add(
 					Slot.WateringCount);
+				SavedItem.MultiPlanterElementalDead.Add(
+					Slot.bElementalDead);
 			}
 		}
 		else if (const ABotanicusPlantPotActor* PlantPot =
@@ -469,6 +478,8 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 				PlantPot->GetCareScore();
 			SavedItem.PlantWateringCount =
 				PlantPot->GetWateringCount();
+			SavedItem.bPlantElementalDead =
+				PlantPot->IsElementalDead();
 		}
 		else if (const ABotanicusSalesDisplayActor* SalesDisplay =
 			Cast<ABotanicusSalesDisplayActor>(*ItemIt))
@@ -830,6 +841,12 @@ void ABotanicusGameMode::RestoreWorldState()
 			false,
 			nullptr,
 			ETeleportType::TeleportPhysics);
+		if (ABotanicusElementalGreenhouseActor* Greenhouse =
+			Cast<ABotanicusElementalGreenhouseActor>(RestoredActor))
+		{
+			Greenhouse->RestoreGreenhouseLevel(
+				SavedActor.ElementalGreenhouseLevel);
+		}
 		++RestoredCount;
 	}
 
@@ -1167,6 +1184,12 @@ void ABotanicusGameMode::RestoreWorldState()
 							? SavedItem.
 								MultiPlanterWateringCounts[Index]
 							: 0;
+					Slot.bElementalDead =
+						SavedItem.MultiPlanterElementalDead.
+							IsValidIndex(Index)
+							? SavedItem.
+								MultiPlanterElementalDead[Index]
+							: false;
 				}
 				MultiPlanter->RestoreMultiPlantState(
 					SavedItem.MultiPlanterSoilUnits,
@@ -1180,7 +1203,8 @@ void ABotanicusGameMode::RestoreWorldState()
 					SavedItem.PlantKey,
 					SavedItem.PlantWaterLevel,
 					SavedItem.PlantGrowthProgress,
-					SavedItem.PlantCareScore);
+					SavedItem.PlantCareScore,
+					SavedItem.bPlantElementalDead);
 				PlantPot->RestoreWateringCount(
 					SavedItem.PlantWateringCount);
 			}

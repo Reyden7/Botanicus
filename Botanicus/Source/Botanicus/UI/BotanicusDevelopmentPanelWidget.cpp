@@ -56,7 +56,8 @@ FReply UBotanicusDevelopmentPanelWidget::NativeOnKeyDown(
 	const FGeometry& InGeometry,
 	const FKeyEvent& InKeyEvent)
 {
-	if (InKeyEvent.GetKey() == EKeys::Tab ||
+	if (InKeyEvent.GetKey() == EKeys::N ||
+		InKeyEvent.GetKey() == EKeys::F1 ||
 		InKeyEvent.GetKey() == EKeys::Escape)
 	{
 		if (BotanicusController)

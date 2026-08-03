@@ -46,5 +46,8 @@
 				"Editor"
 			]
 		}
+	],
+	"AdditionalPluginDirectories": [
+		"../../../../Downloads/meshy-for-unreal-ue5.7-0.2.0"
 	]
 }

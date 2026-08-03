@@ -7,6 +7,16 @@
 #include "Engine/DeveloperSettings.h"
 #include "BotanicusPlantCatalog.generated.h"
 
+UENUM(BlueprintType)
+enum class EBotanicusPlantElement : uint8
+{
+	Normal,
+	Fire,
+	Water,
+	Ice,
+	Shadow
+};
+
 USTRUCT(BlueprintType)
 struct BOTANICUS_API FBotanicusPlantDefinition
 {
@@ -20,6 +30,18 @@ struct BOTANICUS_API FBotanicusPlantDefinition
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Identity")
 	FText DisplayName;
+
+	/** Elemental plants only grow inside a greenhouse of the same element. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Element")
+	EBotanicusPlantElement Element = EBotanicusPlantElement::Normal;
+
+	/** Radius used by elemental reactions such as fire burning normal plants. */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category="Element",
+		meta=(ClampMin="0.0", Units="cm"))
+	float ElementalInteractionRadius = 500.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Harvest")
 	FName HarvestToolItemKey = TEXT("GardenTrowel");

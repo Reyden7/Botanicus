@@ -17,6 +17,7 @@
 #include "Components/ActorComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/MeshComponent.h"
+#include "Components/TextRenderComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/OverlapResult.h"
 #include "EngineUtils.h"
@@ -962,6 +963,13 @@ void ABotanicusPlayerController::PlayerTick(float DeltaTime)
 			(bAzertyLeftPressed ? 1.0f : 0.0f);
 		if (bBuildingTopDownViewActive)
 		{
+			if (bBuildingCameraOrbitActive &&
+				LocalBuildingGroup.Num() == 0)
+			{
+				EndBuildingCameraOrbit();
+			}
+			UpdateBuildingCameraOrbit();
+			UpdateBuildingCameraFreeLook();
 			MoveBuildingCameraForward(AzertyForward);
 			MoveBuildingCameraRight(AzertyRight);
 		}
@@ -1049,7 +1057,8 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		return true;
 	}
 
-	if (Params.Key == EKeys::F1)
+	if (Params.Key == EKeys::N ||
+		Params.Key == EKeys::F1)
 	{
 		if (Params.Event == IE_Pressed)
 		{
@@ -1399,6 +1408,64 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 
 	if (bBuildingTopDownViewActive)
 	{
+		if (Params.Key == EKeys::LeftShift)
+		{
+			if (Params.Event == IE_Pressed &&
+				LocalBuildingGroup.Num() > 0)
+			{
+				BeginBuildingCameraOrbit();
+			}
+			else if (Params.Event == IE_Released &&
+				bBuildingCameraOrbitActive)
+			{
+				EndBuildingCameraOrbit();
+			}
+			return true;
+		}
+
+		if (bBuildingCameraOrbitActive &&
+			(Params.Key == EKeys::LeftMouseButton ||
+			 Params.Key == EKeys::RightMouseButton))
+		{
+			return true;
+		}
+
+		if (bDoorEditSelectionActive)
+		{
+			if (Params.Key == EKeys::LeftMouseButton &&
+				Params.Event == IE_Pressed)
+			{
+				if (!IsCursorOverTopDownToolbar())
+				{
+					FHitResult DoorHit;
+					if (TraceTopDownCursor(DoorHit) &&
+						IsValid(DoorHit.GetActor()) &&
+						(DoorHit.GetActor()->IsA<
+							 ABotanicusCommunicationDoorActor>() ||
+						 IsEbsBuildingActor(DoorHit.GetActor())))
+					{
+						bDoorEditSelectionActive = false;
+						RefreshTopDownToolbar();
+						ServerBeginManualDoorPlacement(
+							DoorHit.GetActor());
+					}
+					else
+					{
+						ClientMessage(
+							TEXT("Cliquez sur un bâtiment ou une porte existante."));
+					}
+				}
+				return true;
+			}
+			if ((Params.Key == EKeys::RightMouseButton ||
+				 Params.Key == EKeys::Escape) &&
+				Params.Event == IE_Pressed)
+			{
+				CancelDoorEditing();
+				return true;
+			}
+		}
+
 		if (PendingVisitorZoneType != INDEX_NONE)
 		{
 			if (Params.Key == EKeys::LeftMouseButton &&
@@ -1491,6 +1558,30 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 			}
 		}
 
+		if (Params.Key == EKeys::RightMouseButton &&
+			LocalBuildingGroup.Num() == 0 &&
+			PendingVisitorZoneType == INDEX_NONE &&
+			!bCommunicationDoorPlacementActive &&
+			!bPathPlacementActive &&
+			!bPathDeletionActive)
+		{
+			if (Params.Event == IE_Pressed)
+			{
+				BeginBuildingCameraFreeLook();
+			}
+			else if (Params.Event == IE_Released)
+			{
+				EndBuildingCameraFreeLook();
+			}
+			return true;
+		}
+
+		if (bBuildingCameraFreeLookActive &&
+			Params.Key == EKeys::LeftMouseButton)
+		{
+			return true;
+		}
+
 		if (Params.Event == IE_Pressed &&
 			(Params.Key == EKeys::MouseScrollUp ||
 			 Params.Key == EKeys::MouseScrollDown))
@@ -1498,12 +1589,11 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 			const float Direction =
 				Params.Key == EKeys::MouseScrollUp ? 1.0f : -1.0f;
 
-			// While a building is selected, the wheel keeps its existing
-			// rotation role. Holding Shift temporarily restores camera zoom.
+			// Wheel rotates the selected building. Ctrl + wheel always zooms.
 			const bool bZoomRequested =
 				LocalBuildingGroup.Num() == 0 ||
-				IsInputKeyDown(EKeys::LeftShift) ||
-				IsInputKeyDown(EKeys::RightShift);
+				IsInputKeyDown(EKeys::LeftControl) ||
+				IsInputKeyDown(EKeys::RightControl);
 			if (!bZoomRequested)
 			{
 				RotateBuildingGroup(Direction);
@@ -1918,6 +2008,14 @@ void ABotanicusPlayerController::EnterBuildingTopDownView()
 		return;
 	}
 
+	// Older controller Blueprints may have serialized the former 5000-unit
+	// limit. Keep the expanded building overview available in those maps.
+	MaximumBuildingCameraHeight =
+		FMath::Max(MaximumBuildingCameraHeight, 25000.0f);
+	// Keep the overview/detail transition consistent even for controller
+	// Blueprints that serialized the former 15000-unit value.
+	BuildingDetailViewDistance = 10000.0f;
+
 	if (!IsValid(BuildingCameraActor))
 	{
 		FActorSpawnParameters SpawnParameters;
@@ -1941,6 +2039,9 @@ void ABotanicusPlayerController::EnterBuildingTopDownView()
 	BuildingCameraActor->SetActorLocationAndRotation(
 		CameraLocation,
 		FRotator(-90.0f, 0.0f, 0.0f));
+	bBuildingCameraOrbitActive = false;
+	bBuildingCameraOrbitInitialized = false;
+	bBuildingCameraFreeLookActive = false;
 
 	if (UCameraComponent* Camera = BuildingCameraActor->GetCameraComponent())
 	{
@@ -1985,9 +2086,18 @@ void ABotanicusPlayerController::ExitBuildingTopDownView()
 {
 	APawn* ControlledPawn = GetPawn();
 
+	if (bBuildingCameraOrbitActive)
+	{
+		EndBuildingCameraOrbit();
+	}
+	if (bBuildingCameraFreeLookActive)
+	{
+		EndBuildingCameraFreeLook();
+	}
 	CancelPathPlacement();
 	CancelPathDeletion();
 	CancelVisitorZonePlacement();
+	bDoorEditSelectionActive = false;
 	if (bCommunicationDoorPlacementActive)
 	{
 		ServerCancelCommunicationDoor();
@@ -2461,6 +2571,25 @@ void ABotanicusPlayerController::RefreshTopDownRoofVisibility()
 		return;
 	}
 
+	const bool bShowBuildingOverview =
+		GetTopDownBuildingViewDistance() >=
+			BuildingDetailViewDistance;
+	RefreshTopDownBuildingLabels(bShowBuildingOverview);
+	if (bShowBuildingOverview)
+	{
+		// At long range, complete silhouettes make buildings easier to read.
+		for (const TWeakObjectPtr<UPrimitiveComponent>& Component :
+			 TopDownHiddenRoofComponents)
+		{
+			if (Component.IsValid())
+			{
+				Component->SetVisibility(true, false);
+			}
+		}
+		TopDownHiddenRoofComponents.Reset();
+		return;
+	}
+
 	for (auto ComponentIt = TopDownHiddenRoofComponents.CreateIterator();
 		 ComponentIt;
 		 ++ComponentIt)
@@ -2474,18 +2603,28 @@ void ABotanicusPlayerController::RefreshTopDownRoofVisibility()
 	for (TActorIterator<AActor> ActorIt(GetWorld()); ActorIt; ++ActorIt)
 	{
 		AActor* Actor = *ActorIt;
-		if (!IsEbsBuildingActor(Actor) ||
-			!Actor->GetClass()->GetName().Contains(
-				TEXT("Roof"),
-				ESearchCase::IgnoreCase))
+		if (!IsEbsBuildingActor(Actor))
 		{
 			continue;
 		}
 
+		const bool bRoofActor =
+			Actor->GetClass()->GetName().Contains(
+				TEXT("Roof"),
+				ESearchCase::IgnoreCase);
 		TInlineComponentArray<UPrimitiveComponent*> RoofComponents(Actor);
 		for (UPrimitiveComponent* RoofComponent : RoofComponents)
 		{
-			if (!IsValid(RoofComponent) ||
+			if (!IsValid(RoofComponent))
+			{
+				continue;
+			}
+			const bool bRoofComponent =
+				bRoofActor ||
+				RoofComponent->GetName().Contains(
+					TEXT("Roof"),
+					ESearchCase::IgnoreCase);
+			if (!bRoofComponent ||
 				TopDownHiddenRoofComponents.Contains(RoofComponent) ||
 				!RoofComponent->IsVisible())
 			{
@@ -2512,7 +2651,179 @@ void ABotanicusPlayerController::RestoreTopDownRoofVisibility()
 		}
 	}
 	TopDownHiddenRoofComponents.Reset();
+	HideTopDownBuildingLabels();
 	TopDownRoofRefreshAccumulator = 0.0f;
+}
+
+void ABotanicusPlayerController::RefreshTopDownBuildingLabels(
+	bool bShowLabels)
+{
+	for (auto It = TopDownBuildingLabels.CreateIterator(); It; ++It)
+	{
+		if (!It.Key().IsValid() || !It.Value().IsValid())
+		{
+			It.RemoveCurrent();
+			continue;
+		}
+		It.Value()->SetVisibility(bShowLabels);
+	}
+	if (!bShowLabels || !IsValid(BuildingCameraActor))
+	{
+		return;
+	}
+
+	for (TActorIterator<ABotanicusCatalogBuildingActor> It(GetWorld());
+		 It;
+		 ++It)
+	{
+		ABotanicusCatalogBuildingActor* Building = *It;
+		if (!IsValid(Building))
+		{
+			continue;
+		}
+
+		UTextRenderComponent* Label = nullptr;
+		if (const TWeakObjectPtr<UTextRenderComponent>* Found =
+			TopDownBuildingLabels.Find(Building))
+		{
+			Label = Found->Get();
+		}
+		if (!IsValid(Label))
+		{
+			Label = NewObject<UTextRenderComponent>(
+				Building,
+				MakeUniqueObjectName(
+					Building,
+					UTextRenderComponent::StaticClass(),
+					TEXT("BotanicusTopDownBuildingLabel")));
+			if (!Label)
+			{
+				continue;
+			}
+			Label->RegisterComponent();
+			Label->AttachToComponent(
+				Building->GetRootComponent(),
+				FAttachmentTransformRules::KeepWorldTransform);
+			Label->SetMobility(EComponentMobility::Movable);
+			Label->SetUsingAbsoluteRotation(true);
+			Label->SetHorizontalAlignment(EHTA_Center);
+			Label->SetVerticalAlignment(EVRTA_TextCenter);
+			Label->SetWorldSize(180.0f);
+			Label->SetTextRenderColor(FColor(255, 225, 80));
+			Label->SetCollisionEnabled(
+				ECollisionEnabled::NoCollision);
+			Label->SetIsReplicated(false);
+			Label->SetText(ResolveTopDownBuildingName(Building));
+			TopDownBuildingLabels.Add(Building, Label);
+		}
+
+		FBox BuildingBounds(EForceInit::ForceInit);
+		TInlineComponentArray<UPrimitiveComponent*> Components(Building);
+		for (UPrimitiveComponent* Component : Components)
+		{
+			if (IsValid(Component) &&
+				Component != Label &&
+				!Component->IsA<UTextRenderComponent>())
+			{
+				BuildingBounds += Component->Bounds.GetBox();
+			}
+		}
+		const FVector BoundsOrigin =
+			BuildingBounds.IsValid
+				? BuildingBounds.GetCenter()
+				: Building->GetActorLocation();
+		const FVector BoundsExtent =
+			BuildingBounds.IsValid
+				? BuildingBounds.GetExtent()
+				: FVector(0.0f, 0.0f, 300.0f);
+		const FVector LabelLocation =
+			BoundsOrigin +
+			FVector(
+				0.0f,
+				0.0f,
+				BoundsExtent.Z + 350.0f);
+		Label->SetWorldLocation(LabelLocation);
+		Label->SetUsingAbsoluteRotation(true);
+		const FVector FacingCamera =
+			-BuildingCameraActor->GetActorForwardVector();
+		const FVector CameraRight =
+			BuildingCameraActor->GetActorRightVector();
+		Label->SetWorldRotation(
+			FRotationMatrix::MakeFromXY(
+				FacingCamera,
+				-CameraRight).Rotator());
+		Label->SetVisibility(true);
+	}
+}
+
+void ABotanicusPlayerController::HideTopDownBuildingLabels()
+{
+	for (const TPair<
+			 TWeakObjectPtr<AActor>,
+			 TWeakObjectPtr<UTextRenderComponent>>& Pair :
+		 TopDownBuildingLabels)
+	{
+		if (Pair.Value.IsValid())
+		{
+			Pair.Value->SetVisibility(false);
+		}
+	}
+}
+
+float ABotanicusPlayerController::
+	GetTopDownBuildingViewDistance() const
+{
+	if (!IsValid(BuildingCameraActor))
+	{
+		return 0.0f;
+	}
+	if (LocalBuildingGroup.Num() > 0 &&
+		bBuildingCameraOrbitInitialized)
+	{
+		return BuildingCameraOrbitDistance;
+	}
+
+	const FVector CameraLocation =
+		BuildingCameraActor->GetActorLocation();
+	float GroundHeight = 0.0f;
+	if (!FindLandscapeHeight(
+			FVector2D(CameraLocation.X, CameraLocation.Y),
+			GroundHeight))
+	{
+		if (const APawn* ControlledPawn = GetPawn())
+		{
+			GroundHeight = ControlledPawn->GetActorLocation().Z;
+		}
+	}
+	return FMath::Abs(CameraLocation.Z - GroundHeight);
+}
+
+FText ABotanicusPlayerController::ResolveTopDownBuildingName(
+	AActor* BuildingActor) const
+{
+	const UGameInstance* GameInstance = GetGameInstance();
+	const UBotanicusBuildingCatalogSubsystem* Catalog =
+		GameInstance
+			? GameInstance->GetSubsystem<
+				UBotanicusBuildingCatalogSubsystem>()
+			: nullptr;
+	if (Catalog && IsValid(BuildingActor))
+	{
+		for (const FBotanicusBuildingDefinition& Definition :
+			 Catalog->GetAllBuildings())
+		{
+			UClass* BuildingClass =
+				Definition.FallbackPrefabClass.LoadSynchronous();
+			if (BuildingClass &&
+				BuildingActor->IsA(BuildingClass))
+			{
+				return Definition.DisplayName;
+			}
+		}
+	}
+	return IsValid(BuildingActor)
+		? BuildingActor->GetClass()->GetDisplayNameText()
+		: FText::GetEmpty();
 }
 
 void ABotanicusPlayerController::AdvanceEbsViewMode()
@@ -2539,28 +2850,48 @@ void ABotanicusPlayerController::MoveBuildingCameraForward(float AxisValue)
 {
 	if (!bBuildingTopDownViewActive ||
 		!IsValid(BuildingCameraActor) ||
+		bBuildingCameraOrbitActive ||
 		FMath::IsNearlyZero(AxisValue))
 	{
 		return;
 	}
 
 	const float DeltaSeconds = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.0f;
+	FVector CameraForward =
+		BuildingCameraActor->GetActorForwardVector();
+	CameraForward.Z = 0.0f;
+	if (!CameraForward.Normalize())
+	{
+		// The initial view looks straight down, so its projected forward
+		// vector has no length. Preserve the historical world-forward axis.
+		CameraForward = FVector::ForwardVector;
+	}
 	BuildingCameraActor->AddActorWorldOffset(
-		FVector(AxisValue * BuildingCameraPanSpeed * DeltaSeconds, 0.0f, 0.0f));
+		CameraForward *
+			(AxisValue * BuildingCameraPanSpeed * DeltaSeconds));
 }
 
 void ABotanicusPlayerController::MoveBuildingCameraRight(float AxisValue)
 {
 	if (!bBuildingTopDownViewActive ||
 		!IsValid(BuildingCameraActor) ||
+		bBuildingCameraOrbitActive ||
 		FMath::IsNearlyZero(AxisValue))
 	{
 		return;
 	}
 
 	const float DeltaSeconds = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.0f;
+	FVector CameraRight =
+		BuildingCameraActor->GetActorRightVector();
+	CameraRight.Z = 0.0f;
+	if (!CameraRight.Normalize())
+	{
+		CameraRight = FVector::RightVector;
+	}
 	BuildingCameraActor->AddActorWorldOffset(
-		FVector(0.0f, AxisValue * BuildingCameraPanSpeed * DeltaSeconds, 0.0f));
+		CameraRight *
+			(AxisValue * BuildingCameraPanSpeed * DeltaSeconds));
 }
 
 void ABotanicusPlayerController::ZoomBuildingCamera(float Direction)
@@ -2572,6 +2903,30 @@ void ABotanicusPlayerController::ZoomBuildingCamera(float Direction)
 		return;
 	}
 
+	if (LocalBuildingGroup.Num() > 0)
+	{
+		if (!bBuildingCameraOrbitInitialized)
+		{
+			InitializeBuildingCameraOrbitFromCurrentView();
+		}
+		const float MinimumDistance =
+			FMath::Min(
+				MinimumBuildingCameraHeight,
+				MaximumBuildingCameraHeight);
+		const float MaximumDistance =
+			FMath::Max(
+				MinimumBuildingCameraHeight,
+				MaximumBuildingCameraHeight);
+		BuildingCameraOrbitDistance = FMath::Clamp(
+			BuildingCameraOrbitDistance -
+				Direction * BuildingCameraZoomStep,
+			MinimumDistance,
+			MaximumDistance);
+		ApplyBuildingCameraOrbit();
+		return;
+	}
+
+	bBuildingCameraOrbitInitialized = false;
 	FVector CameraLocation = BuildingCameraActor->GetActorLocation();
 	float GroundHeight = 0.0f;
 	if (!FindLandscapeHeight(
@@ -2598,9 +2953,254 @@ void ABotanicusPlayerController::ZoomBuildingCamera(float Direction)
 	BuildingCameraActor->SetActorLocation(CameraLocation);
 }
 
+void ABotanicusPlayerController::BeginBuildingCameraOrbit()
+{
+	if (!bBuildingTopDownViewActive ||
+		LocalBuildingGroup.Num() == 0 ||
+		!IsValid(BuildingCameraActor) ||
+		bBuildingCameraOrbitActive)
+	{
+		return;
+	}
+
+	GetMousePosition(
+		BuildingOrbitSavedMouseX,
+		BuildingOrbitSavedMouseY);
+	InitializeBuildingCameraOrbitFromCurrentView();
+	bBuildingCameraOrbitActive = true;
+	bShowMouseCursor = false;
+	bEnableClickEvents = false;
+	bEnableMouseOverEvents = false;
+	SetInputMode(FInputModeGameOnly());
+}
+
+void ABotanicusPlayerController::EndBuildingCameraOrbit()
+{
+	if (!bBuildingCameraOrbitActive)
+	{
+		return;
+	}
+
+	bBuildingCameraOrbitActive = false;
+	bShowMouseCursor = true;
+	bEnableClickEvents = true;
+	bEnableMouseOverEvents = true;
+	FInputModeGameAndUI InputMode;
+	InputMode.SetLockMouseToViewportBehavior(
+		EMouseLockMode::DoNotLock);
+	InputMode.SetHideCursorDuringCapture(false);
+	SetInputMode(InputMode);
+	SetMouseLocation(
+		FMath::RoundToInt(BuildingOrbitSavedMouseX),
+		FMath::RoundToInt(BuildingOrbitSavedMouseY));
+}
+
+void ABotanicusPlayerController::UpdateBuildingCameraOrbit()
+{
+	if (!bBuildingCameraOrbitActive ||
+		!IsValid(BuildingCameraActor) ||
+		LocalBuildingGroup.Num() == 0)
+	{
+		return;
+	}
+
+	float MouseDeltaX = 0.0f;
+	float MouseDeltaY = 0.0f;
+	GetInputMouseDelta(MouseDeltaX, MouseDeltaY);
+	if (FMath::IsNearlyZero(MouseDeltaX) &&
+		FMath::IsNearlyZero(MouseDeltaY))
+	{
+		return;
+	}
+
+	BuildingCameraOrbitYaw =
+		FMath::UnwindDegrees(
+			BuildingCameraOrbitYaw +
+				MouseDeltaX * BuildingCameraOrbitSensitivity);
+	BuildingCameraOrbitPitch = FMath::Clamp(
+		BuildingCameraOrbitPitch +
+			MouseDeltaY * BuildingCameraOrbitSensitivity,
+		MinimumBuildingCameraOrbitPitch,
+		MaximumBuildingCameraOrbitPitch);
+	ApplyBuildingCameraOrbit();
+}
+
+void ABotanicusPlayerController::
+	InitializeBuildingCameraOrbitFromCurrentView()
+{
+	if (!IsValid(BuildingCameraActor) ||
+		LocalBuildingGroup.Num() == 0)
+	{
+		return;
+	}
+
+	FVector Offset =
+		BuildingCameraActor->GetActorLocation() -
+		LocalBuildingPivot;
+	const float MinimumDistance =
+		FMath::Min(
+			MinimumBuildingCameraHeight,
+			MaximumBuildingCameraHeight);
+	BuildingCameraOrbitDistance =
+		FMath::Max(MinimumDistance, Offset.Size());
+	if (Offset.IsNearlyZero())
+	{
+		Offset = FVector(0.0f, 0.0f, BuildingCameraOrbitDistance);
+	}
+	BuildingCameraOrbitYaw =
+		FMath::RadiansToDegrees(
+			FMath::Atan2(Offset.Y, Offset.X));
+	BuildingCameraOrbitPitch = FMath::Clamp(
+		FMath::RadiansToDegrees(
+			FMath::Asin(
+				FMath::Clamp(
+					Offset.Z / BuildingCameraOrbitDistance,
+					-1.0f,
+					1.0f))),
+		MinimumBuildingCameraOrbitPitch,
+		MaximumBuildingCameraOrbitPitch);
+	bBuildingCameraOrbitInitialized = true;
+}
+
+void ABotanicusPlayerController::ApplyBuildingCameraOrbit()
+{
+	if (!bBuildingCameraOrbitInitialized ||
+		!IsValid(BuildingCameraActor) ||
+		LocalBuildingGroup.Num() == 0)
+	{
+		return;
+	}
+
+	const float YawRadians =
+		FMath::DegreesToRadians(BuildingCameraOrbitYaw);
+	const float PitchRadians =
+		FMath::DegreesToRadians(BuildingCameraOrbitPitch);
+	const float HorizontalDistance =
+		BuildingCameraOrbitDistance * FMath::Cos(PitchRadians);
+	const FVector Offset(
+		HorizontalDistance * FMath::Cos(YawRadians),
+		HorizontalDistance * FMath::Sin(YawRadians),
+		BuildingCameraOrbitDistance * FMath::Sin(PitchRadians));
+	const FVector CameraLocation =
+		LocalBuildingPivot + Offset;
+	BuildingCameraActor->SetActorLocationAndRotation(
+		CameraLocation,
+		(LocalBuildingPivot - CameraLocation).Rotation());
+}
+
+void ABotanicusPlayerController::BeginBuildingCameraFreeLook()
+{
+	if (!bBuildingTopDownViewActive ||
+		LocalBuildingGroup.Num() > 0 ||
+		!IsValid(BuildingCameraActor) ||
+		bBuildingCameraFreeLookActive)
+	{
+		return;
+	}
+
+	GetMousePosition(
+		BuildingOrbitSavedMouseX,
+		BuildingOrbitSavedMouseY);
+	bBuildingCameraFreeLookActive = true;
+	bShowMouseCursor = false;
+	bEnableClickEvents = false;
+	bEnableMouseOverEvents = false;
+	SetInputMode(FInputModeGameOnly());
+}
+
+void ABotanicusPlayerController::EndBuildingCameraFreeLook()
+{
+	if (!bBuildingCameraFreeLookActive)
+	{
+		return;
+	}
+
+	bBuildingCameraFreeLookActive = false;
+	bShowMouseCursor = true;
+	bEnableClickEvents = true;
+	bEnableMouseOverEvents = true;
+	FInputModeGameAndUI InputMode;
+	InputMode.SetLockMouseToViewportBehavior(
+		EMouseLockMode::DoNotLock);
+	InputMode.SetHideCursorDuringCapture(false);
+	SetInputMode(InputMode);
+	SetMouseLocation(
+		FMath::RoundToInt(BuildingOrbitSavedMouseX),
+		FMath::RoundToInt(BuildingOrbitSavedMouseY));
+}
+
+void ABotanicusPlayerController::UpdateBuildingCameraFreeLook()
+{
+	if (!bBuildingCameraFreeLookActive ||
+		!IsValid(BuildingCameraActor) ||
+		LocalBuildingGroup.Num() > 0)
+	{
+		return;
+	}
+
+	float MouseDeltaX = 0.0f;
+	float MouseDeltaY = 0.0f;
+	GetInputMouseDelta(MouseDeltaX, MouseDeltaY);
+	if (FMath::IsNearlyZero(MouseDeltaX) &&
+		FMath::IsNearlyZero(MouseDeltaY))
+	{
+		return;
+	}
+
+	FRotator CameraRotation =
+		BuildingCameraActor->GetActorRotation();
+	CameraRotation.Yaw = FMath::UnwindDegrees(
+		CameraRotation.Yaw +
+			MouseDeltaX * BuildingCameraOrbitSensitivity);
+	CameraRotation.Pitch = FMath::Clamp(
+		CameraRotation.Pitch +
+			MouseDeltaY * BuildingCameraOrbitSensitivity,
+		MinimumBuildingCameraFreeLookPitch,
+		MaximumBuildingCameraFreeLookPitch);
+	CameraRotation.Roll = 0.0f;
+	BuildingCameraActor->SetActorRotation(CameraRotation);
+}
+
 void ABotanicusPlayerController::BeginPathPlacement()
 {
 	BeginPathPlacementInternal(EBotanicusPathType::Standard);
+}
+
+void ABotanicusPlayerController::BeginDoorEditing()
+{
+	if (!bBuildingTopDownViewActive ||
+		!IsLocalPlayerController())
+	{
+		return;
+	}
+	if (bDoorEditSelectionActive ||
+		bCommunicationDoorPlacementActive)
+	{
+		CancelDoorEditing();
+		return;
+	}
+
+	CancelPathPlacement();
+	CancelPathDeletion();
+	CancelVisitorZonePlacement();
+	if (LocalBuildingGroup.Num() > 0)
+	{
+		CancelBuildingGroupMove();
+	}
+	bDoorEditSelectionActive = true;
+	RefreshTopDownToolbar();
+	ClientMessage(
+		TEXT("PORTES : cliquez sur un bâtiment pour ajouter une porte, ou sur une porte existante pour la déplacer."));
+}
+
+void ABotanicusPlayerController::CancelDoorEditing()
+{
+	bDoorEditSelectionActive = false;
+	if (bCommunicationDoorPlacementActive)
+	{
+		ServerCancelCommunicationDoor();
+	}
+	RefreshTopDownToolbar();
 }
 
 void ABotanicusPlayerController::BeginVisitorRoutePlacement()
@@ -2618,6 +3218,7 @@ void ABotanicusPlayerController::BeginPathPlacementInternal(
 
 	CancelPathDeletion();
 	CancelVisitorZonePlacement();
+	CancelDoorEditing();
 	if (LocalBuildingGroup.Num() > 0)
 	{
 		CancelBuildingGroupMove();
@@ -2731,6 +3332,7 @@ void ABotanicusPlayerController::BeginVisitorZonePlacement(
 
 	CancelPathPlacement();
 	CancelPathDeletion();
+	CancelDoorEditing();
 	PendingVisitorZoneType = ZoneType;
 	RefreshTopDownToolbar();
 	if (ZoneType == 3)
@@ -2802,6 +3404,7 @@ void ABotanicusPlayerController::BeginPathDeletion()
 	{
 		return;
 	}
+	CancelDoorEditing();
 
 	if (bPathDeletionActive)
 	{
@@ -7046,7 +7649,9 @@ void ABotanicusPlayerController::RefreshTopDownToolbar()
 			bPathDeletionActive,
 			PendingPathType ==
 				EBotanicusPathType::VisitorRoute,
-			PendingVisitorZoneType);
+			PendingVisitorZoneType,
+			bDoorEditSelectionActive ||
+				bCommunicationDoorPlacementActive);
 	}
 }
 
@@ -7394,7 +7999,8 @@ void ABotanicusPlayerController::UpdateBuildingGroupPreview(float DeltaTime)
 {
 	if (!IsLocalPlayerController() ||
 		!bBuildingTopDownViewActive ||
-		LocalBuildingGroup.Num() == 0)
+		LocalBuildingGroup.Num() == 0 ||
+		bBuildingCameraOrbitActive)
 	{
 		return;
 	}
@@ -7682,8 +8288,11 @@ bool ABotanicusPlayerController::TraceTopDownCursor(
 		{
 			if (RoofComponent.IsValid())
 			{
-				QueryParams.AddIgnoredActor(
-					RoofComponent->GetOwner());
+				// A native catalogue building owns its floor, walls and roof
+				// in one actor. Ignoring the owner would make the complete
+				// building unselectable while its roof is hidden.
+				QueryParams.AddIgnoredComponent(
+					RoofComponent.Get());
 			}
 		}
 	}
@@ -7866,7 +8475,10 @@ void ABotanicusPlayerController::ServerPurchaseCatalogBuilding_Implementation(
 	// Older versions of the test map spawn their EBS references at runtime
 	// and therefore cannot carry saved actor tags. Keep those maps usable by
 	// resolving distinct complete groups in proximity order.
-	if (!TemplateSeed)
+	const bool bSupportsLegacyBuildingTemplate =
+		BuildingKey == TEXT("GreenhouseCompact") ||
+		BuildingKey == TEXT("GreenhouseWorkshop");
+	if (!TemplateSeed && bSupportsLegacyBuildingTemplate)
 	{
 		TSet<TWeakObjectPtr<AActor>> VisitedTemplateActors;
 		TArray<TPair<AActor*, float>> LegacyTemplateSeeds;
@@ -10099,13 +10711,95 @@ void ABotanicusPlayerController::
 }
 
 void ABotanicusPlayerController::
+	ServerBeginManualDoorPlacement_Implementation(AActor* SelectedActor)
+{
+	if (!IsValid(SelectedActor) ||
+		(!SelectedActor->IsA<ABotanicusCommunicationDoorActor>() &&
+		 !IsEbsBuildingActor(SelectedActor)))
+	{
+		ClientMessage(TEXT("Sélection de porte invalide."));
+		return;
+	}
+
+	ServerManualDoorToMove =
+		Cast<ABotanicusCommunicationDoorActor>(SelectedActor);
+	bServerManualDoorPlacement = true;
+	if (!BuildManualDoorCandidates(SelectedActor))
+	{
+		bServerManualDoorPlacement = false;
+		ServerManualDoorToMove = nullptr;
+		ClientMessage(
+			TEXT("Aucun emplacement de porte compatible trouvé."));
+		ClientEndCommunicationDoorPlacement(false);
+		return;
+	}
+	ClientBeginCommunicationDoorPlacement(
+		ServerDoorCandidateLocations,
+		ServerDoorCandidateYaws);
+}
+
+void ABotanicusPlayerController::
 	ServerConfirmCommunicationDoor_Implementation(int32 CandidateIndex)
 {
 	UWorld* World = GetWorld();
 	if (!World ||
 		!ServerDoorCandidateLocations.IsValidIndex(CandidateIndex) ||
-		!ServerDoorCandidateYaws.IsValidIndex(CandidateIndex) ||
-		!ServerDoorCandidatePurchasedWalls.IsValidIndex(CandidateIndex) ||
+		!ServerDoorCandidateYaws.IsValidIndex(CandidateIndex))
+	{
+		return;
+	}
+
+	if (bServerManualDoorPlacement)
+	{
+		ABotanicusCommunicationDoorActor* Door =
+			ServerManualDoorToMove.Get();
+		if (!IsValid(Door))
+		{
+			FActorSpawnParameters SpawnParameters;
+			SpawnParameters.SpawnCollisionHandlingOverride =
+				ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			Door = World->SpawnActor<ABotanicusCommunicationDoorActor>(
+				FVector(ServerDoorCandidateLocations[CandidateIndex]),
+				FRotator(
+					0.0f,
+					ServerDoorCandidateYaws[CandidateIndex],
+					0.0f),
+				SpawnParameters);
+			if (Door)
+			{
+				ConfigurePurchasedActorForNetworking(Door);
+			}
+		}
+		else
+		{
+			Door->SetActorLocationAndRotation(
+				FVector(ServerDoorCandidateLocations[CandidateIndex]),
+				FRotator(
+					0.0f,
+					ServerDoorCandidateYaws[CandidateIndex],
+					0.0f),
+				false,
+				nullptr,
+				ETeleportType::TeleportPhysics);
+			Door->ForceNetUpdate();
+		}
+		if (!Door)
+		{
+			return;
+		}
+
+		ServerDoorCandidatePurchasedWalls.Reset();
+		ServerDoorCandidateExistingWalls.Reset();
+		ServerDoorCandidateLocations.Reset();
+		ServerDoorCandidateYaws.Reset();
+		ServerManualDoorToMove = nullptr;
+		bServerManualDoorPlacement = false;
+		ScheduleSharedStateAutosave(this);
+		ClientEndCommunicationDoorPlacement(true);
+		return;
+	}
+
+	if (!ServerDoorCandidatePurchasedWalls.IsValidIndex(CandidateIndex) ||
 		!ServerDoorCandidateExistingWalls.IsValidIndex(CandidateIndex))
 	{
 		return;
@@ -10163,6 +10857,8 @@ void ABotanicusPlayerController::
 	ServerDoorCandidateExistingWalls.Reset();
 	ServerDoorCandidateLocations.Reset();
 	ServerDoorCandidateYaws.Reset();
+	ServerManualDoorToMove = nullptr;
+	bServerManualDoorPlacement = false;
 	ClientEndCommunicationDoorPlacement(true);
 
 	UE_LOG(
@@ -10179,6 +10875,8 @@ void ABotanicusPlayerController::
 	ServerDoorCandidateExistingWalls.Reset();
 	ServerDoorCandidateLocations.Reset();
 	ServerDoorCandidateYaws.Reset();
+	ServerManualDoorToMove = nullptr;
+	bServerManualDoorPlacement = false;
 	ClientEndCommunicationDoorPlacement(false);
 }
 
@@ -10396,17 +11094,22 @@ void ABotanicusPlayerController::ClientBeginBuildingGroupMove_Implementation(
 			? GroupPivot.Z - InitialLandscapeHeight
 			: 0.0f;
 	BuildingPreviewUpdateAccumulator = 0.0f;
+	bBuildingCameraOrbitInitialized = false;
 	bLocalBuildingPlacementValid = true;
 	SetBuildingGroupHighlighted(true);
 	UpdateBuildingGroupPlacementVisual(true);
 
 	ClientMessage(
-		TEXT("Bâtiment sélectionné : souris pour déplacer, molette pour tourner, clic/E pour confirmer, clic droit/Échap pour annuler."));
+		TEXT("Bâtiment sélectionné : souris pour déplacer, molette pour tourner, Ctrl + molette pour zoomer, Maj gauche + souris pour orienter la caméra, clic/E pour confirmer."));
 }
 
 void ABotanicusPlayerController::ClientEndBuildingGroupMove_Implementation(
 	bool bConfirmed)
 {
+	if (bBuildingCameraOrbitActive)
+	{
+		EndBuildingCameraOrbit();
+	}
 	SetBuildingGroupHighlighted(false);
 	LocalBuildingGroup.Reset();
 	LocalBuildingOriginalTransforms.Reset();
@@ -10415,6 +11118,7 @@ void ABotanicusPlayerController::ClientEndBuildingGroupMove_Implementation(
 	LocalBuildingYaw = 0.0f;
 	LocalBuildingGroundOffset = 0.0f;
 	BuildingPreviewUpdateAccumulator = 0.0f;
+	bBuildingCameraOrbitInitialized = false;
 	bLocalBuildingPlacementValid = true;
 
 	ClientMessage(
@@ -10473,6 +11177,8 @@ void ABotanicusPlayerController::
 	LocalDoorCandidateYaws = CandidateYaws;
 	LocalCommunicationDoorCandidateIndex = 0;
 	bCommunicationDoorPlacementActive = true;
+	bDoorEditSelectionActive = false;
+	RefreshTopDownToolbar();
 
 	if (!IsValid(CommunicationDoorPreviewActor))
 	{
@@ -10494,13 +11200,14 @@ void ABotanicusPlayerController::
 
 	ClientMessage(
 		TEXT(
-			"Choisissez la porte de communication avec la souris, puis clic gauche pour confirmer. Clic droit/Echap pour annuler."));
+			"Choisissez un emplacement avec la souris, puis clic gauche pour confirmer. Clic droit/Echap pour annuler."));
 }
 
 void ABotanicusPlayerController::
 	ClientEndCommunicationDoorPlacement_Implementation(bool bCreated)
 {
 	bCommunicationDoorPlacementActive = false;
+	bDoorEditSelectionActive = false;
 	LocalDoorCandidateLocations.Reset();
 	LocalDoorCandidateYaws.Reset();
 	LocalCommunicationDoorCandidateIndex = INDEX_NONE;
@@ -10509,11 +11216,12 @@ void ABotanicusPlayerController::
 		CommunicationDoorPreviewActor->Destroy();
 		CommunicationDoorPreviewActor = nullptr;
 	}
+	RefreshTopDownToolbar();
 
 	ClientMessage(
 		bCreated
-			? TEXT("Porte de communication créée.")
-			: TEXT("Création de la porte de communication annulée."));
+			? TEXT("Porte enregistrée.")
+			: TEXT("Modification de la porte annulée."));
 }
 
 void ABotanicusPlayerController::
@@ -11552,6 +12260,152 @@ bool ABotanicusPlayerController::BuildCommunicationDoorCandidates(
 		Display,
 		TEXT(
 			"Detected %d communication-door candidate wall pair(s)."),
+		ServerDoorCandidateLocations.Num());
+	return ServerDoorCandidateLocations.Num() > 0;
+}
+
+bool ABotanicusPlayerController::BuildManualDoorCandidates(
+	AActor* SelectedActor)
+{
+	check(HasAuthority());
+
+	ServerDoorCandidatePurchasedWalls.Reset();
+	ServerDoorCandidateExistingWalls.Reset();
+	ServerDoorCandidateLocations.Reset();
+	ServerDoorCandidateYaws.Reset();
+
+	UWorld* World = GetWorld();
+	if (!World || !IsValid(SelectedActor))
+	{
+		return false;
+	}
+
+	const bool bMovingExistingDoor =
+		SelectedActor->IsA<ABotanicusCommunicationDoorActor>();
+	TSet<AActor*> CandidateBuildings;
+	if (bMovingExistingDoor)
+	{
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			if (IsEbsBuildingActor(*It))
+			{
+				CandidateBuildings.Add(*It);
+			}
+		}
+	}
+	else if (SelectedActor->IsA<ABotanicusCatalogBuildingActor>())
+	{
+		CandidateBuildings.Add(SelectedActor);
+	}
+	else
+	{
+		for (AActor* Actor :
+			 BuildCompleteBuildingGroup(SelectedActor))
+		{
+			if (IsValid(Actor))
+			{
+				CandidateBuildings.Add(Actor);
+			}
+		}
+	}
+
+	const auto IsOccupied =
+		[this, World](const FVector& Location)
+		{
+			for (TActorIterator<ABotanicusCommunicationDoorActor> It(
+					 World);
+				 It;
+				 ++It)
+			{
+				if (*It != ServerManualDoorToMove.Get() &&
+					FVector::DistSquared2D(
+						It->GetActorLocation(),
+						Location) < FMath::Square(140.0f))
+				{
+					return true;
+				}
+			}
+			return false;
+		};
+	const auto AddCandidate =
+		[this, &IsOccupied](
+			const FVector& Origin,
+			const FVector& Extent)
+		{
+			FVector Location = Origin;
+			Location.Z = Origin.Z - Extent.Z;
+			const bool bNormalIsX = Extent.X <= Extent.Y;
+			if (IsOccupied(Location))
+			{
+				return;
+			}
+			for (const FVector_NetQuantize10& Existing :
+				 ServerDoorCandidateLocations)
+			{
+				if (FVector::DistSquared2D(
+						FVector(Existing),
+						Location) < FMath::Square(100.0f))
+				{
+					return;
+				}
+			}
+			ServerDoorCandidateLocations.Add(
+				FVector_NetQuantize10(Location));
+			ServerDoorCandidateYaws.Add(
+				bNormalIsX ? 0.0f : 90.0f);
+		};
+
+	for (AActor* Building : CandidateBuildings)
+	{
+		if (!IsValid(Building))
+		{
+			continue;
+		}
+		if (Building->IsA<ABotanicusCatalogBuildingActor>())
+		{
+			FBox FrontOpeningBounds(EForceInit::ForceInit);
+			TInlineComponentArray<UPrimitiveComponent*> Components(
+				Building);
+			for (UPrimitiveComponent* Component : Components)
+			{
+				if (!IsValid(Component) ||
+					!Component->GetName().Contains(
+						TEXT("Wall"),
+						ESearchCase::IgnoreCase))
+				{
+					continue;
+				}
+				if (Component->GetName().Contains(
+						TEXT("FrontWall"),
+						ESearchCase::IgnoreCase))
+				{
+					FrontOpeningBounds += Component->Bounds.GetBox();
+					continue;
+				}
+				AddCandidate(
+					Component->Bounds.Origin,
+					Component->Bounds.BoxExtent);
+			}
+			if (FrontOpeningBounds.IsValid)
+			{
+				AddCandidate(
+					FrontOpeningBounds.GetCenter(),
+					FrontOpeningBounds.GetExtent());
+			}
+		}
+		else if (IsPlainBuildingWall(Building))
+		{
+			FVector Origin;
+			FVector Extent;
+			Building->GetActorBounds(true, Origin, Extent);
+			AddCandidate(Origin, Extent);
+		}
+	}
+
+	UE_LOG(
+		LogBotanicus,
+		Display,
+		TEXT("Manual door editing found %d candidate(s)."),
 		ServerDoorCandidateLocations.Num());
 	return ServerDoorCandidateLocations.Num() > 0;
 }

@@ -5,12 +5,15 @@
 #include "Botanicus.h"
 #include "BotanicusCharacter.h"
 #include "Camera/PlayerCameraManager.h"
+#include "Building/BotanicusElementalGreenhouseActor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/StaticMesh.h"
+#include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "Growing/BotanicusPlantSubsystem.h"
+#include "Growing/BotanicusMultiPlantPotActor.h"
 #include "Growing/BotanicusWateringCanActor.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
@@ -138,6 +141,18 @@ void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 		return;
 	}
 
+	const bool bElementalChanged =
+		ProcessElementalInteractions(*Definition);
+	if (bElementalDead)
+	{
+		if (bElementalChanged || bPrimaryUseChanged)
+		{
+			RefreshVisuals();
+			ForceNetUpdate();
+		}
+		return;
+	}
+
 	const float PreviousWater = WaterLevel;
 	const float PreviousGrowth = GrowthProgress;
 	const float PreviousCareScore = CareScore;
@@ -147,7 +162,8 @@ void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 				DeltaSeconds,
 		0.0f,
 		1.0f);
-	if (WaterLevel >= Definition->MinimumHealthyWater &&
+	if (IsInCompatibleGreenhouse(*Definition) &&
+		WaterLevel >= Definition->MinimumHealthyWater &&
 		WaterLevel <= Definition->MaximumHealthyWater &&
 		GrowthProgress < 1.0f)
 	{
@@ -187,7 +203,8 @@ void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 	if (!FMath::IsNearlyEqual(PreviousWater, WaterLevel, 0.0001f) ||
 		!FMath::IsNearlyEqual(PreviousGrowth, GrowthProgress, 0.0001f) ||
 		!FMath::IsNearlyEqual(PreviousCareScore, CareScore, 0.0001f) ||
-		bPrimaryUseChanged)
+		bPrimaryUseChanged ||
+		bElementalChanged)
 	{
 		RefreshVisuals();
 		ForceNetUpdate();
@@ -204,6 +221,7 @@ void ABotanicusPlantPotActor::GetLifetimeReplicatedProps(
 	DOREPLIFETIME(ABotanicusPlantPotActor, GrowthProgress);
 	DOREPLIFETIME(ABotanicusPlantPotActor, CareScore);
 	DOREPLIFETIME(ABotanicusPlantPotActor, WateringCount);
+	DOREPLIFETIME(ABotanicusPlantPotActor, bElementalDead);
 	DOREPLIFETIME(ABotanicusPlantPotActor, SoilFillProgress);
 	DOREPLIFETIME(ABotanicusPlantPotActor, bWateringActive);
 	DOREPLIFETIME(ABotanicusPlantPotActor, HarvestProgress);
@@ -370,6 +388,13 @@ void ABotanicusPlantPotActor::BeginPrimaryUse(AActor* Interactor)
 		PlantKey.IsNone() ? TEXT("none") : *PlantKey.ToString(),
 		WaterLevel,
 		WateringCount);
+	if (bElementalDead)
+	{
+		SendInteractorMessage(
+			Interactor,
+			TEXT("Cette plante est morte a cause d'une reaction elementaire."));
+		return;
+	}
 
 	if (!bHasSoil)
 	{
@@ -405,6 +430,7 @@ void ABotanicusPlantPotActor::BeginPrimaryUse(AActor* Interactor)
 			return;
 		}
 		PlantKey = Definition->PlantKey;
+		bElementalDead = false;
 		GrowthProgress = 0.02f;
 		CareScore = 0.01f;
 		SendInteractorMessage(
@@ -628,6 +654,7 @@ bool ABotanicusPlantPotActor::UpdatePrimaryUse(float DeltaSeconds)
 			GrowthProgress = 0.0f;
 			CareScore = 0.0f;
 			WateringCount = 0;
+			bElementalDead = false;
 			HarvestProgress = 0.0f;
 			ActivePrimaryUser.Reset();
 			PrimaryUseMode = EPrimaryUseMode::None;
@@ -732,7 +759,8 @@ void ABotanicusPlantPotActor::RestoreGrowingState(
 	FName InPlantKey,
 	float InWaterLevel,
 	float InGrowthProgress,
-	float InCareScore)
+	float InCareScore,
+	bool bInElementalDead)
 {
 	if (!HasAuthority())
 	{
@@ -743,8 +771,99 @@ void ABotanicusPlantPotActor::RestoreGrowingState(
 	WaterLevel = FMath::Clamp(InWaterLevel, 0.0f, 1.0f);
 	GrowthProgress = FMath::Clamp(InGrowthProgress, 0.0f, 1.0f);
 	CareScore = FMath::Clamp(InCareScore, 0.0f, 1.0f);
+	bElementalDead = bInElementalDead && !PlantKey.IsNone();
 	RefreshVisuals();
 	ForceNetUpdate();
+}
+
+void ABotanicusPlantPotActor::ApplyElementalInfluence(
+	EBotanicusPlantElement SourceElement,
+	const FVector& SourceLocation)
+{
+	if (!HasAuthority() ||
+		bElementalDead ||
+		PlantKey.IsNone())
+	{
+		return;
+	}
+	const FBotanicusPlantDefinition* Definition =
+		GetPlantDefinition();
+	if (!Definition ||
+		FVector::DistSquared(
+			GetActorLocation(),
+			SourceLocation) >
+			FMath::Square(500.0f))
+	{
+		return;
+	}
+	const bool bBurnedByFire =
+		SourceElement == EBotanicusPlantElement::Fire &&
+		Definition->Element == EBotanicusPlantElement::Normal;
+	const bool bExtinguishedByWater =
+		SourceElement == EBotanicusPlantElement::Water &&
+		Definition->Element == EBotanicusPlantElement::Fire;
+	if (bBurnedByFire || bExtinguishedByWater)
+	{
+		bElementalDead = true;
+		EndPrimaryUse(ActivePrimaryUser.Get());
+		RefreshVisuals();
+		ForceNetUpdate();
+	}
+}
+
+bool ABotanicusPlantPotActor::IsInCompatibleGreenhouse(
+	const FBotanicusPlantDefinition& Definition) const
+{
+	if (Definition.Element == EBotanicusPlantElement::Normal)
+	{
+		return true;
+	}
+	return ABotanicusElementalGreenhouseActor::
+		FindGreenhouseElementAtLocation(
+			GetWorld(),
+			GetActorLocation()) == Definition.Element;
+}
+
+bool ABotanicusPlantPotActor::ProcessElementalInteractions(
+	const FBotanicusPlantDefinition& Definition)
+{
+	if (bElementalDead ||
+		(Definition.Element != EBotanicusPlantElement::Fire &&
+		 Definition.Element != EBotanicusPlantElement::Water))
+	{
+		return false;
+	}
+
+	const FVector SourceLocation = GetActorLocation();
+	const float Radius = FMath::Max(
+		0.0f,
+		Definition.ElementalInteractionRadius);
+	for (TActorIterator<ABotanicusPlantPotActor> It(GetWorld());
+		 It;
+		 ++It)
+	{
+		if (*It == this ||
+			FVector::DistSquared(
+				It->GetActorLocation(),
+				SourceLocation) > FMath::Square(Radius))
+		{
+			continue;
+		}
+		if (ABotanicusMultiPlantPotActor* MultiPlanter =
+			Cast<ABotanicusMultiPlantPotActor>(*It))
+		{
+			MultiPlanter->ApplyElementalInfluence(
+				Definition.Element,
+				SourceLocation);
+		}
+		else
+		{
+			It->ApplyElementalInfluence(
+				Definition.Element,
+				SourceLocation);
+		}
+	}
+	return false;
 }
 
 const FBotanicusPlantDefinition*
@@ -976,12 +1095,27 @@ void ABotanicusPlantPotActor::RefreshVisuals()
 			{
 				FoliageMaterial->SetVectorParameterValue(
 					TEXT("Color"),
-					Definition->MatureColor);
+					bElementalDead
+						? FLinearColor(0.03f, 0.03f, 0.03f, 1.0f)
+						: Definition->MatureColor);
 			}
 		}
 	}
 	if (StatusText)
 	{
+		FString EnvironmentStatus = TEXT("-");
+		if (Definition &&
+			Definition->Element != EBotanicusPlantElement::Normal)
+		{
+			EnvironmentStatus =
+				IsInCompatibleGreenhouse(*Definition)
+					? TEXT("SERRE COMPATIBLE")
+					: TEXT("MAUVAISE SERRE - CROISSANCE BLOQUEE");
+		}
+		if (bElementalDead)
+		{
+			EnvironmentStatus = TEXT("PLANTE MORTE");
+		}
 		FString ActionStatus = TEXT("AUCUNE");
 		if (SoilFillProgress > 0.0f)
 		{
@@ -1003,7 +1137,7 @@ void ABotanicusPlantPotActor::RefreshVisuals()
 			FText::FromString(
 				FString::Printf(
 					TEXT(
-						"TERREAU : %s\nPLANTE : %s\nARROSAGES : %d\nEAU : %d%%\nCROISSANCE : %d%%\nQUALITE ESTIMEE : %s\nACTION : %s"),
+						"TERREAU : %s\nPLANTE : %s\nARROSAGES : %d\nEAU : %d%%\nCROISSANCE : %d%%\nENVIRONNEMENT : %s\nQUALITE ESTIMEE : %s\nACTION : %s"),
 					bHasSoil ? TEXT("OUI") : TEXT("NON"),
 					Definition
 						? *Definition->DisplayName.ToString().ToUpper()
@@ -1011,12 +1145,15 @@ void ABotanicusPlantPotActor::RefreshVisuals()
 					WateringCount,
 					FMath::RoundToInt(WaterLevel * 100.0f),
 					FMath::RoundToInt(GrowthProgress * 100.0f),
+					*EnvironmentStatus,
 					PlantKey.IsNone()
 						? TEXT("-")
 						: *GetPlantQualityLabel(),
 					*ActionStatus)));
 		StatusText->SetTextRenderColor(
-			bHasSoil
+			bElementalDead
+				? FColor(255, 70, 40)
+				: bHasSoil
 				? FColor(120, 255, 150)
 				: FColor(255, 190, 80));
 	}
