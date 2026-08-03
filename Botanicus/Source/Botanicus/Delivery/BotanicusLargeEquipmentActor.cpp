@@ -10,6 +10,8 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/GameInstance.h"
 #include "EngineUtils.h"
+#include "ItemDataAsset.h"
+#include "ItemDataSubsystem.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInterface.h"
 #include "Net/UnrealNetwork.h"
@@ -394,6 +396,21 @@ void ABotanicusLargeEquipmentActor::OnRep_ItemKey()
 
 void ABotanicusLargeEquipmentActor::ApplyItemDefinition()
 {
+	UStaticMesh* ResolvedMesh = nullptr;
+	bUsingItemDataMesh = false;
+
+	if (IsFurnitureEquipmentKey(ItemKey))
+	{
+		const UItemDataAsset* ItemData =
+			UItemDataSubsystem::Get(this).GetItemDataAsset(ItemKey);
+		if (ItemData)
+		{
+			ResolvedMesh =
+				ItemData->GetItemStaticMesh().LoadSynchronous();
+			bUsingItemDataMesh = IsValid(ResolvedMesh);
+		}
+	}
+
 	UGameInstance* GameInstance = GetGameInstance();
 	const UBotanicusItemCatalogSubsystem* Catalog =
 		GameInstance
@@ -407,12 +424,18 @@ void ABotanicusLargeEquipmentActor::ApplyItemDefinition()
 		return;
 	}
 
-	if (UStaticMesh* DefinitionMesh =
-		Definition->WorldMesh.LoadSynchronous())
+	if (!ResolvedMesh)
 	{
-		Mesh->SetStaticMesh(DefinitionMesh);
+		ResolvedMesh = Definition->WorldMesh.LoadSynchronous();
 	}
-	Mesh->SetRelativeScale3D(Definition->WorldScale);
+	if (ResolvedMesh)
+	{
+		Mesh->SetStaticMesh(ResolvedMesh);
+	}
+	Mesh->SetRelativeScale3D(
+		bUsingItemDataMesh
+			? FVector::OneVector
+			: Definition->WorldScale);
 	InteractionName = Definition->DisplayName;
 	bCooperativeCarry =
 		Definition->WeightClass ==

@@ -9893,10 +9893,43 @@ void ABotanicusPlayerController::
 		return;
 	}
 
-	PlacedItem->SetOwner(nullptr);
-	PlacedItem->SetNetDormancy(DORM_Awake);
-	PlacedItem->FlushNetDormancy();
-	PlacedItem->ForceNetUpdate();
+	bool bMountedOnSalesDisplay = false;
+	if (ABotanicusSalePotActor* SalePot =
+			Cast<ABotanicusSalePotActor>(PlacedItem);
+		IsValid(SalePot) && SalePot->IsReadyForSale())
+	{
+		for (TActorIterator<ABotanicusSalesDisplayActor> DisplayIt(
+				 World);
+			 DisplayIt;
+			 ++DisplayIt)
+		{
+			const FVector DisplayLocation =
+				DisplayIt->GetSalePotPlacementTransform().
+					GetLocation();
+			const FVector PotLocation =
+				PlacementTransform.GetLocation();
+			if (DisplayIt->IsEmpty() &&
+				FVector::DistSquared2D(
+					PotLocation,
+					DisplayLocation) <=
+					FMath::Square(170.0f) &&
+				FMath::Abs(PotLocation.Z - DisplayLocation.Z) <=
+					180.0f &&
+				DisplayIt->TryMountSalePot(SalePot, this))
+			{
+				bMountedOnSalesDisplay = true;
+				break;
+			}
+		}
+	}
+
+	if (!bMountedOnSalesDisplay && IsValid(PlacedItem))
+	{
+		PlacedItem->SetOwner(nullptr);
+		PlacedItem->SetNetDormancy(DORM_Awake);
+		PlacedItem->FlushNetDormancy();
+		PlacedItem->ForceNetUpdate();
+	}
 	if (ABotanicusGameMode* GameMode =
 			GetWorld()->GetAuthGameMode<ABotanicusGameMode>())
 	{
@@ -10246,12 +10279,18 @@ void ABotanicusPlayerController::
 			 DisplayIt;
 			 ++DisplayIt)
 		{
+			const FVector DisplayLocation =
+				DisplayIt->GetSalePotPlacementTransform().
+					GetLocation();
+			const FVector PotLocation =
+				PlacementTransform.GetLocation();
 			if (DisplayIt->IsEmpty() &&
-				FVector::DistSquared(
-					PlacementTransform.GetLocation(),
-					DisplayIt->GetSalePotPlacementTransform().
-						GetLocation()) <=
-					FMath::Square(30.0f) &&
+				FVector::DistSquared2D(
+					PotLocation,
+					DisplayLocation) <=
+					FMath::Square(170.0f) &&
+				FMath::Abs(PotLocation.Z - DisplayLocation.Z) <=
+					180.0f &&
 				DisplayIt->TryMountSalePot(SalePot, this))
 			{
 				ServerMovedPlaceableItem = nullptr;

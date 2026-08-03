@@ -58,6 +58,9 @@ public:
 		TArray<ABotanicusSalePotActor*>& OutPots) const;
 	void SetMoveContentsWithFurniture(bool bEnabled);
 
+protected:
+	virtual void OnEquipmentDefinitionApplied() override;
+
 private:
 	bool IsSlotOccupied(
 		int32 SlotIndex,

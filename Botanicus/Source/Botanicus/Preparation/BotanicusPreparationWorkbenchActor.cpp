@@ -364,19 +364,43 @@ void ABotanicusPreparationWorkbenchActor::RefreshLevelVisuals()
 {
 	WorkbenchLevel = FMath::Clamp(WorkbenchLevel, 1, 5);
 	const int32 MeshIndex = WorkbenchLevel - 1;
-	if (LevelMeshes.IsValidIndex(MeshIndex) &&
-		LevelMeshes[MeshIndex])
+	const bool bHasLevelMesh =
+		LevelMeshes.IsValidIndex(MeshIndex) &&
+		LevelMeshes[MeshIndex];
+	const bool bCustomVisual =
+		IsUsingItemDataMesh() && !bHasLevelMesh;
+	if (bHasLevelMesh)
 	{
 		Mesh->SetStaticMesh(LevelMeshes[MeshIndex]);
 		Mesh->SetRelativeScale3D(FVector::OneVector);
 	}
+	else if (bCustomVisual)
+	{
+		Mesh->SetRelativeLocation(FVector::ZeroVector);
+		Mesh->SetRelativeScale3D(FVector::OneVector);
+	}
 	else
 	{
+		Mesh->SetRelativeLocation(FVector(0.0f, 0.0f, 90.0f));
 		Mesh->SetRelativeScale3D(
 			FVector(
 				1.2f + (WorkbenchLevel - 1) * 0.75f,
 				0.6f,
 				0.12f));
+	}
+
+	const bool bShowProceduralLegs =
+		!bCustomVisual && !bHasLevelMesh;
+	for (UStaticMeshComponent* Leg : Legs)
+	{
+		if (Leg)
+		{
+			Leg->SetVisibility(bShowProceduralLegs);
+			Leg->SetCollisionEnabled(
+				bShowProceduralLegs
+					? ECollisionEnabled::QueryAndPhysics
+					: ECollisionEnabled::NoCollision);
+		}
 	}
 
 	const float LegX =
@@ -420,6 +444,12 @@ void ABotanicusPreparationWorkbenchActor::RefreshLevelVisuals()
 					WorkbenchLevel,
 					WorkbenchLevel)));
 	}
+}
+
+void ABotanicusPreparationWorkbenchActor::
+	OnEquipmentDefinitionApplied()
+{
+	RefreshLevelVisuals();
 }
 
 void ABotanicusPreparationWorkbenchActor::OnRep_WorkbenchLevel()

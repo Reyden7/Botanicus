@@ -376,6 +376,7 @@ void ABotanicusStorageShelfActor::RefreshShelfConfiguration()
 {
 	const FName Key = GetItemKey();
 	const bool bWall = IsWallMountedShelf();
+	const bool bCustomVisual = IsUsingItemDataMesh();
 	const bool bLarge =
 		Key == FloorShelfLargeKey || Key == WallShelfLargeKey;
 
@@ -421,18 +422,28 @@ void ABotanicusStorageShelfActor::RefreshShelfConfiguration()
 		}
 	}
 
-	Mesh->SetRelativeLocation(FVector(-ConfiguredExtent.X + 5.0f, 0.0f, 0.0f));
+	Mesh->SetRelativeLocation(
+		bCustomVisual
+			? FVector::ZeroVector
+			: FVector(-ConfiguredExtent.X + 5.0f, 0.0f, 0.0f));
 	Mesh->SetRelativeScale3D(
-		FVector(
-			0.10f,
-			ConfiguredExtent.Y / 50.0f,
-			ConfiguredExtent.Z / 50.0f));
+		bCustomVisual
+			? FVector::OneVector
+			: FVector(
+				0.10f,
+				ConfiguredExtent.Y / 50.0f,
+				ConfiguredExtent.Z / 50.0f));
 
 	for (int32 Index = 0; Index < ShelfBoards.Num(); ++Index)
 	{
 		const bool bVisible =
+			!bCustomVisual &&
 			Index < (bWall ? (bLarge ? 2 : 1) : 3);
 		ShelfBoards[Index]->SetVisibility(bVisible);
+		ShelfBoards[Index]->SetCollisionEnabled(
+			bVisible
+				? ECollisionEnabled::QueryAndPhysics
+				: ECollisionEnabled::NoCollision);
 		if (bVisible)
 		{
 			const float BoardZ = bWall
@@ -449,7 +460,11 @@ void ABotanicusStorageShelfActor::RefreshShelfConfiguration()
 	}
 	for (int32 Index = 0; Index < SidePanels.Num(); ++Index)
 	{
-		SidePanels[Index]->SetVisibility(true);
+		SidePanels[Index]->SetVisibility(!bCustomVisual);
+		SidePanels[Index]->SetCollisionEnabled(
+			bCustomVisual
+				? ECollisionEnabled::NoCollision
+				: ECollisionEnabled::QueryAndPhysics);
 		SidePanels[Index]->SetRelativeLocation(
 			FVector(
 				0.0f,

@@ -6,6 +6,8 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/StaticMesh.h"
+#include "ItemDataAsset.h"
+#include "ItemDataSubsystem.h"
 #include "Materials/MaterialInterface.h"
 #include "Net/UnrealNetwork.h"
 #include "UObject/ConstructorHelpers.h"
@@ -175,6 +177,21 @@ void ABotanicusPlaceableItemActor::OnRep_ItemKey()
 
 void ABotanicusPlaceableItemActor::ApplyItemDefinition()
 {
+	UStaticMesh* ResolvedMesh = nullptr;
+	bool bUsesItemDataMesh = false;
+
+	if (!ItemKey.IsNone())
+	{
+		const UItemDataAsset* ItemData =
+			UItemDataSubsystem::Get(this).GetItemDataAsset(ItemKey);
+		if (ItemData)
+		{
+			ResolvedMesh =
+				ItemData->GetItemStaticMesh().LoadSynchronous();
+			bUsesItemDataMesh = IsValid(ResolvedMesh);
+		}
+	}
+
 	UGameInstance* GameInstance = GetGameInstance();
 	const UBotanicusItemCatalogSubsystem* Catalog =
 		GameInstance
@@ -183,15 +200,21 @@ void ABotanicusPlaceableItemActor::ApplyItemDefinition()
 			: nullptr;
 	const FBotanicusItemDefinition* Definition =
 		Catalog ? Catalog->FindItem(ItemKey) : nullptr;
-	if (!Definition)
+
+	if (!ResolvedMesh && Definition)
 	{
-		return;
+		ResolvedMesh = Definition->WorldMesh.LoadSynchronous();
 	}
 
-	if (UStaticMesh* DefinitionMesh =
-		Definition->WorldMesh.LoadSynchronous())
+	if (ResolvedMesh)
 	{
-		Mesh->SetStaticMesh(DefinitionMesh);
+		Mesh->SetStaticMesh(ResolvedMesh);
 	}
-	Mesh->SetRelativeScale3D(Definition->WorldScale);
+
+	// Imported ItemData meshes are authored at their real in-game size. The
+	// native catalog scale only exists to resize its primitive fallback meshes.
+	Mesh->SetRelativeScale3D(
+		bUsesItemDataMesh || !Definition
+			? FVector::OneVector
+			: Definition->WorldScale);
 }

@@ -60,6 +60,10 @@ public:
 
 protected:
 	virtual void OnEquipmentDefinitionApplied() {}
+	bool IsUsingItemDataMesh() const
+	{
+		return bUsingItemDataMesh;
+	}
 
 private:
 	void PickUp(ABotanicusCharacter* Character);
@@ -108,5 +112,6 @@ private:
 	UPROPERTY()
 	TObjectPtr<UMaterialInterface> InvalidPlacementMaterial;
 
+	bool bUsingItemDataMesh = false;
 	FTransform PlacementOriginTransform = FTransform::Identity;
 };
