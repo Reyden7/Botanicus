@@ -10,28 +10,8 @@
 #include "Sales/BotanicusSalePotActor.h"
 #include "UObject/ConstructorHelpers.h"
 
-namespace
-{
-float PreparationSlotOffsetX(int32 SlotIndex, float SlotSpacing)
-{
-	switch (SlotIndex)
-	{
-	case 1:
-		return -SlotSpacing;
-	case 2:
-		return SlotSpacing;
-	case 3:
-		return -SlotSpacing * 2.0f;
-	case 4:
-		return SlotSpacing * 2.0f;
-	default:
-		return 0.0f;
-	}
-}
-}
-
 ABotanicusPreparationWorkbenchActor::
-	ABotanicusPreparationWorkbenchActor()
+ABotanicusPreparationWorkbenchActor()
 {
 	InteractionName =
 		NSLOCTEXT(
@@ -41,31 +21,8 @@ ABotanicusPreparationWorkbenchActor::
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(
 		TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (CubeFinder.Succeeded())
-	{
-		Mesh->SetStaticMesh(CubeFinder.Object);
-	}
-	Mesh->SetRelativeLocation(FVector(0.0f, 0.0f, 90.0f));
-	Mesh->SetRelativeScale3D(FVector(1.2f, 0.6f, 0.12f));
 
-	const FVector LegLocations[] = {
-		FVector(95.0f, 45.0f, 42.0f),
-		FVector(95.0f, -45.0f, 42.0f),
-		FVector(-95.0f, 45.0f, 42.0f),
-		FVector(-95.0f, -45.0f, 42.0f)};
-	for (int32 LegIndex = 0; LegIndex < 4; ++LegIndex)
-	{
-		UStaticMeshComponent* Leg =
-			CreateDefaultSubobject<UStaticMeshComponent>(
-				*FString::Printf(TEXT("WorkbenchLeg%d"), LegIndex));
-		Leg->SetupAttachment(SceneRoot);
-		Leg->SetStaticMesh(
-			CubeFinder.Succeeded() ? CubeFinder.Object : nullptr);
-		Leg->SetRelativeLocation(LegLocations[LegIndex]);
-		Leg->SetRelativeScale3D(FVector(0.12f, 0.12f, 0.84f));
-		Leg->SetCollisionProfileName(TEXT("BlockAll"));
-		Legs.Add(Leg);
-	}
+
 
 	for (int32 SlotIndex = 0; SlotIndex < 5; ++SlotIndex)
 	{
@@ -95,7 +52,7 @@ ABotanicusPreparationWorkbenchActor::
 	PreparationLabel->SetVerticalAlignment(EVRTA_TextCenter);
 	PreparationLabel->SetWorldSize(14.0f);
 	PreparationLabel->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	RefreshLevelVisuals();
+
 }
 
 void ABotanicusPreparationWorkbenchActor::BeginPlay()
@@ -170,32 +127,31 @@ void ABotanicusPreparationWorkbenchActor::SetLocalPlacementPreview(
 }
 
 FTransform ABotanicusPreparationWorkbenchActor::
-	GetSalePotPreparationTransform(int32 SlotIndex) const
+GetSalePotPreparationTransform(int32 SlotIndex) const
 {
 	const int32 SafeSlotIndex =
 		FMath::Clamp(SlotIndex, 0, GetSlotCount() - 1);
-	return FTransform(
-		GetActorRotation(),
-		GetActorTransform().TransformPosition(
-			FVector(
-				PreparationSlotOffsetX(
-					SafeSlotIndex,
-					SlotSpacing),
-				0.0f,
-				107.0f)));
+
+	if (SlotMarkers.IsValidIndex(SafeSlotIndex) &&
+		IsValid(SlotMarkers[SafeSlotIndex]))
+	{
+		return SlotMarkers[SafeSlotIndex]->GetComponentTransform();
+	}
+
+	return GetActorTransform();
 }
 
 bool ABotanicusPreparationWorkbenchActor::
-	FindClosestAvailableSalePotSlot(
-		const FVector& ReferenceLocation,
-		FTransform& OutTransform,
-		const ABotanicusSalePotActor* IgnoredPot) const
+FindClosestAvailableSalePotSlot(
+	const FVector& ReferenceLocation,
+	FTransform& OutTransform,
+	const ABotanicusSalePotActor* IgnoredPot) const
 {
 	bool bFoundSlot = false;
 	float BestDistanceSquared = TNumericLimits<float>::Max();
 	for (int32 SlotIndex = 0;
-		 SlotIndex < GetSlotCount();
-		 ++SlotIndex)
+		SlotIndex < GetSlotCount();
+		++SlotIndex)
 	{
 		if (IsSlotOccupied(SlotIndex, IgnoredPot))
 		{
@@ -217,18 +173,18 @@ bool ABotanicusPreparationWorkbenchActor::
 }
 
 bool ABotanicusPreparationWorkbenchActor::
-	IsLocationOnPreparationSlot(
-		const FVector& WorldLocation,
-		float Tolerance) const
+IsLocationOnPreparationSlot(
+	const FVector& WorldLocation,
+	float Tolerance) const
 {
 	for (int32 SlotIndex = 0;
-		 SlotIndex < GetSlotCount();
-		 ++SlotIndex)
+		SlotIndex < GetSlotCount();
+		++SlotIndex)
 	{
 		if (FVector::DistSquared(
-				WorldLocation,
-				GetSalePotPreparationTransform(SlotIndex).
-					GetLocation()) <= FMath::Square(Tolerance))
+			WorldLocation,
+			GetSalePotPreparationTransform(SlotIndex).
+			GetLocation()) <= FMath::Square(Tolerance))
 		{
 			return true;
 		}
@@ -237,12 +193,12 @@ bool ABotanicusPreparationWorkbenchActor::
 }
 
 bool ABotanicusPreparationWorkbenchActor::
-	IsSalePotSlotAvailable(
-		const ABotanicusSalePotActor* IgnoredPot) const
+IsSalePotSlotAvailable(
+	const ABotanicusSalePotActor* IgnoredPot) const
 {
 	for (int32 SlotIndex = 0;
-		 SlotIndex < GetSlotCount();
-		 ++SlotIndex)
+		SlotIndex < GetSlotCount();
+		++SlotIndex)
 	{
 		if (!IsSlotOccupied(SlotIndex, IgnoredPot))
 		{
@@ -258,7 +214,7 @@ int32 ABotanicusPreparationWorkbenchActor::GetUpgradeCost() const
 		500,
 		900,
 		1400,
-		2000};
+		2000 };
 	return WorkbenchLevel >= 1 && WorkbenchLevel < 5
 		? UpgradeCosts[WorkbenchLevel - 1]
 		: 0;
@@ -304,16 +260,16 @@ void ABotanicusPreparationWorkbenchActor::GetPreparedPots(
 		return;
 	}
 	for (TActorIterator<ABotanicusSalePotActor> PotIt(GetWorld());
-		 PotIt;
-		 ++PotIt)
+		PotIt;
+		++PotIt)
 	{
 		if (PotIt->ActorHasTag(TEXT("BotanicusPlacementPreview")))
 		{
 			continue;
 		}
 		if (IsLocationOnPreparationSlot(
-				PotIt->GetActorLocation(),
-				55.0f))
+			PotIt->GetActorLocation(),
+			55.0f))
 		{
 			OutPots.Add(*PotIt);
 		}
@@ -346,8 +302,8 @@ bool ABotanicusPreparationWorkbenchActor::IsSlotOccupied(
 	const FVector SlotLocation =
 		GetSalePotPreparationTransform(SlotIndex).GetLocation();
 	for (TActorIterator<ABotanicusSalePotActor> PotIt(World);
-		 PotIt;
-		 ++PotIt)
+		PotIt;
+		++PotIt)
 	{
 		if (*PotIt != IgnoredPot &&
 			FVector::DistSquared(
@@ -362,79 +318,50 @@ bool ABotanicusPreparationWorkbenchActor::IsSlotOccupied(
 
 void ABotanicusPreparationWorkbenchActor::RefreshLevelVisuals()
 {
-	WorkbenchLevel = FMath::Clamp(WorkbenchLevel, 1, 5);
+	WorkbenchLevel =
+		FMath::Clamp(WorkbenchLevel, 1, 5);
+
 	const int32 MeshIndex = WorkbenchLevel - 1;
-	const bool bHasLevelMesh =
-		LevelMeshes.IsValidIndex(MeshIndex) &&
-		LevelMeshes[MeshIndex];
-	const bool bCustomVisual =
-		IsUsingItemDataMesh() && !bHasLevelMesh;
-	if (bHasLevelMesh)
+
+	// Un mesh complet différent pour chaque niveau.
+	if (LevelMeshes.IsValidIndex(MeshIndex) &&
+		IsValid(LevelMeshes[MeshIndex]))
 	{
 		Mesh->SetStaticMesh(LevelMeshes[MeshIndex]);
-		Mesh->SetRelativeScale3D(FVector::OneVector);
-	}
-	else if (bCustomVisual)
-	{
+
+		// Les meshes doivent avoir leur taille définitive.
+		// Ils ne sont plus étirés selon le niveau.
 		Mesh->SetRelativeLocation(FVector::ZeroVector);
+		Mesh->SetRelativeRotation(FRotator::ZeroRotator);
 		Mesh->SetRelativeScale3D(FVector::OneVector);
 	}
 	else
 	{
-		Mesh->SetRelativeLocation(FVector(0.0f, 0.0f, 90.0f));
-		Mesh->SetRelativeScale3D(
-			FVector(
-				1.2f + (WorkbenchLevel - 1) * 0.75f,
-				0.6f,
-				0.12f));
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT(
+				"Mesh manquant pour l'atelier de preparation niveau %d"),
+			WorkbenchLevel);
 	}
 
-	const bool bShowProceduralLegs =
-		!bCustomVisual && !bHasLevelMesh;
-	for (UStaticMeshComponent* Leg : Legs)
-	{
-		if (Leg)
-		{
-			Leg->SetVisibility(bShowProceduralLegs);
-			Leg->SetCollisionEnabled(
-				bShowProceduralLegs
-					? ECollisionEnabled::QueryAndPhysics
-					: ECollisionEnabled::NoCollision);
-		}
-	}
-
-	const float LegX =
-		95.0f + (WorkbenchLevel - 1) * 37.5f;
-	for (int32 LegIndex = 0;
-		 LegIndex < Legs.Num();
-		 ++LegIndex)
-	{
-		if (Legs[LegIndex])
-		{
-			FVector Location =
-				Legs[LegIndex]->GetRelativeLocation();
-			Location.X = LegIndex < 2 ? LegX : -LegX;
-			Legs[LegIndex]->SetRelativeLocation(Location);
-		}
-	}
-
+	// Active seulement les emplacements disponibles pour le niveau.
+	// Leur position reste celle définie dans le Blueprint.
 	for (int32 SlotIndex = 0;
-		 SlotIndex < SlotMarkers.Num();
-		 ++SlotIndex)
+		SlotIndex < SlotMarkers.Num();
+		++SlotIndex)
 	{
-		const bool bActive = SlotIndex < WorkbenchLevel;
-		SlotMarkers[SlotIndex]->SetVisibility(bActive);
-		if (bActive)
+		if (!IsValid(SlotMarkers[SlotIndex]))
 		{
-			SlotMarkers[SlotIndex]->SetRelativeLocation(
-				FVector(
-					PreparationSlotOffsetX(
-						SlotIndex,
-						SlotSpacing),
-					0.0f,
-					103.0f));
+			continue;
 		}
+
+		const bool bActive =
+			SlotIndex < WorkbenchLevel;
+
+		SlotMarkers[SlotIndex]->SetVisibility(bActive);
 	}
+
 	if (PreparationLabel)
 	{
 		PreparationLabel->SetText(
@@ -447,7 +374,7 @@ void ABotanicusPreparationWorkbenchActor::RefreshLevelVisuals()
 }
 
 void ABotanicusPreparationWorkbenchActor::
-	OnEquipmentDefinitionApplied()
+OnEquipmentDefinitionApplied()
 {
 	RefreshLevelVisuals();
 }
@@ -479,9 +406,9 @@ void ABotanicusPreparationWorkbenchActor::CapturePreparedPotTransforms()
 void ABotanicusPreparationWorkbenchActor::ApplyPreparedPotTransforms()
 {
 	for (int32 Index = 0;
-		 MovingPreparedPots.IsValidIndex(Index) &&
-		 MovingPreparedPotRelativeTransforms.IsValidIndex(Index);
-		 ++Index)
+		MovingPreparedPots.IsValidIndex(Index) &&
+		MovingPreparedPotRelativeTransforms.IsValidIndex(Index);
+		++Index)
 	{
 		ABotanicusSalePotActor* Pot = MovingPreparedPots[Index].Get();
 		if (!IsValid(Pot))
@@ -490,7 +417,7 @@ void ABotanicusPreparationWorkbenchActor::ApplyPreparedPotTransforms()
 		}
 		Pot->SetActorTransform(
 			MovingPreparedPotRelativeTransforms[Index] *
-				GetActorTransform(),
+			GetActorTransform(),
 			false,
 			nullptr,
 			ETeleportType::TeleportPhysics);

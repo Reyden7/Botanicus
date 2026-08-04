@@ -73,8 +73,7 @@ private:
 	UFUNCTION()
 	void OnRep_WorkbenchLevel();
 
-	UPROPERTY(VisibleAnywhere)
-	TArray<TObjectPtr<UStaticMeshComponent>> Legs;
+
 
 	UPROPERTY(VisibleAnywhere)
 	TArray<TObjectPtr<UStaticMeshComponent>> SlotMarkers;
@@ -83,7 +82,11 @@ private:
 	TObjectPtr<UTextRenderComponent> PreparationLabel;
 
 	/** Optional final meshes, indexed from level 1 to level 5. */
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Preparation")
+	UPROPERTY(
+		EditDefaultsOnly,
+		BlueprintReadOnly,
+		Category = "Botanicus|Preparation",
+		meta = (AllowPrivateAccess = "true"))
 	TArray<TObjectPtr<UStaticMesh>> LevelMeshes;
 
 	UPROPERTY(ReplicatedUsing=OnRep_WorkbenchLevel)

@@ -53,6 +53,14 @@
 		{
 			"Name": "ModelContextProtocol",
 			"Enabled": true
+		},
+		{
+			"Name": "meshy",
+			"Enabled": false,
+			"SupportedTargetPlatforms": [
+				"Win64",
+				"Mac"
+			]
 		}
 	],
 	"AdditionalPluginDirectories": [
