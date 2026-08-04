@@ -8,6 +8,9 @@
 #include "Components/CanvasPanelSlot.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
+#include "Components/Image.h"
+#include "Components/Overlay.h"
+#include "Components/OverlaySlot.h"
 #include "Components/ProgressBar.h"
 #include "Components/SizeBox.h"
 #include "Components/Spacer.h"
@@ -16,6 +19,8 @@
 #include "Components/VerticalBoxSlot.h"
 #include "Blueprint/WidgetTree.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
+#include "Catalog/BotanicusItemCatalogSubsystem.h"
+#include "Engine/GameInstance.h"
 #include "Input/Reply.h"
 #include "ItemDataAsset.h"
 #include "Growing/BotanicusWateringCanActor.h"
@@ -46,10 +51,30 @@ void UBotanicusQuickBarSlotWidget::NativeOnInitialized()
 	if (WidgetTree && !WidgetTree->RootWidget)
 	{
 		Background = WidgetTree->ConstructWidget<UBorder>();
-		Background->SetPadding(FMargin(6.0f, 4.0f));
+		Background->SetPadding(FMargin(0.0f));
+
+		UOverlay* Layers =
+			WidgetTree->ConstructWidget<UOverlay>();
+		BackgroundIcon =
+			WidgetTree->ConstructWidget<UImage>();
+		BackgroundIcon->SetColorAndOpacity(
+			FLinearColor(1.0f, 1.0f, 1.0f, 0.82f));
+		BackgroundIcon->SetVisibility(
+			ESlateVisibility::Collapsed);
+		UOverlaySlot* BackgroundIconSlot =
+			Layers->AddChildToOverlay(BackgroundIcon);
+		BackgroundIconSlot->SetHorizontalAlignment(HAlign_Fill);
+		BackgroundIconSlot->SetVerticalAlignment(VAlign_Fill);
+
 		ContentContainer =
 			WidgetTree->ConstructWidget<UVerticalBox>();
-		Background->SetContent(ContentContainer);
+		UOverlaySlot* ContentSlot =
+			Layers->AddChildToOverlay(ContentContainer);
+		ContentSlot->SetPadding(FMargin(6.0f, 4.0f));
+		ContentSlot->SetHorizontalAlignment(HAlign_Fill);
+		ContentSlot->SetVerticalAlignment(VAlign_Fill);
+
+		Background->SetContent(Layers);
 		WidgetTree->RootWidget = Background;
 	}
 }
@@ -274,6 +299,7 @@ void UBotanicusQuickBarWidget::BuildPrototypeLayout()
 
 	SlotBackgrounds.Reserve(UBotanicusQuickBarComponent::SlotCount);
 	ItemLabels.Reserve(UBotanicusQuickBarComponent::SlotCount);
+	ItemIcons.Reserve(UBotanicusQuickBarComponent::SlotCount);
 	QuantityLabels.Reserve(UBotanicusQuickBarComponent::SlotCount);
 
 	for (int32 SlotIndex = 0;
@@ -309,16 +335,22 @@ void UBotanicusQuickBarWidget::BuildPrototypeLayout()
 				? 0
 				: SlotIndex + 1));
 		KeyLabel->SetColorAndOpacity(SecondaryTextColor);
+		KeyLabel->SetShadowOffset(FVector2D(1.0f, 1.0f));
+		KeyLabel->SetShadowColorAndOpacity(FLinearColor::Black);
 		KeyLabel->SetFont(FSlateFontInfo(
 			FCoreStyle::GetDefaultFont(),
 			12,
 			TEXT("Bold")));
 		Content->AddChildToVerticalBox(KeyLabel);
 
+		UImage* ItemIcon = SlotWidget->GetBackgroundIcon();
+
 		UTextBlock* ItemLabel =
 			WidgetTree->ConstructWidget<UTextBlock>();
 		ItemLabel->SetText(FText::FromString(TEXT("—")));
 		ItemLabel->SetColorAndOpacity(PrimaryTextColor);
+		ItemLabel->SetShadowOffset(FVector2D(1.0f, 1.0f));
+		ItemLabel->SetShadowColorAndOpacity(FLinearColor::Black);
 		ItemLabel->SetJustification(ETextJustify::Center);
 		ItemLabel->SetAutoWrapText(true);
 		ItemLabel->SetFont(FSlateFontInfo(
@@ -326,13 +358,16 @@ void UBotanicusQuickBarWidget::BuildPrototypeLayout()
 			9));
 		UVerticalBoxSlot* ItemSlot =
 			Content->AddChildToVerticalBox(ItemLabel);
-		ItemSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		ItemSlot->SetSize(
+			FSlateChildSize(ESlateSizeRule::Fill));
 		ItemSlot->SetHorizontalAlignment(HAlign_Fill);
 		ItemSlot->SetVerticalAlignment(VAlign_Center);
 
 		UTextBlock* QuantityLabel =
 			WidgetTree->ConstructWidget<UTextBlock>();
 		QuantityLabel->SetColorAndOpacity(SecondaryTextColor);
+		QuantityLabel->SetShadowOffset(FVector2D(1.0f, 1.0f));
+		QuantityLabel->SetShadowColorAndOpacity(FLinearColor::Black);
 		QuantityLabel->SetJustification(ETextJustify::Right);
 		QuantityLabel->SetFont(FSlateFontInfo(
 			FCoreStyle::GetDefaultFont(),
@@ -342,6 +377,7 @@ void UBotanicusQuickBarWidget::BuildPrototypeLayout()
 
 		SlotBackgrounds.Add(Background);
 		ItemLabels.Add(ItemLabel);
+		ItemIcons.Add(ItemIcon);
 		QuantityLabels.Add(QuantityLabel);
 	}
 
@@ -430,7 +466,8 @@ void UBotanicusQuickBarWidget::RefreshWateringCanStatus()
 void UBotanicusQuickBarWidget::Refresh()
 {
 	if (!QuickBar ||
-		SlotBackgrounds.Num() != UBotanicusQuickBarComponent::SlotCount)
+		SlotBackgrounds.Num() != UBotanicusQuickBarComponent::SlotCount ||
+		ItemIcons.Num() != UBotanicusQuickBarComponent::SlotCount)
 	{
 		return;
 	}
@@ -444,6 +481,7 @@ void UBotanicusQuickBarWidget::Refresh()
 			QuickBar->GetSlot(SlotIndex);
 		UBorder* Background = SlotBackgrounds[SlotIndex];
 		UTextBlock* ItemLabel = ItemLabels[SlotIndex];
+		UImage* ItemIcon = ItemIcons[SlotIndex];
 		UTextBlock* QuantityLabel = QuantityLabels[SlotIndex];
 
 		Background->SetBrushColor(
@@ -459,19 +497,58 @@ void UBotanicusQuickBarWidget::Refresh()
 
 		if (InventorySlot.IsEmpty())
 		{
+			ItemIcon->SetVisibility(ESlateVisibility::Collapsed);
+			ItemLabel->SetVisibility(
+				ESlateVisibility::HitTestInvisible);
 			ItemLabel->SetText(FText::FromString(TEXT("—")));
 			QuantityLabel->SetText(FText::GetEmpty());
 			continue;
 		}
 
+		FText DisplayName = FText::FromName(InventorySlot.ItemKey);
+		UTexture2D* IconTexture = nullptr;
 		if (UItemDataAsset* ItemData =
 			QuickBar->GetItemDataForSlot(SlotIndex))
 		{
-			ItemLabel->SetText(ItemData->GetItemName());
+			DisplayName = ItemData->GetItemName();
+			IconTexture =
+				ItemData->GetItemIcon().LoadSynchronous();
 		}
 		else
 		{
-			ItemLabel->SetText(FText::FromName(InventorySlot.ItemKey));
+			const UGameInstance* GameInstance = GetGameInstance();
+			const UBotanicusItemCatalogSubsystem* Catalog =
+				GameInstance
+					? GameInstance->GetSubsystem<
+						UBotanicusItemCatalogSubsystem>()
+					: nullptr;
+			const FBotanicusItemDefinition* Definition =
+				Catalog
+					? Catalog->FindItem(InventorySlot.ItemKey)
+					: nullptr;
+			if (Definition &&
+				!Definition->DisplayName.IsEmpty())
+			{
+				DisplayName = Definition->DisplayName;
+			}
+		}
+
+		ItemLabel->SetText(DisplayName);
+		if (IconTexture)
+		{
+			ItemIcon->SetBrushFromTexture(IconTexture, true);
+			ItemIcon->SetToolTipText(DisplayName);
+			ItemIcon->SetVisibility(
+				ESlateVisibility::HitTestInvisible);
+			ItemLabel->SetVisibility(
+				ESlateVisibility::Collapsed);
+		}
+		else
+		{
+			ItemIcon->SetVisibility(
+				ESlateVisibility::Collapsed);
+			ItemLabel->SetVisibility(
+				ESlateVisibility::HitTestInvisible);
 		}
 
 		QuantityLabel->SetText(FText::Format(

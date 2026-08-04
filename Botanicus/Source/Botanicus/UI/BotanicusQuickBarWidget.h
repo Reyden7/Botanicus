@@ -9,6 +9,7 @@
 #include "BotanicusQuickBarWidget.generated.h"
 
 class UBorder;
+class UImage;
 class UProgressBar;
 class UTextBlock;
 class UVerticalBox;
@@ -34,6 +35,7 @@ public:
 		UBotanicusQuickBarWidget* InOwnerWidget,
 		int32 InSlotIndex);
 	UBorder* GetBackground() const { return Background; }
+	UImage* GetBackgroundIcon() const { return BackgroundIcon; }
 	UVerticalBox* GetContentContainer() const
 	{
 		return ContentContainer;
@@ -59,6 +61,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBorder> Background;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UImage> BackgroundIcon;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UVerticalBox> ContentContainer;
@@ -119,6 +124,9 @@ private:
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UTextBlock>> ItemLabels;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UImage>> ItemIcons;
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UTextBlock>> QuantityLabels;

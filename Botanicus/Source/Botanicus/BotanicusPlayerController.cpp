@@ -793,6 +793,15 @@ void ABotanicusPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReaso
 	EndWateringCanRefill(true);
 	EndPlantPotAction();
 	CancelQuickBarItemPlacement();
+	DestroyEquippedQuickBarItem();
+	if (LocalEquippedQuickBarSource.IsValid())
+	{
+		LocalEquippedQuickBarSource->OnQuickBarChanged.RemoveDynamic(
+			this,
+			&ABotanicusPlayerController::
+				HandleEquippedQuickBarChanged);
+	}
+	LocalEquippedQuickBarSource.Reset();
 	CancelDeliveryParcelPlacement();
 	CancelLargeEquipmentPlacement();
 	CancelPathPlacement();
@@ -993,6 +1002,7 @@ void ABotanicusPlayerController::PlayerTick(float DeltaTime)
 	UpdateWateringCanRefill(DeltaTime);
 	UpdateLargeEquipmentPlacement(DeltaTime);
 	UpdateQuickBarItemPlacement(DeltaTime);
+	UpdateEquippedQuickBarItem();
 	UpdateThrowPowerWidget();
 	UpdateDeliveryParcelPlacement(DeltaTime);
 }
@@ -4917,6 +4927,7 @@ void ABotanicusPlayerController::BeginQuickBarItemPlacement()
 		return;
 	}
 
+	DestroyEquippedQuickBarItem();
 	Preview->Tags.AddUnique(TEXT("BotanicusPlacementPreview"));
 	Preview->InitializePlacedItem(SelectedSlot.ItemKey, 1);
 	ApplyCarriedItemState(SelectedSlot, Preview);
@@ -5035,6 +5046,167 @@ void ABotanicusPlayerController::ApplyCarriedItemState(
 				Slot.CarriedState.SalePlantItemKey);
 		}
 	}
+}
+
+void ABotanicusPlayerController::HandleEquippedQuickBarChanged()
+{
+	bLocalEquippedQuickBarDirty = true;
+}
+
+void ABotanicusPlayerController::DestroyEquippedQuickBarItem()
+{
+	if (IsValid(LocalEquippedQuickBarItem))
+	{
+		LocalEquippedQuickBarItem->Destroy();
+	}
+	LocalEquippedQuickBarItem = nullptr;
+}
+
+void ABotanicusPlayerController::UpdateEquippedQuickBarItem()
+{
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+
+	ABotanicusCharacter* BotanicusCharacter =
+		Cast<ABotanicusCharacter>(GetPawn());
+	UBotanicusQuickBarComponent* QuickBar =
+		BotanicusCharacter
+			? BotanicusCharacter->GetQuickBarComponent()
+			: nullptr;
+	if (LocalEquippedQuickBarSource.Get() != QuickBar)
+	{
+		if (LocalEquippedQuickBarSource.IsValid())
+		{
+			LocalEquippedQuickBarSource->OnQuickBarChanged.
+				RemoveDynamic(
+					this,
+					&ABotanicusPlayerController::
+						HandleEquippedQuickBarChanged);
+		}
+		LocalEquippedQuickBarSource = QuickBar;
+		if (QuickBar)
+		{
+			QuickBar->OnQuickBarChanged.AddUniqueDynamic(
+				this,
+				&ABotanicusPlayerController::
+					HandleEquippedQuickBarChanged);
+		}
+		bLocalEquippedQuickBarDirty = true;
+	}
+
+	const bool bCanDisplayEquippedItem =
+		QuickBar &&
+		BotanicusCharacter &&
+		!bBuildingTopDownViewActive &&
+		!IsValid(LocalQuickBarItemPreview) &&
+		!IsValid(LocalMovedPlaceableItem);
+	if (!bCanDisplayEquippedItem)
+	{
+		DestroyEquippedQuickBarItem();
+		return;
+	}
+
+	const int32 SelectedSlotIndex =
+		QuickBar->GetSelectedSlotIndex();
+	const FBotanicusQuickBarSlot SelectedSlot =
+		QuickBar->GetSelectedSlot();
+	const bool bSelectionChanged =
+		bLocalEquippedQuickBarDirty ||
+		LocalEquippedQuickBarSlotIndex != SelectedSlotIndex ||
+		LocalEquippedQuickBarInstanceId != SelectedSlot.InstanceId ||
+		LocalEquippedQuickBarItemKey != SelectedSlot.ItemKey ||
+		LocalEquippedQuickBarQuantity != SelectedSlot.Quantity;
+	if (bSelectionChanged)
+	{
+		DestroyEquippedQuickBarItem();
+		LocalEquippedQuickBarSlotIndex = SelectedSlotIndex;
+		LocalEquippedQuickBarInstanceId = SelectedSlot.InstanceId;
+		LocalEquippedQuickBarItemKey = SelectedSlot.ItemKey;
+		LocalEquippedQuickBarQuantity = SelectedSlot.Quantity;
+		bLocalEquippedQuickBarDirty = false;
+	}
+
+	if (SelectedSlot.IsEmpty())
+	{
+		DestroyEquippedQuickBarItem();
+		return;
+	}
+
+	if (!IsValid(LocalEquippedQuickBarItem))
+	{
+		const FBotanicusItemDefinition* Definition =
+			FindItemDefinition(this, SelectedSlot.ItemKey);
+		UWorld* World = GetWorld();
+		if (!Definition || !World)
+		{
+			return;
+		}
+
+		UClass* EquippedClass =
+			Definition->WorldActorClass.LoadSynchronous();
+		if (!EquippedClass ||
+			!EquippedClass->IsChildOf(
+				ABotanicusPlaceableItemActor::StaticClass()))
+		{
+			EquippedClass =
+				ABotanicusPlaceableItemActor::StaticClass();
+		}
+
+		FActorSpawnParameters SpawnParameters;
+		SpawnParameters.SpawnCollisionHandlingOverride =
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		LocalEquippedQuickBarItem =
+			World->SpawnActor<ABotanicusPlaceableItemActor>(
+				EquippedClass,
+				BotanicusCharacter->GetActorTransform(),
+				SpawnParameters);
+		if (!IsValid(LocalEquippedQuickBarItem))
+		{
+			return;
+		}
+
+		LocalEquippedQuickBarItem->Tags.AddUnique(
+			TEXT("BotanicusEquippedPreview"));
+		LocalEquippedQuickBarItem->InitializePlacedItem(
+			SelectedSlot.ItemKey,
+			1);
+		ApplyCarriedItemState(
+			SelectedSlot,
+			LocalEquippedQuickBarItem);
+		LocalEquippedQuickBarItem->ConfigureAsLocalPreview(true);
+		LocalEquippedQuickBarItem->ConfigureAsLocalInspection();
+	}
+
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	GetPlayerViewPoint(ViewLocation, ViewRotation);
+	const FVector ViewForward = ViewRotation.Vector();
+	const FVector ViewRight =
+		FRotationMatrix(ViewRotation).GetUnitAxis(EAxis::Y);
+	const FVector ViewUp =
+		FRotationMatrix(ViewRotation).GetUnitAxis(EAxis::Z);
+	const float ItemRadius =
+		LocalEquippedQuickBarItem->GetPlacementBoxExtent().
+			GetAbs().GetMax();
+	const float ForwardDistance =
+		FMath::Clamp(
+			70.0f + ItemRadius * 0.35f,
+			75.0f,
+			130.0f);
+	LocalEquippedQuickBarItem->SetActorLocationAndRotation(
+		ViewLocation +
+			ViewForward * ForwardDistance +
+			ViewRight * 24.0f -
+			ViewUp * 24.0f,
+		FRotator(
+			0.0f,
+			ViewRotation.Yaw + 180.0f,
+			0.0f),
+		false,
+		nullptr,
+		ETeleportType::TeleportPhysics);
 }
 
 void ABotanicusPlayerController::ReleaseQuickBarThrowCharge()

@@ -171,6 +171,16 @@ struct BOTANICUS_API FBotanicusItemDefinition
 
 	bool CanBePlacedOn(EBotanicusPlacementSurface Surface) const
 	{
+		// Inventory items can always be placed back on the floor. The
+		// bitmask only adds optional destinations such as shelves or work
+		// surfaces; it must never make an item impossible to put down.
+		if (Surface == EBotanicusPlacementSurface::Floor &&
+			(WeightClass == EBotanicusItemWeightClass::Hotbar ||
+				WeightClass == EBotanicusItemWeightClass::Handheld))
+		{
+			return true;
+		}
+
 		return (AllowedPlacementSurfaces &
 			static_cast<int32>(Surface)) != 0;
 	}

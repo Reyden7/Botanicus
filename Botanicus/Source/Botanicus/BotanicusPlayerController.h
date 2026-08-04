@@ -10,6 +10,7 @@
 class UInputMappingContext;
 class UUserWidget;
 class UBotanicusMultiplayerSubsystem;
+class UBotanicusQuickBarComponent;
 class UBotanicusQuickBarWidget;
 class UBotanicusTopDownToolbarWidget;
 class UBotanicusCarryProgressWidget;
@@ -490,6 +491,12 @@ protected:
 	void ApplyCarriedItemState(
 		const FBotanicusQuickBarSlot& Slot,
 		ABotanicusPlaceableItemActor* Item) const;
+	void UpdateEquippedQuickBarItem();
+	void DestroyEquippedQuickBarItem();
+
+	UFUNCTION()
+	void HandleEquippedQuickBarChanged();
+
 	void BeginWorldItemMove(
 		ABotanicusPlaceableItemActor* WorldItem);
 	void UpdateQuickBarItemPlacement(float DeltaTime);
@@ -1067,6 +1074,18 @@ protected:
 	UPROPERTY(Transient)
 	TObjectPtr<ABotanicusPlaceableItemActor>
 		LocalInspectedQuickBarItem;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ABotanicusPlaceableItemActor>
+		LocalEquippedQuickBarItem;
+
+	TWeakObjectPtr<UBotanicusQuickBarComponent>
+		LocalEquippedQuickBarSource;
+	FGuid LocalEquippedQuickBarInstanceId;
+	FName LocalEquippedQuickBarItemKey = NAME_None;
+	int32 LocalEquippedQuickBarSlotIndex = INDEX_NONE;
+	int32 LocalEquippedQuickBarQuantity = 0;
+	bool bLocalEquippedQuickBarDirty = true;
 
 	UPROPERTY(Transient)
 	TObjectPtr<ABotanicusPlaceableItemActor>

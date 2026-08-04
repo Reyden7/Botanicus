@@ -529,8 +529,7 @@ bool UBotanicusQuickBarComponent::IsValidSlotIndex(int32 SlotIndex) const
 
 bool UBotanicusQuickBarComponent::IsItemKeyValid(FName ItemKey) const
 {
-	if (ItemKey.IsNone() || !GetWorld() ||
-		!UItemDataSubsystem::Get(this).IsKeyValid(ItemKey))
+	if (ItemKey.IsNone() || !GetWorld())
 	{
 		return false;
 	}
@@ -543,9 +542,16 @@ bool UBotanicusQuickBarComponent::IsItemKeyValid(FName ItemKey) const
 			: nullptr;
 	const FBotanicusItemDefinition* Definition =
 		Catalog ? Catalog->FindItem(ItemKey) : nullptr;
-	return !Definition ||
-		Definition->WeightClass ==
+	if (Definition)
+	{
+		return Definition->WeightClass ==
 			EBotanicusItemWeightClass::Hotbar;
+	}
+
+	// ItemData enriches an item with its icon and authored mesh, but native
+	// Botanicus catalogue items must remain usable before their optional
+	// DataAsset is created (notably the elemental seed packets).
+	return UItemDataSubsystem::Get(this).IsKeyValid(ItemKey);
 }
 
 bool UBotanicusQuickBarComponent::CanLocallyControlQuickBar() const
