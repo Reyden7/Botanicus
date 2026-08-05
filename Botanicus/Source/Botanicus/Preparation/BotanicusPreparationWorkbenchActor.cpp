@@ -130,15 +130,27 @@ FTransform ABotanicusPreparationWorkbenchActor::
 GetSalePotPreparationTransform(int32 SlotIndex) const
 {
 	const int32 SafeSlotIndex =
-		FMath::Clamp(SlotIndex, 0, GetSlotCount() - 1);
+		FMath::Clamp(
+			SlotIndex,
+			0,
+			GetSlotCount() - 1);
 
 	if (SlotMarkers.IsValidIndex(SafeSlotIndex) &&
 		IsValid(SlotMarkers[SafeSlotIndex]))
 	{
-		return SlotMarkers[SafeSlotIndex]->GetComponentTransform();
+		FTransform SlotTransform =
+			SlotMarkers[SafeSlotIndex]->GetComponentTransform();
+
+		// Le marqueur sert uniquement à définir la position
+		// et la rotation. Le pot doit garder sa taille normale.
+		SlotTransform.SetScale3D(FVector::OneVector);
+
+		return SlotTransform;
 	}
 
-	return GetActorTransform();
+	FTransform FallbackTransform = GetActorTransform();
+	FallbackTransform.SetScale3D(FVector::OneVector);
+	return FallbackTransform;
 }
 
 bool ABotanicusPreparationWorkbenchActor::
