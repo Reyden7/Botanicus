@@ -734,24 +734,6 @@ void UBotanicusOrderCatalogWidget::RebuildItemRows()
 		return;
 	}
 
-	if (ActiveTab == EBotanicusCommandPanelTab::Preparation)
-	{
-		WorkbenchUpgradeRow =
-			CreateWidget<UBotanicusWorkbenchUpgradeRowWidget>(
-				GetOwningPlayer(),
-				UBotanicusWorkbenchUpgradeRowWidget::StaticClass());
-		if (WorkbenchUpgradeRow)
-		{
-			WorkbenchUpgradeRow->InitializeRow(
-				BotanicusController);
-			UVerticalBoxSlot* WorkbenchRowSlot =
-				ItemsBox->AddChildToVerticalBox(
-					WorkbenchUpgradeRow);
-			WorkbenchRowSlot->SetPadding(
-				FMargin(0.0f, 0.0f, 0.0f, 12.0f));
-		}
-	}
-
 	const UBotanicusItemCatalogSubsystem* Catalog =
 		GameInstance
 			? GameInstance->GetSubsystem<UBotanicusItemCatalogSubsystem>()

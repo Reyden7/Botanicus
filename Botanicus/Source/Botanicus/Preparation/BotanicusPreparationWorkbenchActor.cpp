@@ -2,17 +2,24 @@
 
 #include "Preparation/BotanicusPreparationWorkbenchActor.h"
 
+#include "BotanicusCharacter.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
+#include "GameFramework/PlayerController.h"
 #include "Net/UnrealNetwork.h"
+#include "QuickBar/BotanicusQuickBarComponent.h"
 #include "Sales/BotanicusSalePotActor.h"
 #include "UObject/ConstructorHelpers.h"
 
 ABotanicusPreparationWorkbenchActor::
 ABotanicusPreparationWorkbenchActor()
 {
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.TickInterval = 0.05f;
+
 	InteractionName =
 		NSLOCTEXT(
 			"BotanicusPreparation",
@@ -22,7 +29,22 @@ ABotanicusPreparationWorkbenchActor()
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(
 		TEXT("/Engine/BasicShapes/Cube.Cube"));
 
-
+	UpgradeTerminal =
+		CreateDefaultSubobject<UStaticMeshComponent>(
+			TEXT("WorkbenchUpgradeTerminal"));
+	UpgradeTerminal->SetupAttachment(SceneRoot);
+	UpgradeTerminal->SetStaticMesh(
+		CubeFinder.Succeeded() ? CubeFinder.Object : nullptr);
+	UpgradeTerminal->SetRelativeLocation(
+		FVector(0.0f, 105.0f, 70.0f));
+	UpgradeTerminal->SetRelativeScale3D(FVector(0.20f));
+	UpgradeTerminal->SetCollisionEnabled(
+		ECollisionEnabled::QueryOnly);
+	UpgradeTerminal->SetCollisionResponseToAllChannels(ECR_Ignore);
+	UpgradeTerminal->SetCollisionResponseToChannel(
+		ECC_Visibility,
+		ECR_Block);
+	UpgradeTerminal->SetCastShadow(false);
 
 	for (int32 SlotIndex = 0; SlotIndex < 5; ++SlotIndex)
 	{
@@ -53,12 +75,36 @@ ABotanicusPreparationWorkbenchActor()
 	PreparationLabel->SetWorldSize(14.0f);
 	PreparationLabel->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
+	PlacementPrompt =
+		CreateDefaultSubobject<UTextRenderComponent>(
+			TEXT("SalePotPlacementPrompt"));
+	PlacementPrompt->SetupAttachment(SceneRoot);
+	PlacementPrompt->SetRelativeLocation(
+		FVector(0.0f, 0.0f, 165.0f));
+	PlacementPrompt->SetText(
+		NSLOCTEXT(
+			"BotanicusPreparation",
+			"PlaceSalePotPrompt",
+			"E POUR DEPOSER LE POT SUR L'ATELIER"));
+	PlacementPrompt->SetTextRenderColor(FColor(90, 235, 255));
+	PlacementPrompt->SetHorizontalAlignment(EHTA_Center);
+	PlacementPrompt->SetVerticalAlignment(EVRTA_TextCenter);
+	PlacementPrompt->SetWorldSize(16.0f);
+	PlacementPrompt->SetCollisionEnabled(
+		ECollisionEnabled::NoCollision);
+	PlacementPrompt->SetVisibility(false);
 }
 
 void ABotanicusPreparationWorkbenchActor::BeginPlay()
 {
 	Super::BeginPlay();
 	RefreshLevelVisuals();
+}
+
+void ABotanicusPreparationWorkbenchActor::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	RefreshLocalPlacementPrompt();
 }
 
 void ABotanicusPreparationWorkbenchActor::GetLifetimeReplicatedProps(
@@ -70,9 +116,39 @@ void ABotanicusPreparationWorkbenchActor::GetLifetimeReplicatedProps(
 		WorkbenchLevel);
 }
 
+FBotanicusInteractionPrompt
+ABotanicusPreparationWorkbenchActor::
+GetInteractionPrompt_Implementation(AActor* Interactor) const
+{
+	if (IsUpgradeTerminalTargeted(Interactor))
+	{
+		FBotanicusInteractionPrompt Prompt;
+		Prompt.ActionText =
+			NSLOCTEXT(
+				"BotanicusPreparation",
+				"OpenWorkbenchUpgrades",
+				"Ouvrir");
+		Prompt.TargetName =
+			NSLOCTEXT(
+				"BotanicusPreparation",
+				"WorkbenchUpgradeTerminal",
+				"Ameliorations de l'atelier");
+		Prompt.bCanInteract =
+			CanAccessUpgradeTerminal(Interactor);
+		return Prompt;
+	}
+
+	return Super::GetInteractionPrompt_Implementation(Interactor);
+}
+
 bool ABotanicusPreparationWorkbenchActor::CanInteract_Implementation(
 	AActor* Interactor) const
 {
+	if (IsUpgradeTerminalTargeted(Interactor))
+	{
+		return CanAccessUpgradeTerminal(Interactor);
+	}
+
 	return (!HasPreparedPots() || bMoveContentsWithFurniture) &&
 		Super::CanInteract_Implementation(Interactor);
 }
@@ -83,10 +159,9 @@ void ABotanicusPreparationWorkbenchActor::BeginPlacement(
 	if (bMoveContentsWithFurniture &&
 		MovingPreparedPots.IsEmpty())
 	{
-		CapturePreparedPotTransforms();
+		AttachPreparedPotsForMove();
 	}
 	Super::BeginPlacement(Character);
-	ApplyPreparedPotTransforms();
 }
 
 void ABotanicusPreparationWorkbenchActor::UpdatePlacement(
@@ -94,22 +169,19 @@ void ABotanicusPreparationWorkbenchActor::UpdatePlacement(
 	bool bIsValid)
 {
 	Super::UpdatePlacement(PlacementTransform, bIsValid);
-	ApplyPreparedPotTransforms();
 }
 
 void ABotanicusPreparationWorkbenchActor::ConfirmPlacement()
 {
 	Super::ConfirmPlacement();
-	ApplyPreparedPotTransforms();
-	ClearPreparedPotTransforms();
+	DetachPreparedPotsAfterMove();
 	bMoveContentsWithFurniture = false;
 }
 
 void ABotanicusPreparationWorkbenchActor::CancelPlacement()
 {
 	Super::CancelPlacement();
-	ApplyPreparedPotTransforms();
-	ClearPreparedPotTransforms();
+	DetachPreparedPotsAfterMove();
 	bMoveContentsWithFurniture = false;
 }
 
@@ -120,10 +192,9 @@ void ABotanicusPreparationWorkbenchActor::SetLocalPlacementPreview(
 	if (bMoveContentsWithFurniture &&
 		MovingPreparedPots.IsEmpty())
 	{
-		CapturePreparedPotTransforms();
+		AttachPreparedPotsForMove();
 	}
 	Super::SetLocalPlacementPreview(PlacementTransform, bIsValid);
-	ApplyPreparedPotTransforms();
 }
 
 FTransform ABotanicusPreparationWorkbenchActor::
@@ -185,6 +256,67 @@ FindClosestAvailableSalePotSlot(
 }
 
 bool ABotanicusPreparationWorkbenchActor::
+FindAimedAvailableSalePotSlot(
+	const FVector& ViewLocation,
+	const FVector& ViewDirection,
+	FTransform& OutTransform,
+	int32& OutSlotIndex,
+	const ABotanicusSalePotActor* IgnoredPot) const
+{
+	OutSlotIndex = INDEX_NONE;
+	const FVector SafeViewDirection =
+		ViewDirection.GetSafeNormal();
+	if (SafeViewDirection.IsNearlyZero())
+	{
+		return false;
+	}
+
+	float BestAimDistanceSquared = FMath::Square(28.0f);
+	float BestForwardDistance = TNumericLimits<float>::Max();
+	for (int32 SlotIndex = 0;
+		 SlotIndex < GetSlotCount();
+		 ++SlotIndex)
+	{
+		if (IsSlotOccupied(SlotIndex, IgnoredPot))
+		{
+			continue;
+		}
+
+		const FTransform SlotTransform =
+			GetSalePotPreparationTransform(SlotIndex);
+		const FVector ToSlot =
+			SlotTransform.GetLocation() - ViewLocation;
+		const float ForwardDistance =
+			FVector::DotProduct(ToSlot, SafeViewDirection);
+		if (ForwardDistance <= 0.0f ||
+			ForwardDistance > 600.0f)
+		{
+			continue;
+		}
+
+		const FVector ClosestPointOnViewRay =
+			ViewLocation + SafeViewDirection * ForwardDistance;
+		const float AimDistanceSquared =
+			FVector::DistSquared(
+				ClosestPointOnViewRay,
+				SlotTransform.GetLocation());
+		if (AimDistanceSquared < BestAimDistanceSquared ||
+			(FMath::IsNearlyEqual(
+				 AimDistanceSquared,
+				 BestAimDistanceSquared) &&
+			 ForwardDistance < BestForwardDistance))
+		{
+			BestAimDistanceSquared = AimDistanceSquared;
+			BestForwardDistance = ForwardDistance;
+			OutTransform = SlotTransform;
+			OutSlotIndex = SlotIndex;
+		}
+	}
+
+	return OutSlotIndex != INDEX_NONE;
+}
+
+bool ABotanicusPreparationWorkbenchActor::
 IsLocationOnPreparationSlot(
 	const FVector& WorldLocation,
 	float Tolerance) const
@@ -222,23 +354,119 @@ IsSalePotSlotAvailable(
 
 int32 ABotanicusPreparationWorkbenchActor::GetUpgradeCost() const
 {
-	static const int32 UpgradeCosts[] = {
+	return GetLevelUnlockCost(WorkbenchLevel + 1);
+}
+
+int32 ABotanicusPreparationWorkbenchActor::GetLevelUnlockCost(
+	int32 Level)
+{
+	if (Level < 2 || Level > 5)
+	{
+		return 0;
+	}
+
+	static const int32 LevelCosts[] = {
+		0,
+		0,
 		500,
 		900,
 		1400,
 		2000 };
-	return WorkbenchLevel >= 1 && WorkbenchLevel < 5
-		? UpgradeCosts[WorkbenchLevel - 1]
-		: 0;
+	return LevelCosts[Level];
+}
+
+int32 ABotanicusPreparationWorkbenchActor::
+GetLevelTransitionCost(int32 TargetLevel) const
+{
+	const int32 SafeTargetLevel = FMath::Clamp(TargetLevel, 1, 5);
+	int32 Cost = 0;
+	if (SafeTargetLevel > WorkbenchLevel)
+	{
+		for (int32 Level = WorkbenchLevel + 1;
+			 Level <= SafeTargetLevel;
+			 ++Level)
+		{
+			Cost += GetLevelUnlockCost(Level);
+		}
+	}
+	else
+	{
+		for (int32 Level = SafeTargetLevel + 1;
+			 Level <= WorkbenchLevel;
+			 ++Level)
+		{
+			Cost -= GetLevelUnlockCost(Level);
+		}
+	}
+	return Cost;
 }
 
 bool ABotanicusPreparationWorkbenchActor::UpgradeWorkbench()
 {
-	if (!HasAuthority() || !CanUpgrade())
+	return SetWorkbenchLevel(WorkbenchLevel + 1);
+}
+
+bool ABotanicusPreparationWorkbenchActor::
+CanChangeWorkbenchLevel(int32 TargetLevel) const
+{
+	if (TargetLevel < 1 || TargetLevel > 5)
 	{
 		return false;
 	}
-	++WorkbenchLevel;
+
+	if (TargetLevel >= WorkbenchLevel)
+	{
+		return true;
+	}
+
+	TArray<ABotanicusSalePotActor*> Pots;
+	GetPreparedPots(Pots);
+	for (const ABotanicusSalePotActor* Pot : Pots)
+	{
+		if (!IsValid(Pot))
+		{
+			continue;
+		}
+
+		int32 ClosestSlotIndex = INDEX_NONE;
+		float ClosestDistanceSquared =
+			TNumericLimits<float>::Max();
+		for (int32 SlotIndex = 0;
+			 SlotIndex < WorkbenchLevel;
+			 ++SlotIndex)
+		{
+			const float DistanceSquared =
+				FVector::DistSquared(
+					Pot->GetActorLocation(),
+					GetSalePotPreparationTransform(
+						SlotIndex).GetLocation());
+			if (DistanceSquared < ClosestDistanceSquared)
+			{
+				ClosestDistanceSquared = DistanceSquared;
+				ClosestSlotIndex = SlotIndex;
+			}
+		}
+
+		if (ClosestSlotIndex >= TargetLevel)
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool ABotanicusPreparationWorkbenchActor::
+SetWorkbenchLevel(int32 TargetLevel)
+{
+	if (!HasAuthority() ||
+		TargetLevel == WorkbenchLevel ||
+		!CanChangeWorkbenchLevel(TargetLevel))
+	{
+		return false;
+	}
+
+	WorkbenchLevel = TargetLevel;
 	RefreshLevelVisuals();
 	ForceNetUpdate();
 	return true;
@@ -294,12 +522,56 @@ void ABotanicusPreparationWorkbenchActor::SetMoveContentsWithFurniture(
 	bMoveContentsWithFurniture = bEnabled;
 	if (bEnabled)
 	{
-		CapturePreparedPotTransforms();
+		AttachPreparedPotsForMove();
 	}
 	else
 	{
-		ClearPreparedPotTransforms();
+		DetachPreparedPotsAfterMove();
 	}
+}
+
+bool ABotanicusPreparationWorkbenchActor::
+CanAccessUpgradeTerminal(const AActor* Interactor) const
+{
+	return IsValid(Interactor) &&
+		IsValid(UpgradeTerminal) &&
+		!IsValid(GetCarrier()) &&
+		!IsInPlacementMode() &&
+		FVector::DistSquared(
+			Interactor->GetActorLocation(),
+			UpgradeTerminal->GetComponentLocation()) <=
+			FMath::Square(350.0f);
+}
+
+bool ABotanicusPreparationWorkbenchActor::
+IsUpgradeTerminalTargeted(const AActor* Interactor) const
+{
+	const APawn* Pawn = Cast<APawn>(Interactor);
+	const AController* Controller =
+		Pawn ? Pawn->GetController() : nullptr;
+	UWorld* World = GetWorld();
+	if (!Pawn || !Controller || !World ||
+		!CanAccessUpgradeTerminal(Interactor))
+	{
+		return false;
+	}
+
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	Controller->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	FCollisionQueryParams QueryParams(
+		SCENE_QUERY_STAT(BotanicusWorkbenchUpgradeTerminal),
+		false,
+		Interactor);
+	FHitResult Hit;
+	return World->LineTraceSingleByChannel(
+			Hit,
+			ViewLocation,
+			ViewLocation + ViewRotation.Vector() * 400.0f,
+			ECC_Visibility,
+			QueryParams) &&
+		Hit.GetActor() == this &&
+		Hit.GetComponent() == UpgradeTerminal;
 }
 
 bool ABotanicusPreparationWorkbenchActor::IsSlotOccupied(
@@ -396,10 +668,11 @@ void ABotanicusPreparationWorkbenchActor::OnRep_WorkbenchLevel()
 	RefreshLevelVisuals();
 }
 
-void ABotanicusPreparationWorkbenchActor::CapturePreparedPotTransforms()
+void ABotanicusPreparationWorkbenchActor::AttachPreparedPotsForMove()
 {
+	DetachPreparedPotsAfterMove();
 	MovingPreparedPots.Reset();
-	MovingPreparedPotRelativeTransforms.Reset();
+
 	TArray<ABotanicusSalePotActor*> Pots;
 	GetPreparedPots(Pots);
 	for (ABotanicusSalePotActor* Pot : Pots)
@@ -408,31 +681,11 @@ void ABotanicusPreparationWorkbenchActor::CapturePreparedPotTransforms()
 		{
 			continue;
 		}
-		MovingPreparedPots.Add(Pot);
-		MovingPreparedPotRelativeTransforms.Add(
-			Pot->GetActorTransform().GetRelativeTransform(
-				GetActorTransform()));
-	}
-}
 
-void ABotanicusPreparationWorkbenchActor::ApplyPreparedPotTransforms()
-{
-	for (int32 Index = 0;
-		MovingPreparedPots.IsValidIndex(Index) &&
-		MovingPreparedPotRelativeTransforms.IsValidIndex(Index);
-		++Index)
-	{
-		ABotanicusSalePotActor* Pot = MovingPreparedPots[Index].Get();
-		if (!IsValid(Pot))
-		{
-			continue;
-		}
-		Pot->SetActorTransform(
-			MovingPreparedPotRelativeTransforms[Index] *
-			GetActorTransform(),
-			false,
-			nullptr,
-			ETeleportType::TeleportPhysics);
+		MovingPreparedPots.Add(Pot);
+		Pot->AttachToActor(
+			this,
+			FAttachmentTransformRules::KeepWorldTransform);
 		if (HasAuthority())
 		{
 			Pot->SetNetDormancy(DORM_Awake);
@@ -442,8 +695,78 @@ void ABotanicusPreparationWorkbenchActor::ApplyPreparedPotTransforms()
 	}
 }
 
-void ABotanicusPreparationWorkbenchActor::ClearPreparedPotTransforms()
+void ABotanicusPreparationWorkbenchActor::DetachPreparedPotsAfterMove()
 {
+	for (const TWeakObjectPtr<ABotanicusSalePotActor>& PotPtr :
+		 MovingPreparedPots)
+	{
+		ABotanicusSalePotActor* Pot = PotPtr.Get();
+		if (!IsValid(Pot) || Pot->GetAttachParentActor() != this)
+		{
+			continue;
+		}
+
+		Pot->DetachFromActor(
+			FDetachmentTransformRules::KeepWorldTransform);
+		if (HasAuthority())
+		{
+			Pot->SetNetDormancy(DORM_Awake);
+			Pot->FlushNetDormancy();
+			Pot->ForceNetUpdate();
+		}
+	}
 	MovingPreparedPots.Reset();
-	MovingPreparedPotRelativeTransforms.Reset();
+}
+
+void ABotanicusPreparationWorkbenchActor::
+RefreshLocalPlacementPrompt()
+{
+	if (!PlacementPrompt)
+	{
+		return;
+	}
+
+	PlacementPrompt->SetVisibility(false);
+	UWorld* World = GetWorld();
+	APlayerController* Controller =
+		World ? World->GetFirstPlayerController() : nullptr;
+	ABotanicusCharacter* Character =
+		Controller && Controller->IsLocalController()
+			? Cast<ABotanicusCharacter>(Controller->GetPawn())
+			: nullptr;
+	const UBotanicusQuickBarComponent* QuickBar =
+		Character ? Character->GetQuickBarComponent() : nullptr;
+	if (!Controller ||
+		!Controller->PlayerCameraManager ||
+		!Character ||
+		!QuickBar ||
+		QuickBar->GetSelectedSlot().ItemKey != TEXT("SalePot") ||
+		!IsSalePotSlotAvailable())
+	{
+		return;
+	}
+
+	const FVector CameraLocation =
+		Controller->PlayerCameraManager->GetCameraLocation();
+	const FVector CameraToWorkbench =
+		GetActorLocation() - CameraLocation;
+	const float CameraDistance = CameraToWorkbench.Size();
+	if (CameraDistance <= KINDA_SMALL_NUMBER ||
+		CameraDistance > 600.0f ||
+		FVector::DistSquared(
+			Character->GetActorLocation(),
+			GetActorLocation()) > FMath::Square(500.0f) ||
+		FVector::DotProduct(
+			Controller->PlayerCameraManager->
+				GetCameraRotation().Vector(),
+			CameraToWorkbench / CameraDistance) <
+			FMath::Cos(FMath::DegreesToRadians(28.0f)))
+	{
+		return;
+	}
+
+	PlacementPrompt->SetVisibility(true);
+	PlacementPrompt->SetWorldRotation(
+		(CameraLocation -
+		 PlacementPrompt->GetComponentLocation()).Rotation());
 }

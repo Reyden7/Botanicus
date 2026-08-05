@@ -15,6 +15,7 @@ class UBotanicusQuickBarWidget;
 class UBotanicusTopDownToolbarWidget;
 class UBotanicusCarryProgressWidget;
 class UBotanicusOrderCatalogWidget;
+class UBotanicusWorkbenchUpgradeWidget;
 class UBotanicusDevelopmentPanelWidget;
 class UBotanicusBuildingCatalogWidget;
 class UBotanicusSharedFundsWidget;
@@ -43,6 +44,7 @@ class ABotanicusWateringCanActor;
 class ABotanicusWaterReserveActor;
 class ABotanicusComputerActor;
 class ABotanicusStorageShelfActor;
+class ABotanicusPreparationWorkbenchActor;
 class UActorComponent;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
@@ -192,6 +194,17 @@ public:
 
 	UFUNCTION(Client, Reliable)
 	void ClientOpenOrderCatalogFromComputer();
+
+	UFUNCTION(Client, Reliable)
+	void ClientOpenPreparationWorkbenchUpgrade(
+		ABotanicusPreparationWorkbenchActor* Workbench);
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Preparation")
+	void ClosePreparationWorkbenchUpgrade();
+
+	void RequestPreparationWorkbenchLevel(
+		ABotanicusPreparationWorkbenchActor* Workbench,
+		int32 TargetLevel);
 
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Delivery")
 	void PlaceCatalogOrder(FName ItemKey);
@@ -373,6 +386,7 @@ protected:
 	void InitializeInteractionTargetWidget();
 	void InitializeTopDownToolbarWidget();
 	void InitializeOrderCatalogWidget();
+	void InitializeWorkbenchUpgradeWidget();
 	void InitializeDevelopmentPanelWidget();
 	void InitializeBuildingCatalogWidget();
 	void BeginPathPlacementInternal(EBotanicusPathType PathType);
@@ -440,6 +454,7 @@ protected:
 	bool TryRefillHeldWateringCan();
 	void UpdateWateringCanRefill(float DeltaTime);
 	void EndWateringCanRefill(bool bNotifyServer);
+	bool TryOpenNearbyWorkbenchUpgrade();
 	bool TryUseNearbyComputer();
 	bool TryMoveNearbyPlaceableItem();
 	void BeginPlaceableItemMoveCharge(
@@ -448,6 +463,7 @@ protected:
 	void CancelPlaceableItemMoveCharge();
 	bool TryBeginNearbyPlantPotAction();
 	bool TryBeginNearbySalePotAction();
+	bool TryPlaceSelectedSalePotOnWorkbench();
 	bool TryBeginNearbyParcelCut();
 	void EndParcelCut();
 	bool TryPlacePlantOnNearbySalesDisplay();
@@ -658,6 +674,15 @@ protected:
 	void ServerUpgradePreparationWorkbench();
 
 	UFUNCTION(Server, Reliable)
+	void ServerUseWorkbenchUpgradeTerminal(
+		ABotanicusPreparationWorkbenchActor* Workbench);
+
+	UFUNCTION(Server, Reliable)
+	void ServerSetPreparationWorkbenchLevel(
+		ABotanicusPreparationWorkbenchActor* Workbench,
+		int32 TargetLevel);
+
+	UFUNCTION(Server, Reliable)
 	void ServerSetMainShopOpen(bool bOpen);
 
 	UFUNCTION(Server, Reliable)
@@ -704,7 +729,9 @@ protected:
 
 	UFUNCTION(Server, Reliable)
 	void ServerConfirmLargeEquipmentPlacement(
-		ABotanicusLargeEquipmentActor* Equipment);
+		ABotanicusLargeEquipmentActor* Equipment,
+		FVector_NetQuantize10 RequestedLocation,
+		float RequestedYaw);
 
 	UFUNCTION(Server, Reliable)
 	void ServerCancelLargeEquipmentPlacement(
@@ -853,6 +880,10 @@ protected:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusOrderCatalogWidget> OrderCatalogWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBotanicusWorkbenchUpgradeWidget>
+		WorkbenchUpgradeWidget;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusDevelopmentPanelWidget>

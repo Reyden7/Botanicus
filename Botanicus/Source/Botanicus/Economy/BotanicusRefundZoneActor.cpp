@@ -21,13 +21,13 @@
 namespace
 {
 	constexpr int32 RefundPercent = 80;
+	constexpr float RefundContainmentTolerance = 12.0f;
 
 	bool IsProtectedGameplayItem(
 		const FBotanicusItemDefinition& Definition)
 	{
 		return Definition.Category == EBotanicusItemCategory::Tool ||
 			Definition.ItemKey == TEXT("CashRegister") ||
-			Definition.ItemKey == TEXT("PreparationWorkbench") ||
 			Definition.ItemKey == TEXT("CommandComputer");
 	}
 }
@@ -182,8 +182,10 @@ bool ABotanicusRefundZoneActor::IsObjectFullyInside(
 	{
 		const FVector LocalCorner =
 			GetActorTransform().InverseTransformPosition(Corner);
-		if (FMath::Abs(LocalCorner.X) > BoxExtent.X ||
-			FMath::Abs(LocalCorner.Y) > BoxExtent.Y)
+		if (FMath::Abs(LocalCorner.X) >
+				BoxExtent.X + RefundContainmentTolerance ||
+			FMath::Abs(LocalCorner.Y) >
+				BoxExtent.Y + RefundContainmentTolerance)
 		{
 			return false;
 		}

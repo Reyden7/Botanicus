@@ -60,6 +60,7 @@
 #include "UI/BotanicusCarryProgressWidget.h"
 #include "UI/BotanicusBuildingCatalogWidget.h"
 #include "UI/BotanicusOrderCatalogWidget.h"
+#include "UI/BotanicusWorkbenchUpgradeWidget.h"
 #include "UI/BotanicusDevelopmentPanelWidget.h"
 #include "UI/BotanicusSharedFundsWidget.h"
 #include "UI/BotanicusShopObjectivesWidget.h"
@@ -824,6 +825,11 @@ void ABotanicusPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReaso
 		OrderCatalogWidget->RemoveFromParent();
 		OrderCatalogWidget = nullptr;
 	}
+	if (WorkbenchUpgradeWidget)
+	{
+		WorkbenchUpgradeWidget->RemoveFromParent();
+		WorkbenchUpgradeWidget = nullptr;
+	}
 	if (DevelopmentPanelWidget)
 	{
 		DevelopmentPanelWidget->RemoveFromParent();
@@ -1124,6 +1130,18 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		return true;
 	}
 
+	if (WorkbenchUpgradeWidget &&
+		WorkbenchUpgradeWidget->GetVisibility() ==
+			ESlateVisibility::Visible)
+	{
+		if (Params.Key == EKeys::Escape &&
+			Params.Event == IE_Pressed)
+		{
+			ClosePreparationWorkbenchUpgrade();
+		}
+		return true;
+	}
+
 	if (IsValid(LocalStorageCollectionItem))
 	{
 		if (Params.Event == IE_Pressed &&
@@ -1262,8 +1280,10 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 	if (Params.Key == EKeys::E &&
 		Params.Event == IE_Pressed &&
 		!bBuildingTopDownViewActive &&
-		(TryUseNearbyComputer() ||
+		(TryOpenNearbyWorkbenchUpgrade() ||
+		 TryUseNearbyComputer() ||
 		 TryHandleNearbyWateringCan() ||
+		 TryPlaceSelectedSalePotOnWorkbench() ||
 		 TryHandleNearbyLargeEquipment() ||
 		 TryCollectNearbyDeliveryParcel() ||
 		 TryMoveNearbyPlaceableItem()))
@@ -2494,6 +2514,31 @@ void ABotanicusPlayerController::InitializeOrderCatalogWidget()
 	OrderCatalogWidget->SetVisibility(ESlateVisibility::Collapsed);
 }
 
+void ABotanicusPlayerController::InitializeWorkbenchUpgradeWidget()
+{
+	if (!IsLocalPlayerController() || WorkbenchUpgradeWidget)
+	{
+		return;
+	}
+
+	WorkbenchUpgradeWidget =
+		CreateWidget<UBotanicusWorkbenchUpgradeWidget>(
+			this,
+			UBotanicusWorkbenchUpgradeWidget::StaticClass());
+	if (!WorkbenchUpgradeWidget)
+	{
+		UE_LOG(
+			LogBotanicus,
+			Error,
+			TEXT("Could not create the workbench upgrade panel."));
+		return;
+	}
+
+	WorkbenchUpgradeWidget->AddToPlayerScreen(75);
+	WorkbenchUpgradeWidget->SetVisibility(
+		ESlateVisibility::Collapsed);
+}
+
 void ABotanicusPlayerController::
 	InitializeDevelopmentPanelWidget()
 {
@@ -3653,6 +3698,88 @@ void ABotanicusPlayerController::
 	OrderCatalogWidget->Refresh();
 }
 
+void ABotanicusPlayerController::
+	ClientOpenPreparationWorkbenchUpgrade_Implementation(
+		ABotanicusPreparationWorkbenchActor* Workbench)
+{
+	if (!IsLocalPlayerController() || !IsValid(Workbench))
+	{
+		return;
+	}
+
+	InitializeWorkbenchUpgradeWidget();
+	if (!WorkbenchUpgradeWidget)
+	{
+		return;
+	}
+
+	if (OrderCatalogWidget)
+	{
+		OrderCatalogWidget->SetVisibility(
+			ESlateVisibility::Collapsed);
+	}
+	if (BuildingCatalogWidget)
+	{
+		BuildingCatalogWidget->SetVisibility(
+			ESlateVisibility::Collapsed);
+	}
+	if (DevelopmentPanelWidget)
+	{
+		DevelopmentPanelWidget->SetVisibility(
+			ESlateVisibility::Collapsed);
+	}
+	bOrderCatalogOpenedFromComputer = false;
+	bAzertyForwardPressed = false;
+	bAzertyBackwardPressed = false;
+	bAzertyLeftPressed = false;
+	bAzertyRightPressed = false;
+
+	WorkbenchUpgradeWidget->InitializeWithWorkbench(
+		this,
+		Workbench);
+	WorkbenchUpgradeWidget->SetVisibility(
+		ESlateVisibility::Visible);
+	bShowMouseCursor = true;
+	FInputModeGameAndUI InputMode;
+	InputMode.SetHideCursorDuringCapture(false);
+	InputMode.SetLockMouseToViewportBehavior(
+		EMouseLockMode::DoNotLock);
+	InputMode.SetWidgetToFocus(
+		WorkbenchUpgradeWidget->TakeWidget());
+	SetInputMode(InputMode);
+	WorkbenchUpgradeWidget->SetKeyboardFocus();
+}
+
+void ABotanicusPlayerController::
+ClosePreparationWorkbenchUpgrade()
+{
+	if (!IsLocalPlayerController() || !WorkbenchUpgradeWidget)
+	{
+		return;
+	}
+
+	WorkbenchUpgradeWidget->SetVisibility(
+		ESlateVisibility::Collapsed);
+	bShowMouseCursor = false;
+	SetInputMode(FInputModeGameOnly());
+}
+
+void ABotanicusPlayerController::
+RequestPreparationWorkbenchLevel(
+	ABotanicusPreparationWorkbenchActor* Workbench,
+	int32 TargetLevel)
+{
+	if (IsLocalPlayerController() &&
+		IsValid(Workbench) &&
+		TargetLevel >= 1 &&
+		TargetLevel <= 5)
+	{
+		ServerSetPreparationWorkbenchLevel(
+			Workbench,
+			TargetLevel);
+	}
+}
+
 void ABotanicusPlayerController::PlaceCatalogOrder(FName ItemKey)
 {
 	if (IsLocalPlayerController() &&
@@ -4197,6 +4324,44 @@ bool ABotanicusPlayerController::TryHandleNearbyLargeEquipment()
 	return true;
 }
 
+bool ABotanicusPlayerController::TryOpenNearbyWorkbenchUpgrade()
+{
+	if (!IsLocalPlayerController() || !GetPawn() || !GetWorld())
+	{
+		return false;
+	}
+
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	GetPlayerViewPoint(ViewLocation, ViewRotation);
+	FCollisionQueryParams QueryParams(
+		SCENE_QUERY_STAT(BotanicusWorkbenchUpgradeInput),
+		false,
+		GetPawn());
+	FHitResult Hit;
+	if (!GetWorld()->LineTraceSingleByChannel(
+			Hit,
+			ViewLocation,
+			ViewLocation + ViewRotation.Vector() * 400.0f,
+			ECC_Visibility,
+			QueryParams))
+	{
+		return false;
+	}
+
+	ABotanicusPreparationWorkbenchActor* Workbench =
+		Cast<ABotanicusPreparationWorkbenchActor>(
+			Hit.GetActor());
+	if (!Workbench ||
+		!Workbench->IsUpgradeTerminalTargeted(GetPawn()))
+	{
+		return false;
+	}
+
+	ServerUseWorkbenchUpgradeTerminal(Workbench);
+	return true;
+}
+
 void ABotanicusPlayerController::BeginEquipmentCarryCharge(
 	ABotanicusLargeEquipmentActor* Equipment)
 {
@@ -4597,7 +4762,9 @@ void ABotanicusPlayerController::ConfirmLargeEquipmentPlacement()
 	}
 
 	ServerConfirmLargeEquipmentPlacement(
-		LocalLargeEquipmentPlacement);
+		LocalLargeEquipmentPlacement,
+		LocalLargeEquipmentPlacement->GetActorLocation(),
+		LargeEquipmentPlacementYaw);
 	if (ABotanicusStorageShelfActor* Shelf =
 			Cast<ABotanicusStorageShelfActor>(
 				LocalLargeEquipmentPlacement))
@@ -4767,6 +4934,19 @@ bool ABotanicusPlayerController::ResolveLargeEquipmentPlacement(
 		false);
 	FloorQuery.AddIgnoredActor(Equipment);
 	FloorQuery.AddIgnoredActor(ControlledPawn);
+	for (ABotanicusPlaceableItemActor* StoredItem :
+		 StoredShelfItems)
+	{
+		FloorQuery.AddIgnoredActor(StoredItem);
+	}
+	for (ABotanicusSalePotActor* PreparedPot : PreparedPots)
+	{
+		FloorQuery.AddIgnoredActor(PreparedPot);
+	}
+	for (AActor* SurfaceContent : WorkSurfaceContents)
+	{
+		FloorQuery.AddIgnoredActor(SurfaceContent);
+	}
 	const float PawnBaseZ = ControlledPawn->GetActorLocation().Z;
 	const FVector TraceStart(
 		RequestedLocation.X,
@@ -7539,6 +7719,110 @@ bool ABotanicusPlayerController::TryBeginNearbySalePotAction()
 }
 
 bool ABotanicusPlayerController::
+	TryPlaceSelectedSalePotOnWorkbench()
+{
+	ABotanicusCharacter* BotanicusCharacter =
+		Cast<ABotanicusCharacter>(GetPawn());
+	UBotanicusQuickBarComponent* QuickBar =
+		BotanicusCharacter
+			? BotanicusCharacter->GetQuickBarComponent()
+			: nullptr;
+	if (!IsLocalPlayerController() ||
+		!BotanicusCharacter ||
+		!QuickBar ||
+		!GetWorld() ||
+		IsValid(LocalQuickBarItemPreview) ||
+		IsValid(LocalLargeEquipmentPlacement) ||
+		IsValid(LocalMovedPlaceableItem))
+	{
+		return false;
+	}
+
+	const int32 SelectedSlotIndex =
+		QuickBar->GetSelectedSlotIndex();
+	const FBotanicusQuickBarSlot SelectedSlot =
+		QuickBar->GetSelectedSlot();
+	if (SelectedSlot.IsEmpty() ||
+		SelectedSlot.ItemKey != TEXT("SalePot"))
+	{
+		return false;
+	}
+
+	for (TActorIterator<ABotanicusSalePotActor> PotIt(GetWorld());
+		 PotIt;
+		 ++PotIt)
+	{
+		if (!PotIt->ActorHasTag(TEXT("BotanicusPlacementPreview")) &&
+			IsLookingAtWorldItem(*PotIt, 400.0f))
+		{
+			// Looking at an existing pot keeps the hold-E pickup path
+			// available, even when a neighbouring workbench slot is free.
+			return false;
+		}
+	}
+
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	GetPlayerViewPoint(ViewLocation, ViewRotation);
+	ABotanicusPreparationWorkbenchActor* TargetWorkbench = nullptr;
+	FTransform TargetTransform;
+	int32 TargetSlotIndex = INDEX_NONE;
+	float BestDistanceSquared = FMath::Square(600.0f);
+	for (TActorIterator<ABotanicusPreparationWorkbenchActor>
+			 WorkbenchIt(GetWorld());
+		 WorkbenchIt;
+		 ++WorkbenchIt)
+	{
+		if (WorkbenchIt->GetCarrier() ||
+			WorkbenchIt->IsInPlacementMode() ||
+			FVector::DistSquared(
+				BotanicusCharacter->GetActorLocation(),
+				WorkbenchIt->GetActorLocation()) >
+				FMath::Square(500.0f))
+		{
+			continue;
+		}
+
+		FTransform CandidateTransform;
+		int32 CandidateSlotIndex = INDEX_NONE;
+		if (!WorkbenchIt->FindAimedAvailableSalePotSlot(
+				ViewLocation,
+				ViewRotation.Vector(),
+				CandidateTransform,
+				CandidateSlotIndex))
+		{
+			continue;
+		}
+
+		const float DistanceSquared =
+			FVector::DistSquared(
+				ViewLocation,
+				CandidateTransform.GetLocation());
+		if (DistanceSquared < BestDistanceSquared)
+		{
+			BestDistanceSquared = DistanceSquared;
+			TargetWorkbench = *WorkbenchIt;
+			TargetTransform = CandidateTransform;
+			TargetSlotIndex = CandidateSlotIndex;
+		}
+	}
+
+	if (!TargetWorkbench || TargetSlotIndex == INDEX_NONE)
+	{
+		return false;
+	}
+
+	ServerPlaceQuickBarItem(
+		SelectedSlotIndex,
+		SelectedSlot.InstanceId,
+		SelectedSlot.ItemKey,
+		TargetTransform.GetLocation(),
+		TargetTransform.Rotator().Yaw,
+		1);
+	return true;
+}
+
+bool ABotanicusPlayerController::
 	TryPlacePlantOnNearbySalesDisplay()
 {
 	if (!IsLocalPlayerController() || !GetPawn() || !GetWorld() ||
@@ -9253,6 +9537,88 @@ void ABotanicusPlayerController::
 	ScheduleSharedStateAutosave(this);
 }
 
+void ABotanicusPlayerController::
+	ServerUseWorkbenchUpgradeTerminal_Implementation(
+		ABotanicusPreparationWorkbenchActor* Workbench)
+{
+	if (!IsValid(Workbench) ||
+		!Workbench->CanAccessUpgradeTerminal(GetPawn()) ||
+		!Workbench->IsUpgradeTerminalTargeted(GetPawn()))
+	{
+		return;
+	}
+
+	ClientOpenPreparationWorkbenchUpgrade(Workbench);
+}
+
+void ABotanicusPlayerController::
+	ServerSetPreparationWorkbenchLevel_Implementation(
+		ABotanicusPreparationWorkbenchActor* Workbench,
+		int32 TargetLevel)
+{
+	if (!IsValid(Workbench) ||
+		!Workbench->CanAccessUpgradeTerminal(GetPawn()) ||
+		TargetLevel < 1 ||
+		TargetLevel > 5)
+	{
+		return;
+	}
+
+	const int32 CurrentLevel = Workbench->GetWorkbenchLevel();
+	if (TargetLevel == CurrentLevel)
+	{
+		return;
+	}
+	if (!Workbench->CanChangeWorkbenchLevel(TargetLevel))
+	{
+		ClientMessage(
+			TEXT(
+				"Downgrade impossible : retirez d'abord les pots des emplacements qui vont disparaitre."));
+		return;
+	}
+
+	const int32 TransitionCost =
+		Workbench->GetLevelTransitionCost(TargetLevel);
+	if (TransitionCost > 0 &&
+		!TrySpendSharedFunds(this, TransitionCost))
+	{
+		ClientMessage(
+			TEXT(
+				"Credits communs insuffisants pour cette amelioration."));
+		return;
+	}
+
+	if (!Workbench->SetWorkbenchLevel(TargetLevel))
+	{
+		if (TransitionCost > 0)
+		{
+			AddSharedFunds(this, TransitionCost);
+		}
+		return;
+	}
+
+	if (TransitionCost < 0)
+	{
+		AddSharedFunds(this, -TransitionCost);
+	}
+
+	const FString ResultMessage =
+		TargetLevel > CurrentLevel
+			? FString::Printf(
+				TEXT(
+					"Atelier ameliore au niveau %d pour %d credits."),
+				TargetLevel,
+				FMath::Abs(TransitionCost))
+			: FString::Printf(
+				TEXT(
+					"Atelier ramene au niveau %d : %d credits rembourses."),
+				TargetLevel,
+				FMath::Abs(TransitionCost));
+	ClientMessage(ResultMessage);
+	OnRep_OrderState();
+	ScheduleSharedStateAutosave(this);
+}
+
 void ABotanicusPlayerController::ServerSetMainShopOpen_Implementation(
 	bool bOpen)
 {
@@ -9823,7 +10189,9 @@ void ABotanicusPlayerController::
 
 void ABotanicusPlayerController::
 	ServerConfirmLargeEquipmentPlacement_Implementation(
-		ABotanicusLargeEquipmentActor* Equipment)
+		ABotanicusLargeEquipmentActor* Equipment,
+		FVector_NetQuantize10 RequestedLocation,
+		float RequestedYaw)
 {
 	if (!IsValid(Equipment) ||
 		Equipment->GetCarrier() != GetPawn() ||
@@ -9848,8 +10216,8 @@ void ABotanicusPlayerController::
 	FTransform PlacementTransform;
 	const bool bIsValid = ResolveLargeEquipmentPlacement(
 		Equipment,
-		Equipment->GetActorLocation(),
-		Equipment->GetActorRotation().Yaw,
+		FVector(RequestedLocation),
+		RequestedYaw,
 		PlacementTransform);
 	Equipment->UpdatePlacement(PlacementTransform, bIsValid);
 	if (bIsValid)
