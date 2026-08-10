@@ -38,7 +38,9 @@ protected:
 
 private:
 	template <typename WidgetType>
-	WidgetType* CreateElement(UNamedSlot* HostSlot);
+	WidgetType* CreateElement(
+		UNamedSlot* HostSlot,
+		const TCHAR* BlueprintClassPath = nullptr);
 
 	UPROPERTY(meta=(BindWidget))
 	TObjectPtr<UNamedSlot> ClockSlot;

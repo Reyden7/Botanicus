@@ -24,7 +24,7 @@ private:
 	void BuildLayout();
 	void RefreshReputation();
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> ReputationLabel;
 
 	int32 LastDisplayedReputation = INDEX_NONE;

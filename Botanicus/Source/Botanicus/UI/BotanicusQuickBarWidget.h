@@ -106,6 +106,31 @@ protected:
 		const FGeometry& MyGeometry,
 		float InDeltaTime) override;
 
+	/** Editable in WBP_HUD_QuickBar > Class Defaults. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="HUD|Text")
+	FSlateFontInfo ShortcutTextFont;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="HUD|Text")
+	FSlateFontInfo ItemNameTextFont;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="HUD|Text")
+	FSlateFontInfo QuantityTextFont;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="HUD|Text")
+	FSlateFontInfo WaterStatusTextFont;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="HUD|Text")
+	FSlateFontInfo ReorganizationTextFont;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="HUD|Text")
+	FMargin ShortcutTextPadding;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="HUD|Text")
+	FMargin ItemNameTextPadding;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="HUD|Text")
+	FMargin QuantityTextPadding;
+
 private:
 	void BuildPrototypeLayout();
 	void Refresh();

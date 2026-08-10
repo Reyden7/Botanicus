@@ -10,6 +10,8 @@ class UTextBlock;
 class UVerticalBox;
 class UCanvasPanelSlot;
 class UImage;
+class UButton;
+class UCanvasPanel;
 
 /** Collapsible orange HUD list for the shared main-shop upgrade goals. */
 UCLASS()
@@ -31,11 +33,17 @@ private:
 	UFUNCTION()
 	void HandleToggleClicked();
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> TitleLabel;
 
-	UPROPERTY(Transient)
-	TObjectPtr<UVerticalBox> ObjectivesBody;
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
+	TObjectPtr<UWidget> ObjectivesBody;
+
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
+	TObjectPtr<UCanvasPanel> ObjectivesPanel;
+
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
+	TObjectPtr<UButton> ToggleButton;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> DayTitleLabel;
@@ -45,39 +53,39 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> DailySalesProgressLabel;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> DailyRevenueLabel;
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> DailyRevenueProgressLabel;
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UImage> DailyRevenueIcon;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> PlantSalesLabel;
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> PlantSalesProgressLabel;
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UImage> PlantSalesIcon;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> CatalogOrdersLabel;
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> CatalogOrdersProgressLabel;
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UImage> CatalogOrdersIcon;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> FundsGoalLabel;
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> FundsGoalProgressLabel;
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UImage> FundsGoalIcon;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> ReputationGoalLabel;
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> ReputationGoalProgressLabel;
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UImage> ReputationGoalIcon;
 
 	UPROPERTY(Transient)

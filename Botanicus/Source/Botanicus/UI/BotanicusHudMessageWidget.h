@@ -26,7 +26,7 @@ protected:
 private:
 	void BuildLayout();
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> MessageLabel;
 
 	double HideAtTime = 0.0;

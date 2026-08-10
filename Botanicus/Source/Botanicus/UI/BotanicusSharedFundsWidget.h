@@ -24,7 +24,7 @@ private:
 	void BuildLayout();
 	void RefreshFunds();
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> FundsLabel;
 
 	UPROPERTY(Transient)

@@ -23,6 +23,6 @@ protected:
 	virtual void NativeOnInitialized() override;
 
 private:
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> TargetNameText;
 };

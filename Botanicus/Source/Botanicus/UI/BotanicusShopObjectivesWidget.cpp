@@ -131,6 +131,15 @@ void UBotanicusShopObjectivesWidget::NativeOnInitialized()
 	{
 		BuildLayout();
 	}
+	if (ObjectivesPanel)
+	{
+		PanelCanvasSlot = Cast<UCanvasPanelSlot>(ObjectivesPanel->Slot);
+	}
+	if (ToggleButton)
+	{
+		ToggleButton->OnClicked.AddUniqueDynamic(
+			this, &UBotanicusShopObjectivesWidget::HandleToggleClicked);
+	}
 	RefreshObjectives();
 }
 
@@ -149,6 +158,7 @@ void UBotanicusShopObjectivesWidget::BuildLayout()
 	Root->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 
 	UCanvasPanel* ClipPanel = WidgetTree->ConstructWidget<UCanvasPanel>();
+	ObjectivesPanel = ClipPanel;
 	ClipPanel->SetClipping(EWidgetClipping::ClipToBounds);
 	PanelCanvasSlot = Root->AddChildToCanvas(ClipPanel);
 	PanelCanvasSlot->SetPosition(FVector2D::ZeroVector);
@@ -171,39 +181,42 @@ void UBotanicusShopObjectivesWidget::BuildLayout()
 	TitleSlot->SetPosition(FVector2D(68.0f, 27.0f));
 	TitleSlot->SetSize(FVector2D(226.0f, 43.0f));
 
-	UButton* ToggleButton = WidgetTree->ConstructWidget<UButton>();
+	ToggleButton = WidgetTree->ConstructWidget<UButton>();
 	ToggleButton->SetBackgroundColor(FLinearColor(1.0f, 1.0f, 1.0f, 0.01f));
 	UCanvasPanelSlot* ToggleSlot = ClipPanel->AddChildToCanvas(ToggleButton);
 	ToggleSlot->SetPosition(FVector2D(302.0f, 24.0f));
 	ToggleSlot->SetSize(FVector2D(49.0f, 49.0f));
-	ToggleButton->OnClicked.AddDynamic(
+	ToggleButton->OnClicked.AddUniqueDynamic(
 		this, &UBotanicusShopObjectivesWidget::HandleToggleClicked);
 
-	ObjectivesBody = WidgetTree->ConstructWidget<UVerticalBox>();
-	UCanvasPanelSlot* BodySlot = ClipPanel->AddChildToCanvas(ObjectivesBody);
+	UVerticalBox* ObjectivesVerticalBox =
+		WidgetTree->ConstructWidget<UVerticalBox>();
+	ObjectivesBody = ObjectivesVerticalBox;
+	UCanvasPanelSlot* BodySlot =
+		ClipPanel->AddChildToCanvas(ObjectivesVerticalBox);
 	BodySlot->SetPosition(FVector2D(33.0f, 82.0f));
 	BodySlot->SetSize(FVector2D(304.0f, 245.0f));
 
 	UImage* Icon = nullptr;
 	UTextBlock* Name = nullptr;
 	UTextBlock* Progress = nullptr;
-	CreateObjectiveRow(WidgetTree, ObjectivesBody, Icon, Name, Progress);
+	CreateObjectiveRow(WidgetTree, ObjectivesVerticalBox, Icon, Name, Progress);
 	PlantSalesIcon = Icon;
 	PlantSalesLabel = Name;
 	PlantSalesProgressLabel = Progress;
-	CreateObjectiveRow(WidgetTree, ObjectivesBody, Icon, Name, Progress);
+	CreateObjectiveRow(WidgetTree, ObjectivesVerticalBox, Icon, Name, Progress);
 	CatalogOrdersIcon = Icon;
 	CatalogOrdersLabel = Name;
 	CatalogOrdersProgressLabel = Progress;
-	CreateObjectiveRow(WidgetTree, ObjectivesBody, Icon, Name, Progress);
+	CreateObjectiveRow(WidgetTree, ObjectivesVerticalBox, Icon, Name, Progress);
 	ReputationGoalIcon = Icon;
 	ReputationGoalLabel = Name;
 	ReputationGoalProgressLabel = Progress;
-	CreateObjectiveRow(WidgetTree, ObjectivesBody, Icon, Name, Progress);
+	CreateObjectiveRow(WidgetTree, ObjectivesVerticalBox, Icon, Name, Progress);
 	FundsGoalIcon = Icon;
 	FundsGoalLabel = Name;
 	FundsGoalProgressLabel = Progress;
-	CreateObjectiveRow(WidgetTree, ObjectivesBody, Icon, Name, Progress);
+	CreateObjectiveRow(WidgetTree, ObjectivesVerticalBox, Icon, Name, Progress);
 	DailyRevenueIcon = Icon;
 	DailyRevenueLabel = Name;
 	DailyRevenueProgressLabel = Progress;

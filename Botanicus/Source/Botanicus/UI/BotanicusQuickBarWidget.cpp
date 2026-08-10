@@ -244,10 +244,11 @@ void UBotanicusQuickBarWidget::BuildPrototypeLayout()
 		ETextJustify::Center);
 	ReorganizationHelpText->SetColorAndOpacity(
 		FLinearColor(0.3f, 0.82f, 1.0f, 1.0f));
-	ReorganizationHelpText->SetFont(FSlateFontInfo(
-		FCoreStyle::GetDefaultFont(),
-		15,
-		TEXT("Bold")));
+	ReorganizationHelpText->SetFont(
+		ReorganizationTextFont.HasValidFont()
+			? ReorganizationTextFont
+			: FSlateFontInfo(
+				FCoreStyle::GetDefaultFont(), 15, TEXT("Bold")));
 	UCanvasPanelSlot* HelpCanvasSlot =
 		RootCanvas->AddChildToCanvas(ReorganizationHelpText);
 	HelpCanvasSlot->SetAnchors(FAnchors(0.5f, 1.0f));
@@ -284,10 +285,11 @@ void UBotanicusQuickBarWidget::BuildPrototypeLayout()
 	WateringCanText->SetJustification(ETextJustify::Center);
 	WateringCanText->SetColorAndOpacity(
 		FLinearColor(0.45f, 0.88f, 1.0f, 1.0f));
-	WateringCanText->SetFont(FSlateFontInfo(
-		FCoreStyle::GetDefaultFont(),
-		15,
-		TEXT("Bold")));
+	WateringCanText->SetFont(
+		WaterStatusTextFont.HasValidFont()
+			? WaterStatusTextFont
+			: FSlateFontInfo(
+				FCoreStyle::GetDefaultFont(), 15, TEXT("Bold")));
 	UVerticalBoxSlot* WaterTextSlot =
 		WaterStatusContent->AddChildToVerticalBox(
 			WateringCanText);
@@ -349,11 +351,16 @@ void UBotanicusQuickBarWidget::BuildPrototypeLayout()
 			FLinearColor(0.88f, 0.87f, 0.70f, 1.0f));
 		KeyLabel->SetShadowOffset(FVector2D(1.0f, 1.0f));
 		KeyLabel->SetShadowColorAndOpacity(FLinearColor::Black);
-		KeyLabel->SetFont(FSlateFontInfo(
-			FCoreStyle::GetDefaultFont(),
-			11,
-			TEXT("Bold")));
-		Content->AddChildToVerticalBox(KeyLabel);
+		KeyLabel->SetFont(
+			ShortcutTextFont.HasValidFont()
+				? ShortcutTextFont
+				: FSlateFontInfo(
+					FCoreStyle::GetDefaultFont(), 11, TEXT("Bold")));
+		if (UVerticalBoxSlot* KeyTextSlot =
+			Content->AddChildToVerticalBox(KeyLabel))
+		{
+			KeyTextSlot->SetPadding(ShortcutTextPadding);
+		}
 
 		UImage* ItemIcon = SlotWidget->GetBackgroundIcon();
 		UImage* FrameIcon = SlotWidget->GetFrameIcon();
@@ -366,15 +373,17 @@ void UBotanicusQuickBarWidget::BuildPrototypeLayout()
 		ItemLabel->SetShadowColorAndOpacity(FLinearColor::Black);
 		ItemLabel->SetJustification(ETextJustify::Center);
 		ItemLabel->SetAutoWrapText(true);
-		ItemLabel->SetFont(FSlateFontInfo(
-			FCoreStyle::GetDefaultFont(),
-			9));
+		ItemLabel->SetFont(
+			ItemNameTextFont.HasValidFont()
+				? ItemNameTextFont
+				: FSlateFontInfo(FCoreStyle::GetDefaultFont(), 9));
 		UVerticalBoxSlot* ItemSlot =
 			Content->AddChildToVerticalBox(ItemLabel);
 		ItemSlot->SetSize(
 			FSlateChildSize(ESlateSizeRule::Fill));
 		ItemSlot->SetHorizontalAlignment(HAlign_Fill);
 		ItemSlot->SetVerticalAlignment(VAlign_Center);
+		ItemSlot->SetPadding(ItemNameTextPadding);
 
 		UTextBlock* QuantityLabel =
 			WidgetTree->ConstructWidget<UTextBlock>();
@@ -383,11 +392,16 @@ void UBotanicusQuickBarWidget::BuildPrototypeLayout()
 		QuantityLabel->SetShadowOffset(FVector2D(1.0f, 1.0f));
 		QuantityLabel->SetShadowColorAndOpacity(FLinearColor::Black);
 		QuantityLabel->SetJustification(ETextJustify::Right);
-		QuantityLabel->SetFont(FSlateFontInfo(
-			FCoreStyle::GetDefaultFont(),
-			11,
-			TEXT("Bold")));
-		Content->AddChildToVerticalBox(QuantityLabel);
+		QuantityLabel->SetFont(
+			QuantityTextFont.HasValidFont()
+				? QuantityTextFont
+				: FSlateFontInfo(
+					FCoreStyle::GetDefaultFont(), 11, TEXT("Bold")));
+		if (UVerticalBoxSlot* QuantityTextSlot =
+			Content->AddChildToVerticalBox(QuantityLabel))
+		{
+			QuantityTextSlot->SetPadding(QuantityTextPadding);
+		}
 
 		SlotBackgrounds.Add(Background);
 		ItemLabels.Add(ItemLabel);

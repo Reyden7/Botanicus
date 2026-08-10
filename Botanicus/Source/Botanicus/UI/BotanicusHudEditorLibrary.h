@@ -16,4 +16,9 @@ class BOTANICUS_API UBotanicusHudEditorLibrary
 public:
 	UFUNCTION(BlueprintCallable, Category="Botanicus|HUD|Editor")
 	static bool BuildEditableHudLayout(UObject* WidgetBlueprintAsset);
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|HUD|Editor")
+	static bool BuildEditableHudElement(
+		UObject* WidgetBlueprintAsset,
+		FName ElementType);
 };

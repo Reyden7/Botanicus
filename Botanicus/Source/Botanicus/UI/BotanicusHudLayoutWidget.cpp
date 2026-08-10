@@ -12,14 +12,25 @@
 #include "UI/BotanicusShopObjectivesWidget.h"
 
 template <typename WidgetType>
-WidgetType* UBotanicusHudLayoutWidget::CreateElement(UNamedSlot* HostSlot)
+WidgetType* UBotanicusHudLayoutWidget::CreateElement(
+	UNamedSlot* HostSlot,
+	const TCHAR* BlueprintClassPath)
 {
 	if (!HostSlot)
 	{
 		return nullptr;
 	}
+	UClass* ElementClass = WidgetType::StaticClass();
+	if (BlueprintClassPath)
+	{
+		if (UClass* BlueprintClass =
+			LoadClass<WidgetType>(nullptr, BlueprintClassPath))
+		{
+			ElementClass = BlueprintClass;
+		}
+	}
 	WidgetType* Element = CreateWidget<WidgetType>(
-		GetOwningPlayer(), WidgetType::StaticClass());
+		GetOwningPlayer(), ElementClass);
 	if (Element)
 	{
 		HostSlot->SetContent(Element);
@@ -32,14 +43,21 @@ void UBotanicusHudLayoutWidget::NativeOnInitialized()
 	Super::NativeOnInitialized();
 	SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 
-	ClockWidget = CreateElement<UBotanicusClockWidget>(ClockSlot);
-	CreditsWidget = CreateElement<UBotanicusSharedFundsWidget>(CreditsSlot);
+	ClockWidget = CreateElement<UBotanicusClockWidget>(ClockSlot,
+		TEXT("/Game/Botanicus/UI/HUD/Elements/WBP_HUD_Clock.WBP_HUD_Clock_C"));
+	CreditsWidget = CreateElement<UBotanicusSharedFundsWidget>(CreditsSlot,
+		TEXT("/Game/Botanicus/UI/HUD/Elements/WBP_HUD_Credits.WBP_HUD_Credits_C"));
 	ReputationWidget =
-		CreateElement<UBotanicusReputationWidget>(ReputationSlot);
+		CreateElement<UBotanicusReputationWidget>(ReputationSlot,
+			TEXT("/Game/Botanicus/UI/HUD/Elements/WBP_HUD_Reputation.WBP_HUD_Reputation_C"));
 	ObjectivesWidget =
-		CreateElement<UBotanicusShopObjectivesWidget>(ObjectivesSlot);
-	QuickBarWidget = CreateElement<UBotanicusQuickBarWidget>(QuickBarSlot);
+		CreateElement<UBotanicusShopObjectivesWidget>(ObjectivesSlot,
+			TEXT("/Game/Botanicus/UI/HUD/Elements/WBP_HUD_Objectives.WBP_HUD_Objectives_C"));
+	QuickBarWidget = CreateElement<UBotanicusQuickBarWidget>(QuickBarSlot,
+		TEXT("/Game/Botanicus/UI/HUD/Elements/WBP_HUD_QuickBar.WBP_HUD_QuickBar_C"));
 	InteractionWidget =
-		CreateElement<UBotanicusInteractionTargetWidget>(InteractionSlot);
-	MessageWidget = CreateElement<UBotanicusHudMessageWidget>(MessageSlot);
+		CreateElement<UBotanicusInteractionTargetWidget>(InteractionSlot,
+			TEXT("/Game/Botanicus/UI/HUD/Elements/WBP_HUD_Interaction.WBP_HUD_Interaction_C"));
+	MessageWidget = CreateElement<UBotanicusHudMessageWidget>(MessageSlot,
+		TEXT("/Game/Botanicus/UI/HUD/Elements/WBP_HUD_Message.WBP_HUD_Message_C"));
 }
