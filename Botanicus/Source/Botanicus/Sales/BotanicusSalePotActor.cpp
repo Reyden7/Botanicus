@@ -49,7 +49,7 @@ FString SalePotPlantQualityLabel(FName QualityTag)
 	return TEXT("STANDARD");
 }
 
-float ReadBlueprintFloatSetting(
+float ReadSalePotBlueprintFloatSetting(
 	const UObject* Object,
 	const FName PropertyName,
 	const float Fallback)
@@ -62,7 +62,7 @@ float ReadBlueprintFloatSetting(
 	return Fallback;
 }
 
-FVector2D ReadBlueprintVector2DSetting(
+FVector2D ReadSalePotBlueprintVector2DSetting(
 	const UObject* Object,
 	const FName PropertyName,
 	const FVector2D& Fallback)
@@ -78,7 +78,7 @@ FVector2D ReadBlueprintVector2DSetting(
 	return Fallback;
 }
 
-bool ReadBlueprintBoolSetting(
+bool ReadSalePotBlueprintBoolSetting(
 	const UObject* Object,
 	const FName PropertyName,
 	const bool bFallback)
@@ -142,7 +142,7 @@ ABotanicusSalePotActor::ABotanicusSalePotActor()
 
 float ABotanicusSalePotActor::GetPreparationHeightAdjustment() const
 {
-	return ReadBlueprintFloatSetting(
+	return ReadSalePotBlueprintFloatSetting(
 		this,
 		TEXT("WorkbenchHeightAdjustmentSetting"),
 		PreparationHeightAdjustment);
@@ -150,25 +150,25 @@ float ABotanicusSalePotActor::GetPreparationHeightAdjustment() const
 
 FVector2D ABotanicusSalePotActor::GetConfiguredSoilHorizontalOffset() const
 {
-	return ReadBlueprintVector2DSetting(
+	return ReadSalePotBlueprintVector2DSetting(
 		this, TEXT("SoilHorizontalPosition"), SoilHorizontalOffset);
 }
 
 float ABotanicusSalePotActor::GetConfiguredSoilMaximumHeight() const
 {
-	return ReadBlueprintFloatSetting(
+	return ReadSalePotBlueprintFloatSetting(
 		this, TEXT("SoilMaximumHeightSetting"), SoilSurfaceHeight);
 }
 
 FVector2D ABotanicusSalePotActor::GetConfiguredSoilBottomRadii() const
 {
-	return ReadBlueprintVector2DSetting(
+	return ReadSalePotBlueprintVector2DSetting(
 		this, TEXT("SoilBottomRadiiSetting"), SoilBottomRadii);
 }
 
 FVector2D ABotanicusSalePotActor::GetConfiguredSoilTopRadii() const
 {
-	return ReadBlueprintVector2DSetting(
+	return ReadSalePotBlueprintVector2DSetting(
 		this, TEXT("SoilTopRadiiSetting"), SoilTopRadii);
 }
 
@@ -176,13 +176,13 @@ float ABotanicusSalePotActor::GetConfiguredSoilVolumeHeight() const
 {
 	return FMath::Max(
 		1.0f,
-		ReadBlueprintFloatSetting(
+		ReadSalePotBlueprintFloatSetting(
 			this, TEXT("SoilVolumeHeightSetting"), SoilVolumeHeight));
 }
 
 bool ABotanicusSalePotActor::GetConfiguredSquareSoilProfile() const
 {
-	return ReadBlueprintBoolSetting(
+	return ReadSalePotBlueprintBoolSetting(
 		this, TEXT("UseSquareSoilProfile"), bSquareSoilProfile);
 }
 

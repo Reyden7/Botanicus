@@ -4,15 +4,18 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
-#include "BotanicusSharedFundsWidget.generated.h"
+#include "BotanicusHudMessageWidget.generated.h"
 
 class UTextBlock;
 
-/** Movable HUD element displaying the nursery's shared wallet. */
+/** Short, discreet gameplay feedback displayed above the quick bar. */
 UCLASS()
-class BOTANICUS_API UBotanicusSharedFundsWidget : public UUserWidget
+class BOTANICUS_API UBotanicusHudMessageWidget : public UUserWidget
 {
 	GENERATED_BODY()
+
+public:
+	void ShowMessage(const FText& Message, float Lifetime = 3.0f);
 
 protected:
 	virtual void NativeOnInitialized() override;
@@ -22,11 +25,9 @@ protected:
 
 private:
 	void BuildLayout();
-	void RefreshFunds();
 
 	UPROPERTY(Transient)
-	TObjectPtr<UTextBlock> FundsLabel;
+	TObjectPtr<UTextBlock> MessageLabel;
 
-	UPROPERTY(Transient)
-	int32 LastDisplayedFunds = INDEX_NONE;
+	double HideAtTime = 0.0;
 };

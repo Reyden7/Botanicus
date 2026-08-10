@@ -30,6 +30,15 @@ public class Botanicus : ModuleRules
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });
+		if (Target.bBuildEditor)
+		{
+			PrivateDependencyModuleNames.AddRange(new string[] {
+				"AssetTools",
+				"Kismet",
+				"UnrealEd",
+				"UMGEditor"
+			});
+		}
 
 		DynamicallyLoadedModuleNames.Add("OnlineSubsystemSteam");
 

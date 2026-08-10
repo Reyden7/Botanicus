@@ -25,13 +25,14 @@
 #include "ItemDataAsset.h"
 #include "Growing/BotanicusWateringCanActor.h"
 #include "Styling/CoreStyle.h"
+#include "UI/BotanicusHudStyle.h"
 
 namespace
 {
-	constexpr float SlotSize = 68.0f;
-	const FLinearColor EmptySlotColor(0.015f, 0.02f, 0.015f, 0.82f);
-	const FLinearColor OccupiedSlotColor(0.04f, 0.10f, 0.055f, 0.92f);
-	const FLinearColor SelectedSlotColor(0.95f, 0.62f, 0.04f, 0.95f);
+	constexpr float SlotSize = 76.0f;
+	const FLinearColor EmptySlotColor = FLinearColor::Transparent;
+	const FLinearColor OccupiedSlotColor = FLinearColor::Transparent;
+	const FLinearColor SelectedSlotColor = FLinearColor::Transparent;
 	const FLinearColor PrimaryTextColor(0.93f, 0.96f, 0.91f, 1.0f);
 	const FLinearColor SecondaryTextColor(1.0f, 0.80f, 0.15f, 1.0f);
 }
@@ -52,9 +53,18 @@ void UBotanicusQuickBarSlotWidget::NativeOnInitialized()
 	{
 		Background = WidgetTree->ConstructWidget<UBorder>();
 		Background->SetPadding(FMargin(0.0f));
+		Background->SetBrushColor(FLinearColor::Transparent);
 
 		UOverlay* Layers =
 			WidgetTree->ConstructWidget<UOverlay>();
+		FrameIcon = WidgetTree->ConstructWidget<UImage>();
+		FrameIcon->SetBrushFromTexture(
+			BotanicusHudStyle::LoadTexture(TEXT("T_HUD_SlotNormal")), true);
+		if (UOverlaySlot* FrameSlot = Layers->AddChildToOverlay(FrameIcon))
+		{
+			FrameSlot->SetHorizontalAlignment(HAlign_Fill);
+			FrameSlot->SetVerticalAlignment(VAlign_Fill);
+		}
 		BackgroundIcon =
 			WidgetTree->ConstructWidget<UImage>();
 		BackgroundIcon->SetColorAndOpacity(
@@ -63,6 +73,7 @@ void UBotanicusQuickBarSlotWidget::NativeOnInitialized()
 			ESlateVisibility::Collapsed);
 		UOverlaySlot* BackgroundIconSlot =
 			Layers->AddChildToOverlay(BackgroundIcon);
+		BackgroundIconSlot->SetPadding(FMargin(11.0f));
 		BackgroundIconSlot->SetHorizontalAlignment(HAlign_Fill);
 		BackgroundIconSlot->SetVerticalAlignment(VAlign_Fill);
 
@@ -220,8 +231,7 @@ void UBotanicusQuickBarWidget::BuildPrototypeLayout()
 		RootCanvas->AddChildToCanvas(SlotRow);
 	RowCanvasSlot->SetAnchors(FAnchors(0.5f, 1.0f));
 	RowCanvasSlot->SetAlignment(FVector2D(0.5f, 1.0f));
-	// Kept above EBS' temporary three-tool strip during the prototype phase.
-	RowCanvasSlot->SetPosition(FVector2D(0.0f, -112.0f));
+	RowCanvasSlot->SetPosition(FVector2D::ZeroVector);
 	RowCanvasSlot->SetAutoSize(true);
 
 	ReorganizationHelpText =
@@ -242,7 +252,7 @@ void UBotanicusQuickBarWidget::BuildPrototypeLayout()
 		RootCanvas->AddChildToCanvas(ReorganizationHelpText);
 	HelpCanvasSlot->SetAnchors(FAnchors(0.5f, 1.0f));
 	HelpCanvasSlot->SetAlignment(FVector2D(0.5f, 1.0f));
-	HelpCanvasSlot->SetPosition(FVector2D(0.0f, -198.0f));
+	HelpCanvasSlot->SetPosition(FVector2D(0.0f, -160.0f));
 	HelpCanvasSlot->SetAutoSize(true);
 	ReorganizationHelpText->SetVisibility(
 		ESlateVisibility::Collapsed);
@@ -255,7 +265,7 @@ void UBotanicusQuickBarWidget::BuildPrototypeLayout()
 		RootCanvas->AddChildToCanvas(WaterStatusSize);
 	WaterStatusCanvasSlot->SetAnchors(FAnchors(0.5f, 1.0f));
 	WaterStatusCanvasSlot->SetAlignment(FVector2D(0.5f, 1.0f));
-	WaterStatusCanvasSlot->SetPosition(FVector2D(0.0f, -188.0f));
+	WaterStatusCanvasSlot->SetPosition(FVector2D(0.0f, -92.0f));
 	WaterStatusCanvasSlot->SetAutoSize(true);
 
 	WateringCanStatus =
@@ -300,6 +310,7 @@ void UBotanicusQuickBarWidget::BuildPrototypeLayout()
 	SlotBackgrounds.Reserve(UBotanicusQuickBarComponent::SlotCount);
 	ItemLabels.Reserve(UBotanicusQuickBarComponent::SlotCount);
 	ItemIcons.Reserve(UBotanicusQuickBarComponent::SlotCount);
+	FrameIcons.Reserve(UBotanicusQuickBarComponent::SlotCount);
 	QuantityLabels.Reserve(UBotanicusQuickBarComponent::SlotCount);
 
 	for (int32 SlotIndex = 0;
@@ -312,7 +323,7 @@ void UBotanicusQuickBarWidget::BuildPrototypeLayout()
 		SlotSizeBox->SetHeightOverride(SlotSize);
 		UHorizontalBoxSlot* HorizontalSlot =
 			SlotRow->AddChildToHorizontalBox(SlotSizeBox);
-		HorizontalSlot->SetPadding(FMargin(3.0f));
+		HorizontalSlot->SetPadding(FMargin(2.0f));
 
 		UBotanicusQuickBarSlotWidget* SlotWidget =
 			WidgetTree->ConstructWidget<
@@ -334,16 +345,18 @@ void UBotanicusQuickBarWidget::BuildPrototypeLayout()
 			SlotIndex == UBotanicusQuickBarComponent::SlotCount - 1
 				? 0
 				: SlotIndex + 1));
-		KeyLabel->SetColorAndOpacity(SecondaryTextColor);
+		KeyLabel->SetColorAndOpacity(
+			FLinearColor(0.88f, 0.87f, 0.70f, 1.0f));
 		KeyLabel->SetShadowOffset(FVector2D(1.0f, 1.0f));
 		KeyLabel->SetShadowColorAndOpacity(FLinearColor::Black);
 		KeyLabel->SetFont(FSlateFontInfo(
 			FCoreStyle::GetDefaultFont(),
-			12,
+			11,
 			TEXT("Bold")));
 		Content->AddChildToVerticalBox(KeyLabel);
 
 		UImage* ItemIcon = SlotWidget->GetBackgroundIcon();
+		UImage* FrameIcon = SlotWidget->GetFrameIcon();
 
 		UTextBlock* ItemLabel =
 			WidgetTree->ConstructWidget<UTextBlock>();
@@ -365,7 +378,8 @@ void UBotanicusQuickBarWidget::BuildPrototypeLayout()
 
 		UTextBlock* QuantityLabel =
 			WidgetTree->ConstructWidget<UTextBlock>();
-		QuantityLabel->SetColorAndOpacity(SecondaryTextColor);
+		QuantityLabel->SetColorAndOpacity(
+			FLinearColor(0.94f, 0.90f, 0.66f, 1.0f));
 		QuantityLabel->SetShadowOffset(FVector2D(1.0f, 1.0f));
 		QuantityLabel->SetShadowColorAndOpacity(FLinearColor::Black);
 		QuantityLabel->SetJustification(ETextJustify::Right);
@@ -378,6 +392,7 @@ void UBotanicusQuickBarWidget::BuildPrototypeLayout()
 		SlotBackgrounds.Add(Background);
 		ItemLabels.Add(ItemLabel);
 		ItemIcons.Add(ItemIcon);
+		FrameIcons.Add(FrameIcon);
 		QuantityLabels.Add(QuantityLabel);
 	}
 
@@ -482,6 +497,9 @@ void UBotanicusQuickBarWidget::Refresh()
 		UBorder* Background = SlotBackgrounds[SlotIndex];
 		UTextBlock* ItemLabel = ItemLabels[SlotIndex];
 		UImage* ItemIcon = ItemIcons[SlotIndex];
+		UImage* FrameIcon = FrameIcons.IsValidIndex(SlotIndex)
+			? FrameIcons[SlotIndex]
+			: nullptr;
 		UTextBlock* QuantityLabel = QuantityLabels[SlotIndex];
 
 		Background->SetBrushColor(
@@ -494,6 +512,15 @@ void UBotanicusQuickBarWidget::Refresh()
 				: (InventorySlot.IsEmpty()
 					? EmptySlotColor
 					: OccupiedSlotColor)));
+		if (FrameIcon)
+		{
+			FrameIcon->SetBrushFromTexture(
+				BotanicusHudStyle::LoadTexture(
+					SlotIndex == SelectedSlotIndex
+						? TEXT("T_HUD_SlotSelected")
+						: TEXT("T_HUD_SlotNormal")),
+				true);
+		}
 
 		if (InventorySlot.IsEmpty())
 		{

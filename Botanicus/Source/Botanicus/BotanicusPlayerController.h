@@ -24,6 +24,8 @@ class UBotanicusDaySummaryWidget;
 class UBotanicusClockWidget;
 class UBotanicusStorageQuantityWidget;
 class UBotanicusInteractionTargetWidget;
+class UBotanicusHudMessageWidget;
+class UBotanicusHudLayoutWidget;
 class UTextRenderComponent;
 class UBotanicusThrowPowerWidget;
 class ABotanicusGameState;
@@ -400,6 +402,12 @@ protected:
 	/** Consumes EBS' original V binding so the three-state camera cycle cannot run. */
 	virtual bool InputKey(const FInputKeyEventArgs& Params) override;
 
+	/** Replaces the engine's yellow console-style messages with HUD feedback. */
+	virtual void ClientMessage_Implementation(
+		const FString& S,
+		FName Type,
+		float MsgLifeTime) override;
+
 	/** Returns true if the player should use UMG touch controls */
 	bool ShouldUseTouchControls() const;
 
@@ -408,6 +416,7 @@ protected:
 	void EnterBuildingTopDownView();
 	void ExitBuildingTopDownView();
 	void ForceFirstPersonView();
+	void InitializeHudLayoutWidget();
 	void InitializeQuickBarWidget();
 	void ToggleQuickBarReorganizationMode();
 	void InitializeSharedFundsWidget();
@@ -416,6 +425,8 @@ protected:
 	void InitializeClockWidget();
 	void InitializeStorageQuantityWidget();
 	void InitializeInteractionTargetWidget();
+	void InitializeHudMessageWidget();
+	void SetHudCursorMode(bool bEnabled);
 	void InitializeTopDownToolbarWidget();
 	void InitializeOrderCatalogWidget();
 	void InitializeWorkbenchUpgradeWidget();
@@ -425,6 +436,7 @@ protected:
 	void BeginVisitorZonePlacement(int32 ZoneType);
 	void PlaceVisitorZoneAtCursor();
 	void HideEbsDemoHud();
+	void HideLegacyWorldGuidance();
 	void RefreshTopDownRoofVisibility();
 	void RestoreTopDownRoofVisibility();
 	void RefreshTopDownBuildingLabels(bool bShowLabels);
@@ -1127,6 +1139,11 @@ protected:
 	TObjectPtr<UBotanicusSharedFundsWidget>
 		SharedFundsWidget;
 
+	/** Master Widget Blueprint that owns all freely movable HUD slots. */
+	UPROPERTY(Transient)
+	TObjectPtr<UBotanicusHudLayoutWidget>
+		HudLayoutWidget;
+
 	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusShopObjectivesWidget>
 		ShopObjectivesWidget;
@@ -1146,6 +1163,12 @@ protected:
 	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusInteractionTargetWidget>
 		InteractionTargetWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBotanicusHudMessageWidget>
+		HudMessageWidget;
+
+	bool bHudCursorModeActive = false;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusThrowPowerWidget>
@@ -1305,6 +1328,7 @@ protected:
 	bool bServerFurnitureMoveModeActive = false;
 	float FurnitureHighlightRefreshAccumulator = 0.0f;
 	float InteractionHighlightRefreshAccumulator = 0.0f;
+	float LegacyWorldGuidanceRefreshAccumulator = 0.0f;
 	TSet<TWeakObjectPtr<AActor>> LocalHighlightedFurniture;
 	TWeakObjectPtr<AActor> LocalInteractionHighlightActor;
 	int32 LocalQuickBarItemSlotIndex = INDEX_NONE;

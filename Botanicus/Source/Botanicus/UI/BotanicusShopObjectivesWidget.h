@@ -9,6 +9,7 @@
 class UTextBlock;
 class UVerticalBox;
 class UCanvasPanelSlot;
+class UImage;
 
 /** Collapsible orange HUD list for the shared main-shop upgrade goals. */
 UCLASS()
@@ -41,21 +42,43 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> DailySalesLabel;
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> DailySalesProgressLabel;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> DailyRevenueLabel;
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> DailyRevenueProgressLabel;
+	UPROPERTY(Transient)
+	TObjectPtr<UImage> DailyRevenueIcon;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> PlantSalesLabel;
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> PlantSalesProgressLabel;
+	UPROPERTY(Transient)
+	TObjectPtr<UImage> PlantSalesIcon;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> CatalogOrdersLabel;
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> CatalogOrdersProgressLabel;
+	UPROPERTY(Transient)
+	TObjectPtr<UImage> CatalogOrdersIcon;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> FundsGoalLabel;
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> FundsGoalProgressLabel;
+	UPROPERTY(Transient)
+	TObjectPtr<UImage> FundsGoalIcon;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> ReputationGoalLabel;
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> ReputationGoalProgressLabel;
+	UPROPERTY(Transient)
+	TObjectPtr<UImage> ReputationGoalIcon;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UCanvasPanelSlot> PanelCanvasSlot;

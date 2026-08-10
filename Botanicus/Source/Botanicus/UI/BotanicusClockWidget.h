@@ -28,6 +28,9 @@ private:
 	TObjectPtr<UTextBlock> ClockLabel;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> TimeLabel;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> ScheduleLabel;
 
 	UPROPERTY(Transient)

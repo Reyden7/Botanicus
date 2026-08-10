@@ -3,15 +3,39 @@
 #include "UI/BotanicusClockWidget.h"
 
 #include "Blueprint/WidgetTree.h"
-#include "BotanicusPlayerController.h"
 #include "BotanicusGameState.h"
-#include "Components/Border.h"
+#include "BotanicusPlayerController.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Components/Image.h"
+#include "Components/Overlay.h"
+#include "Components/OverlaySlot.h"
 #include "Components/TextBlock.h"
-#include "Components/VerticalBox.h"
 #include "Engine/World.h"
 #include "Styling/CoreStyle.h"
+#include "UI/BotanicusHudStyle.h"
+
+namespace
+{
+UTextBlock* AddClockText(
+	UWidgetTree* WidgetTree,
+	UCanvasPanel* Canvas,
+	const FVector2D& Position,
+	const FVector2D& Size,
+	int32 FontSize)
+{
+	UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>();
+	Text->SetColorAndOpacity(
+		FSlateColor(BotanicusHudStyle::PrimaryText()));
+	Text->SetFont(FSlateFontInfo(
+		FCoreStyle::GetDefaultFont(), FontSize, TEXT("Bold")));
+	Text->SetJustification(ETextJustify::Center);
+	UCanvasPanelSlot* CanvasSlot = Canvas->AddChildToCanvas(Text);
+	CanvasSlot->SetPosition(Position);
+	CanvasSlot->SetSize(Size);
+	return Text;
+}
+}
 
 void UBotanicusClockWidget::NativeOnInitialized()
 {
@@ -20,6 +44,7 @@ void UBotanicusClockWidget::NativeOnInitialized()
 	{
 		BuildLayout();
 	}
+	SetVisibility(ESlateVisibility::HitTestInvisible);
 	RefreshClock();
 }
 
@@ -36,40 +61,60 @@ void UBotanicusClockWidget::BuildLayout()
 	UCanvasPanel* Root = WidgetTree->ConstructWidget<UCanvasPanel>();
 	WidgetTree->RootWidget = Root;
 
-	UBorder* Panel = WidgetTree->ConstructWidget<UBorder>();
-	Panel->SetBrushColor(FLinearColor(0.02f, 0.055f, 0.035f, 0.90f));
-	Panel->SetPadding(FMargin(14.0f, 9.0f));
-	UCanvasPanelSlot* PanelSlot = Root->AddChildToCanvas(Panel);
-	PanelSlot->SetAnchors(FAnchors(0.0f, 0.0f));
-	PanelSlot->SetPosition(FVector2D(24.0f, 24.0f));
-	PanelSlot->SetSize(FVector2D(300.0f, 108.0f));
+	UOverlay* ClockOverlay = WidgetTree->ConstructWidget<UOverlay>();
+	UCanvasPanelSlot* ClockSlot = Root->AddChildToCanvas(ClockOverlay);
+	ClockSlot->SetAnchors(FAnchors(0.0f, 0.0f));
+	ClockSlot->SetPosition(FVector2D::ZeroVector);
+	ClockSlot->SetSize(FVector2D(420.0f, 143.0f));
 
-	UVerticalBox* Column = WidgetTree->ConstructWidget<UVerticalBox>();
-	Panel->SetContent(Column);
+	UImage* Background = WidgetTree->ConstructWidget<UImage>();
+	Background->SetBrushFromTexture(
+		BotanicusHudStyle::LoadTexture(TEXT("T_HUD_Calendar")), true);
+	if (UOverlaySlot* BackgroundSlot =
+			ClockOverlay->AddChildToOverlay(Background))
+	{
+		BackgroundSlot->SetHorizontalAlignment(HAlign_Fill);
+		BackgroundSlot->SetVerticalAlignment(VAlign_Fill);
+	}
 
-	ClockLabel = WidgetTree->ConstructWidget<UTextBlock>();
-	ClockLabel->SetFont(
-		FSlateFontInfo(FCoreStyle::GetDefaultFont(), 25));
-	ClockLabel->SetColorAndOpacity(
-		FSlateColor(FLinearColor(1.0f, 0.82f, 0.28f, 1.0f)));
-	Column->AddChildToVerticalBox(ClockLabel);
+	UCanvasPanel* TextCanvas = WidgetTree->ConstructWidget<UCanvasPanel>();
+	if (UOverlaySlot* TextCanvasSlot =
+			ClockOverlay->AddChildToOverlay(TextCanvas))
+	{
+		TextCanvasSlot->SetHorizontalAlignment(HAlign_Fill);
+		TextCanvasSlot->SetVerticalAlignment(VAlign_Fill);
+	}
+
+	ClockLabel = AddClockText(
+		WidgetTree, TextCanvas,
+		FVector2D(98.0f, 21.0f), FVector2D(128.0f, 42.0f), 20);
+	TimeLabel = AddClockText(
+		WidgetTree, TextCanvas,
+		FVector2D(269.0f, 20.0f), FVector2D(116.0f, 43.0f), 21);
 
 	ScheduleLabel = WidgetTree->ConstructWidget<UTextBlock>();
-	ScheduleLabel->SetFont(
-		FSlateFontInfo(FCoreStyle::GetDefaultFont(), 13));
 	ScheduleLabel->SetColorAndOpacity(
-		FSlateColor(FLinearColor(0.70f, 0.86f, 0.74f, 1.0f)));
-	Column->AddChildToVerticalBox(ScheduleLabel);
+		FSlateColor(FLinearColor(0.86f, 0.86f, 0.72f, 1.0f)));
+	ScheduleLabel->SetFont(FSlateFontInfo(
+		FCoreStyle::GetDefaultFont(), 11, TEXT("Bold")));
+	ScheduleLabel->SetJustification(ETextJustify::Center);
+	UCanvasPanelSlot* ScheduleSlot =
+		TextCanvas->AddChildToCanvas(ScheduleLabel);
+	ScheduleSlot->SetPosition(FVector2D(95.0f, 90.0f));
+	ScheduleSlot->SetSize(FVector2D(290.0f, 30.0f));
 
 	FurnitureModeLabel = WidgetTree->ConstructWidget<UTextBlock>();
-	FurnitureModeLabel->SetFont(
-		FSlateFontInfo(FCoreStyle::GetDefaultFont(), 14));
+	FurnitureModeLabel->SetFont(FSlateFontInfo(
+		FCoreStyle::GetDefaultFont(), 12, TEXT("Bold")));
 	FurnitureModeLabel->SetColorAndOpacity(
-		FSlateColor(FLinearColor(1.0f, 0.82f, 0.12f, 1.0f)));
+		FSlateColor(FLinearColor(1.0f, 0.82f, 0.20f, 1.0f)));
 	FurnitureModeLabel->SetText(
 		FText::FromString(TEXT("MODE MEUBLES [B] : ACTIF")));
 	FurnitureModeLabel->SetVisibility(ESlateVisibility::Collapsed);
-	Column->AddChildToVerticalBox(FurnitureModeLabel);
+	UCanvasPanelSlot* FurnitureSlot =
+		Root->AddChildToCanvas(FurnitureModeLabel);
+	FurnitureSlot->SetPosition(FVector2D(116.0f, 151.0f));
+	FurnitureSlot->SetAutoSize(true);
 }
 
 void UBotanicusClockWidget::RefreshClock()
@@ -88,29 +133,23 @@ void UBotanicusClockWidget::RefreshClock()
 	const int32 Minute = TotalMinutes % 60;
 	if (ClockLabel)
 	{
-		ClockLabel->SetText(
-			FText::FromString(
-				FString::Printf(
-					TEXT("JOUR %d   %02d:%02d"),
-					GameState->GetCurrentDayNumber(),
-					Hour,
-					Minute)));
+		ClockLabel->SetText(FText::FromString(FString::Printf(
+			TEXT("JOUR %d"), GameState->GetCurrentDayNumber())));
+	}
+	if (TimeLabel)
+	{
+		TimeLabel->SetText(FText::FromString(FString::Printf(
+			TEXT("%02d:%02d"), Hour, Minute)));
 	}
 	if (ScheduleLabel)
 	{
-		ScheduleLabel->SetText(
-			FText::FromString(
-				FString::Printf(
-					TEXT("%s  |  08:00 - 19:00  |  DEBUG x%.0f"),
-					GameState->IsMainShopOpen()
-						? TEXT("MAGASIN OUVERT")
-						: TEXT("MAGASIN FERME"),
-					GameState->GetDevelopmentTimeScale())));
-		ScheduleLabel->SetColorAndOpacity(
-			FSlateColor(
-				GameState->IsMainShopOpen()
-					? FLinearColor(0.30f, 1.0f, 0.45f, 1.0f)
-					: FLinearColor(1.0f, 0.48f, 0.28f, 1.0f)));
+		ScheduleLabel->SetText(FText::FromString(FString::Printf(
+			TEXT("BOUTIQUE %s   08:00 - 19:00"),
+			GameState->IsMainShopOpen() ? TEXT("OUVERTE") : TEXT("FERMEE"))));
+		ScheduleLabel->SetColorAndOpacity(FSlateColor(
+			GameState->IsMainShopOpen()
+				? FLinearColor(0.75f, 0.91f, 0.54f, 1.0f)
+				: FLinearColor(1.0f, 0.55f, 0.35f, 1.0f)));
 	}
 	if (FurnitureModeLabel)
 	{

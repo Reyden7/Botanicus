@@ -4,13 +4,13 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
-#include "BotanicusSharedFundsWidget.generated.h"
+#include "BotanicusReputationWidget.generated.h"
 
 class UTextBlock;
 
-/** Movable HUD element displaying the nursery's shared wallet. */
+/** Movable HUD element displaying the shop reputation. */
 UCLASS()
-class BOTANICUS_API UBotanicusSharedFundsWidget : public UUserWidget
+class BOTANICUS_API UBotanicusReputationWidget : public UUserWidget
 {
 	GENERATED_BODY()
 
@@ -22,11 +22,10 @@ protected:
 
 private:
 	void BuildLayout();
-	void RefreshFunds();
+	void RefreshReputation();
 
 	UPROPERTY(Transient)
-	TObjectPtr<UTextBlock> FundsLabel;
+	TObjectPtr<UTextBlock> ReputationLabel;
 
-	UPROPERTY(Transient)
-	int32 LastDisplayedFunds = INDEX_NONE;
+	int32 LastDisplayedReputation = INDEX_NONE;
 };

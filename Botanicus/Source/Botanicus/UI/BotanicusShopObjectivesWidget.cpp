@@ -4,79 +4,123 @@
 
 #include "Blueprint/WidgetTree.h"
 #include "BotanicusGameState.h"
-#include "Components/Border.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Components/HorizontalBox.h"
+#include "Components/HorizontalBoxSlot.h"
+#include "Components/Image.h"
+#include "Components/Overlay.h"
+#include "Components/OverlaySlot.h"
+#include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Engine/World.h"
 #include "Styling/CoreStyle.h"
+#include "UI/BotanicusHudStyle.h"
 
 namespace
 {
-void ConfigureObjectiveText(UTextBlock* Text)
+void ConfigureObjectiveText(UTextBlock* Text, int32 Size = 14)
 {
-	if (!Text)
+	Text->SetFont(FSlateFontInfo(FCoreStyle::GetDefaultFont(), Size));
+	Text->SetColorAndOpacity(FSlateColor(BotanicusHudStyle::PrimaryText()));
+}
+
+void CreateObjectiveRow(
+	UWidgetTree* WidgetTree,
+	UVerticalBox* Body,
+	UImage*& OutIcon,
+	UTextBlock*& OutName,
+	UTextBlock*& OutProgress)
+{
+	USizeBox* RowSize = WidgetTree->ConstructWidget<USizeBox>();
+	RowSize->SetHeightOverride(47.0f);
+	Body->AddChildToVerticalBox(RowSize);
+
+	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
+	RowSize->SetContent(Row);
+
+	USizeBox* IconSize = WidgetTree->ConstructWidget<USizeBox>();
+	IconSize->SetWidthOverride(30.0f);
+	IconSize->SetHeightOverride(30.0f);
+	if (UHorizontalBoxSlot* Slot = Row->AddChildToHorizontalBox(IconSize))
 	{
-		return;
+		Slot->SetPadding(FMargin(0.0f, 7.0f, 8.0f, 7.0f));
+		Slot->SetVerticalAlignment(VAlign_Center);
 	}
-	Text->SetFont(FSlateFontInfo(FCoreStyle::GetDefaultFont(), 14));
-	Text->SetAutoWrapText(true);
-	Text->SetMargin(FMargin(7.0f, 4.0f));
+	OutIcon = WidgetTree->ConstructWidget<UImage>();
+	IconSize->SetContent(OutIcon);
+
+	OutName = WidgetTree->ConstructWidget<UTextBlock>();
+	ConfigureObjectiveText(OutName);
+	if (UHorizontalBoxSlot* Slot = Row->AddChildToHorizontalBox(OutName))
+	{
+		Slot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		Slot->SetVerticalAlignment(VAlign_Center);
+	}
+
+	OutProgress = WidgetTree->ConstructWidget<UTextBlock>();
+	ConfigureObjectiveText(OutProgress, 14);
+	OutProgress->SetJustification(ETextJustify::Right);
+	if (UHorizontalBoxSlot* Slot = Row->AddChildToHorizontalBox(OutProgress))
+	{
+		Slot->SetVerticalAlignment(VAlign_Center);
+	}
 }
 
 void SetObjectiveProgress(
+	UImage* Icon,
 	UTextBlock* Label,
+	UTextBlock* ProgressLabel,
 	const FString& ObjectiveName,
 	int32 Current,
 	int32 Required)
 {
-	if (!Label)
+	if (!Icon || !Label || !ProgressLabel)
 	{
 		return;
 	}
 	const bool bComplete = Current >= Required;
-	Label->SetText(
-		FText::FromString(
-			FString::Printf(
-				TEXT("%s  %s : %d/%d  -  %s"),
-				bComplete ? TEXT("[OK]") : TEXT("[  ]"),
-				*ObjectiveName,
-				FMath::Min(Current, Required),
-				Required,
-				bComplete ? TEXT("TERMINE") : TEXT("EN COURS"))));
-	Label->SetColorAndOpacity(
-		FSlateColor(
-			bComplete
-				? FLinearColor(0.3f, 1.0f, 0.45f, 1.0f)
-				: FLinearColor(1.0f, 0.72f, 0.22f, 1.0f)));
+	Icon->SetBrushFromTexture(BotanicusHudStyle::LoadTexture(
+		bComplete
+			? TEXT("T_HUD_ObjectiveComplete")
+			: TEXT("T_HUD_ObjectiveIncomplete")), true);
+	Label->SetText(FText::FromString(ObjectiveName));
+	ProgressLabel->SetText(FText::FromString(FString::Printf(
+		TEXT("%d/%d"), FMath::Min(Current, Required), Required)));
+	const FLinearColor Color = bComplete
+		? BotanicusHudStyle::CompletedText()
+		: BotanicusHudStyle::PrimaryText();
+	Label->SetColorAndOpacity(FSlateColor(Color));
+	ProgressLabel->SetColorAndOpacity(FSlateColor(Color));
 }
 
 void SetReputationProgress(
+	UImage* Icon,
 	UTextBlock* Label,
+	UTextBlock* ProgressLabel,
 	int32 Current,
 	int32 Required)
 {
-	if (!Label)
+	if (!Icon || !Label || !ProgressLabel)
 	{
 		return;
 	}
 	const bool bComplete = Current >= Required;
-	Label->SetText(
-		FText::FromString(
-			FString::Printf(
-				TEXT("%s  Reputation : %.2f/%.2f etoiles  -  %s"),
-				bComplete ? TEXT("[OK]") : TEXT("[  ]"),
-				Current / 100.0f,
-				Required / 100.0f,
-				bComplete ? TEXT("TERMINE") : TEXT("EN COURS"))));
-	Label->SetColorAndOpacity(
-		FSlateColor(
-			bComplete
-				? FLinearColor(0.3f, 1.0f, 0.45f, 1.0f)
-				: FLinearColor(1.0f, 0.72f, 0.22f, 1.0f)));
+	Icon->SetBrushFromTexture(BotanicusHudStyle::LoadTexture(
+		bComplete
+			? TEXT("T_HUD_ObjectiveComplete")
+			: TEXT("T_HUD_ObjectiveIncomplete")), true);
+	Label->SetText(FText::FromString(TEXT("Reputation")));
+	ProgressLabel->SetText(FText::FromString(FString::Printf(
+		TEXT("%.2f/%.2f"), Current / 100.0f, Required / 100.0f)));
+	const FLinearColor Color = bComplete
+		? BotanicusHudStyle::CompletedText()
+		: BotanicusHudStyle::PrimaryText();
+	Label->SetColorAndOpacity(FSlateColor(Color));
+	ProgressLabel->SetColorAndOpacity(FSlateColor(Color));
 }
 }
 
@@ -102,68 +146,67 @@ void UBotanicusShopObjectivesWidget::BuildLayout()
 {
 	UCanvasPanel* Root = WidgetTree->ConstructWidget<UCanvasPanel>();
 	WidgetTree->RootWidget = Root;
+	Root->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 
-	UBorder* Panel = WidgetTree->ConstructWidget<UBorder>();
-	Panel->SetBrushColor(FLinearColor(0.19f, 0.075f, 0.015f, 0.94f));
-	Panel->SetPadding(FMargin(9.0f));
-	PanelCanvasSlot = Root->AddChildToCanvas(Panel);
-	PanelCanvasSlot->SetAnchors(FAnchors(1.0f, 0.0f));
-	PanelCanvasSlot->SetAlignment(FVector2D(1.0f, 0.0f));
-	PanelCanvasSlot->SetPosition(FVector2D(-24.0f, 184.0f));
-	PanelCanvasSlot->SetSize(FVector2D(390.0f, 360.0f));
+	UCanvasPanel* ClipPanel = WidgetTree->ConstructWidget<UCanvasPanel>();
+	ClipPanel->SetClipping(EWidgetClipping::ClipToBounds);
+	PanelCanvasSlot = Root->AddChildToCanvas(ClipPanel);
+	PanelCanvasSlot->SetPosition(FVector2D::ZeroVector);
+	PanelCanvasSlot->SetSize(FVector2D(370.0f, 370.0f));
 
-	UVerticalBox* Column = WidgetTree->ConstructWidget<UVerticalBox>();
-	Panel->SetContent(Column);
+	UImage* Background = WidgetTree->ConstructWidget<UImage>();
+	Background->SetBrushFromTexture(BotanicusHudStyle::LoadTexture(
+		TEXT("T_HUD_ObjectivesBackground")), true);
+	UCanvasPanelSlot* BackgroundSlot = ClipPanel->AddChildToCanvas(Background);
+	BackgroundSlot->SetPosition(FVector2D::ZeroVector);
+	BackgroundSlot->SetSize(FVector2D(370.0f, 370.0f));
+
+	TitleLabel = WidgetTree->ConstructWidget<UTextBlock>();
+	TitleLabel->SetColorAndOpacity(
+		FSlateColor(BotanicusHudStyle::PrimaryText()));
+	TitleLabel->SetFont(FSlateFontInfo(
+		FCoreStyle::GetDefaultFont(), 16, TEXT("Bold")));
+	TitleLabel->SetJustification(ETextJustify::Center);
+	UCanvasPanelSlot* TitleSlot = ClipPanel->AddChildToCanvas(TitleLabel);
+	TitleSlot->SetPosition(FVector2D(68.0f, 27.0f));
+	TitleSlot->SetSize(FVector2D(226.0f, 43.0f));
 
 	UButton* ToggleButton = WidgetTree->ConstructWidget<UButton>();
-	ToggleButton->SetBackgroundColor(
-		FLinearColor(0.78f, 0.28f, 0.035f, 1.0f));
-	TitleLabel = WidgetTree->ConstructWidget<UTextBlock>();
-	TitleLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-	TitleLabel->SetJustification(ETextJustify::Left);
-	TitleLabel->SetMargin(FMargin(10.0f, 8.0f));
-	TitleLabel->SetFont(
-		FSlateFontInfo(FCoreStyle::GetDefaultFont(), 17));
-	ToggleButton->AddChild(TitleLabel);
-	Column->AddChildToVerticalBox(ToggleButton);
+	ToggleButton->SetBackgroundColor(FLinearColor(1.0f, 1.0f, 1.0f, 0.01f));
+	UCanvasPanelSlot* ToggleSlot = ClipPanel->AddChildToCanvas(ToggleButton);
+	ToggleSlot->SetPosition(FVector2D(302.0f, 24.0f));
+	ToggleSlot->SetSize(FVector2D(49.0f, 49.0f));
 	ToggleButton->OnClicked.AddDynamic(
-		this,
-		&UBotanicusShopObjectivesWidget::HandleToggleClicked);
+		this, &UBotanicusShopObjectivesWidget::HandleToggleClicked);
 
 	ObjectivesBody = WidgetTree->ConstructWidget<UVerticalBox>();
-	UVerticalBoxSlot* BodySlot =
-		Column->AddChildToVerticalBox(ObjectivesBody);
-	BodySlot->SetPadding(FMargin(2.0f, 7.0f, 2.0f, 2.0f));
+	UCanvasPanelSlot* BodySlot = ClipPanel->AddChildToCanvas(ObjectivesBody);
+	BodySlot->SetPosition(FVector2D(33.0f, 82.0f));
+	BodySlot->SetSize(FVector2D(304.0f, 245.0f));
 
-	DayTitleLabel = WidgetTree->ConstructWidget<UTextBlock>();
-	ConfigureObjectiveText(DayTitleLabel);
-	DayTitleLabel->SetColorAndOpacity(
-		FSlateColor(FLinearColor(0.45f, 0.86f, 1.0f, 1.0f)));
-	ObjectivesBody->AddChildToVerticalBox(DayTitleLabel);
-
-	DailySalesLabel = WidgetTree->ConstructWidget<UTextBlock>();
-	ConfigureObjectiveText(DailySalesLabel);
-	ObjectivesBody->AddChildToVerticalBox(DailySalesLabel);
-
-	DailyRevenueLabel = WidgetTree->ConstructWidget<UTextBlock>();
-	ConfigureObjectiveText(DailyRevenueLabel);
-	ObjectivesBody->AddChildToVerticalBox(DailyRevenueLabel);
-
-	PlantSalesLabel = WidgetTree->ConstructWidget<UTextBlock>();
-	ConfigureObjectiveText(PlantSalesLabel);
-	ObjectivesBody->AddChildToVerticalBox(PlantSalesLabel);
-
-	CatalogOrdersLabel = WidgetTree->ConstructWidget<UTextBlock>();
-	ConfigureObjectiveText(CatalogOrdersLabel);
-	ObjectivesBody->AddChildToVerticalBox(CatalogOrdersLabel);
-
-	ReputationGoalLabel = WidgetTree->ConstructWidget<UTextBlock>();
-	ConfigureObjectiveText(ReputationGoalLabel);
-	ObjectivesBody->AddChildToVerticalBox(ReputationGoalLabel);
-
-	FundsGoalLabel = WidgetTree->ConstructWidget<UTextBlock>();
-	ConfigureObjectiveText(FundsGoalLabel);
-	ObjectivesBody->AddChildToVerticalBox(FundsGoalLabel);
+	UImage* Icon = nullptr;
+	UTextBlock* Name = nullptr;
+	UTextBlock* Progress = nullptr;
+	CreateObjectiveRow(WidgetTree, ObjectivesBody, Icon, Name, Progress);
+	PlantSalesIcon = Icon;
+	PlantSalesLabel = Name;
+	PlantSalesProgressLabel = Progress;
+	CreateObjectiveRow(WidgetTree, ObjectivesBody, Icon, Name, Progress);
+	CatalogOrdersIcon = Icon;
+	CatalogOrdersLabel = Name;
+	CatalogOrdersProgressLabel = Progress;
+	CreateObjectiveRow(WidgetTree, ObjectivesBody, Icon, Name, Progress);
+	ReputationGoalIcon = Icon;
+	ReputationGoalLabel = Name;
+	ReputationGoalProgressLabel = Progress;
+	CreateObjectiveRow(WidgetTree, ObjectivesBody, Icon, Name, Progress);
+	FundsGoalIcon = Icon;
+	FundsGoalLabel = Name;
+	FundsGoalProgressLabel = Progress;
+	CreateObjectiveRow(WidgetTree, ObjectivesBody, Icon, Name, Progress);
+	DailyRevenueIcon = Icon;
+	DailyRevenueLabel = Name;
+	DailyRevenueProgressLabel = Progress;
 }
 
 void UBotanicusShopObjectivesWidget::RefreshObjectives()
@@ -175,56 +218,32 @@ void UBotanicusShopObjectivesWidget::RefreshObjectives()
 	{
 		return;
 	}
-
 	if (TitleLabel)
 	{
-		TitleLabel->SetText(
-			FText::FromString(
-				FString::Printf(
-					TEXT("OBJECTIFS BOUTIQUE - NIVEAU %d   %s"),
-					GameState->GetMainShopLevel() + 1,
-					bExpanded ? TEXT("[-]") : TEXT("[+]"))));
-	}
-	if (DayTitleLabel)
-	{
-		DayTitleLabel->SetText(
-			FText::FromString(
-				FString::Printf(
-					TEXT("JOUR %d - %s"),
-					GameState->GetCurrentDayNumber(),
-					GameState->IsShopDayActive()
-						? TEXT("MAGASIN OUVERT")
-						: TEXT("PREPARATION"))));
+		TitleLabel->SetText(FText::FromString(FString::Printf(
+			TEXT("OBJECTIFS NIVEAU %d"),
+			GameState->GetMainShopLevel() + 1)));
 	}
 	SetObjectiveProgress(
-		DailySalesLabel,
-		TEXT("Ventes du jour"),
-		GameState->GetDailyPlantsSold(),
-		GameState->GetDailySalesTarget());
-	SetObjectiveProgress(
-		DailyRevenueLabel,
-		TEXT("Chiffre du jour"),
-		GameState->GetDailyRevenue(),
-		GameState->GetDailyRevenueTarget());
-	SetObjectiveProgress(
-		PlantSalesLabel,
-		TEXT("Vendre des plantes"),
-		GameState->GetTotalPlantsSold(),
+		PlantSalesIcon, PlantSalesLabel, PlantSalesProgressLabel,
+		TEXT("Vendre des plantes"), GameState->GetTotalPlantsSold(),
 		GameState->GetRequiredPlantSalesForUpgrade());
 	SetObjectiveProgress(
-		CatalogOrdersLabel,
-		TEXT("Passer des commandes"),
-		GameState->GetTotalCatalogOrders(),
+		CatalogOrdersIcon, CatalogOrdersLabel, CatalogOrdersProgressLabel,
+		TEXT("Passer des commandes"), GameState->GetTotalCatalogOrders(),
 		GameState->GetRequiredCatalogOrdersForUpgrade());
-	SetObjectiveProgress(
-		FundsGoalLabel,
-		TEXT("Reunir les credits"),
-		GameState->GetSharedFunds(),
-		GameState->GetMainShopUpgradeCost());
 	SetReputationProgress(
-		ReputationGoalLabel,
+		ReputationGoalIcon, ReputationGoalLabel, ReputationGoalProgressLabel,
 		GameState->GetShopReputationPoints(),
 		GameState->GetRequiredReputationForUpgrade());
+	SetObjectiveProgress(
+		FundsGoalIcon, FundsGoalLabel, FundsGoalProgressLabel,
+		TEXT("Reunir les credits"), GameState->GetSharedFunds(),
+		GameState->GetMainShopUpgradeCost());
+	SetObjectiveProgress(
+		DailyRevenueIcon, DailyRevenueLabel, DailyRevenueProgressLabel,
+		TEXT("Chiffre d'affaires"), GameState->GetDailyRevenue(),
+		GameState->GetDailyRevenueTarget());
 }
 
 void UBotanicusShopObjectivesWidget::HandleToggleClicked()
@@ -240,7 +259,7 @@ void UBotanicusShopObjectivesWidget::HandleToggleClicked()
 	if (PanelCanvasSlot)
 	{
 		PanelCanvasSlot->SetSize(
-			FVector2D(390.0f, bExpanded ? 360.0f : 52.0f));
+			FVector2D(370.0f, bExpanded ? 370.0f : 88.0f));
 	}
 	RefreshObjectives();
 }

@@ -71,6 +71,8 @@
 #include "UI/BotanicusClockWidget.h"
 #include "UI/BotanicusStorageQuantityWidget.h"
 #include "UI/BotanicusInteractionTargetWidget.h"
+#include "UI/BotanicusHudMessageWidget.h"
+#include "UI/BotanicusHudLayoutWidget.h"
 #include "UI/BotanicusThrowPowerWidget.h"
 #include "UI/BotanicusTopDownToolbarWidget.h"
 #include "Visitors/BotanicusVisitorZoneActor.h"
@@ -762,6 +764,9 @@ void ABotanicusPlayerController::BeginPlay()
 		&ABotanicusPlayerController::ForceFirstPersonView);
 	GetWorldTimerManager().SetTimerForNextTick(
 		this,
+		&ABotanicusPlayerController::InitializeHudLayoutWidget);
+	GetWorldTimerManager().SetTimerForNextTick(
+		this,
 		&ABotanicusPlayerController::InitializeQuickBarWidget);
 	GetWorldTimerManager().SetTimerForNextTick(
 		this,
@@ -781,6 +786,9 @@ void ABotanicusPlayerController::BeginPlay()
 	GetWorldTimerManager().SetTimerForNextTick(
 		this,
 		&ABotanicusPlayerController::InitializeInteractionTargetWidget);
+	GetWorldTimerManager().SetTimerForNextTick(
+		this,
+		&ABotanicusPlayerController::InitializeHudMessageWidget);
 	GetWorldTimerManager().SetTimerForNextTick(
 		this,
 		&ABotanicusPlayerController::
@@ -834,8 +842,7 @@ void ABotanicusPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReaso
 	{
 		LocalEquippedQuickBarSource->OnQuickBarChanged.RemoveDynamic(
 			this,
-			&ABotanicusPlayerController::
-				HandleEquippedQuickBarChanged);
+			&ABotanicusPlayerController::HandleEquippedQuickBarChanged);
 	}
 	LocalEquippedQuickBarSource.Reset();
 	CancelDeliveryParcelPlacement();
@@ -885,6 +892,18 @@ void ABotanicusPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReaso
 		PendingOrderTimers.Reset();
 	}
 
+	if (HudLayoutWidget)
+	{
+		HudLayoutWidget->RemoveFromParent();
+		HudLayoutWidget = nullptr;
+		QuickBarWidget = nullptr;
+		SharedFundsWidget = nullptr;
+		ShopObjectivesWidget = nullptr;
+		ClockWidget = nullptr;
+		InteractionTargetWidget = nullptr;
+		HudMessageWidget = nullptr;
+	}
+
 	if (QuickBarWidget)
 	{
 		QuickBarWidget->RemoveFromParent();
@@ -920,6 +939,11 @@ void ABotanicusPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReaso
 		InteractionTargetWidget->RemoveFromParent();
 		InteractionTargetWidget = nullptr;
 	}
+	if (HudMessageWidget)
+	{
+		HudMessageWidget->RemoveFromParent();
+		HudMessageWidget = nullptr;
+	}
 	if (CarryProgressWidget)
 	{
 		CarryProgressWidget->RemoveFromParent();
@@ -942,6 +966,10 @@ void ABotanicusPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReaso
 void ABotanicusPlayerController::PlayerTick(float DeltaTime)
 {
 	Super::PlayerTick(DeltaTime);
+	if (IsLocalPlayerController() && !HudLayoutWidget)
+	{
+		InitializeHudLayoutWidget();
+	}
 
 	if (IsLocalPlayerController() && !QuickBarWidget)
 	{
@@ -971,6 +999,10 @@ void ABotanicusPlayerController::PlayerTick(float DeltaTime)
 	{
 		InitializeInteractionTargetWidget();
 	}
+	if (IsLocalPlayerController() && !HudMessageWidget)
+	{
+		InitializeHudMessageWidget();
+	}
 	if (LocalStorageCollectionItem &&
 		!IsValid(LocalStorageCollectionItem))
 	{
@@ -980,6 +1012,12 @@ void ABotanicusPlayerController::PlayerTick(float DeltaTime)
 	if (IsLocalPlayerController())
 	{
 		HideEbsDemoHud();
+		LegacyWorldGuidanceRefreshAccumulator += DeltaTime;
+		if (LegacyWorldGuidanceRefreshAccumulator >= 0.2f)
+		{
+			LegacyWorldGuidanceRefreshAccumulator = 0.0f;
+			HideLegacyWorldGuidance();
+		}
 		if (bFurnitureMoveModeActive)
 		{
 			FurnitureHighlightRefreshAccumulator += DeltaTime;
@@ -1088,6 +1126,19 @@ void ABotanicusPlayerController::SetupInputComponent()
 
 bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 {
+	if (Params.Key == EKeys::LeftAlt)
+	{
+		if (Params.Event == IE_Pressed)
+		{
+			SetHudCursorMode(true);
+		}
+		else if (Params.Event == IE_Released)
+		{
+			SetHudCursorMode(false);
+		}
+		return true;
+	}
+
 	if (Params.Key == EKeys::LeftShift &&
 		Params.Event == IE_Released)
 	{
@@ -2153,8 +2204,8 @@ void ABotanicusPlayerController::RefreshInteractionTargetName(
 	}
 	else
 	{
-		TargetName =
-			TargetActor->GetClass()->GetDisplayNameText();
+		TargetName = FText::FromString(
+			TargetActor->GetClass()->GetName().Replace(TEXT("_C"), TEXT("")));
 	}
 
 	if (bIsParcel)
@@ -2362,10 +2413,11 @@ void ABotanicusPlayerController::ForceFirstPersonView()
 
 void ABotanicusPlayerController::InitializeQuickBarWidget()
 {
-	if (!IsLocalPlayerController() || QuickBarWidget)
+	if (!IsLocalPlayerController())
 	{
 		return;
 	}
+	InitializeHudLayoutWidget();
 
 	ABotanicusCharacter* BotanicusCharacter =
 		Cast<ABotanicusCharacter>(GetPawn());
@@ -2374,10 +2426,13 @@ void ABotanicusPlayerController::InitializeQuickBarWidget()
 		return;
 	}
 
-	QuickBarWidget =
-		CreateWidget<UBotanicusQuickBarWidget>(
-			this,
-			UBotanicusQuickBarWidget::StaticClass());
+	if (!QuickBarWidget)
+	{
+		QuickBarWidget =
+			CreateWidget<UBotanicusQuickBarWidget>(
+				this,
+				UBotanicusQuickBarWidget::StaticClass());
+	}
 	if (!QuickBarWidget)
 	{
 		UE_LOG(
@@ -2389,7 +2444,42 @@ void ABotanicusPlayerController::InitializeQuickBarWidget()
 
 	QuickBarWidget->InitializeWithQuickBar(
 		BotanicusCharacter->GetQuickBarComponent());
-	QuickBarWidget->AddToPlayerScreen(10);
+	if (!HudLayoutWidget)
+	{
+		QuickBarWidget->AddToPlayerScreen(10);
+	}
+}
+
+void ABotanicusPlayerController::InitializeHudLayoutWidget()
+{
+	if (!IsLocalPlayerController() || HudLayoutWidget)
+	{
+		return;
+	}
+
+	static const TCHAR* LayoutClassPath =
+		TEXT("/Game/Botanicus/UI/HUD/WBP_BotanicusHUD.WBP_BotanicusHUD_C");
+	UClass* LayoutClass = LoadClass<UBotanicusHudLayoutWidget>(
+		nullptr, LayoutClassPath);
+	if (!LayoutClass)
+	{
+		return;
+	}
+
+	HudLayoutWidget = CreateWidget<UBotanicusHudLayoutWidget>(
+		this, LayoutClass);
+	if (!HudLayoutWidget)
+	{
+		return;
+	}
+	HudLayoutWidget->AddToPlayerScreen(38);
+
+	QuickBarWidget = HudLayoutWidget->GetQuickBarWidget();
+	SharedFundsWidget = HudLayoutWidget->GetCreditsWidget();
+	ShopObjectivesWidget = HudLayoutWidget->GetObjectivesWidget();
+	ClockWidget = HudLayoutWidget->GetClockWidget();
+	InteractionTargetWidget = HudLayoutWidget->GetInteractionWidget();
+	HudMessageWidget = HudLayoutWidget->GetMessageWidget();
 }
 
 void ABotanicusPlayerController::
@@ -2469,7 +2559,12 @@ void ABotanicusPlayerController::
 
 void ABotanicusPlayerController::InitializeSharedFundsWidget()
 {
-	if (!IsLocalPlayerController() || SharedFundsWidget)
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+	InitializeHudLayoutWidget();
+	if (SharedFundsWidget)
 	{
 		return;
 	}
@@ -2492,7 +2587,12 @@ void ABotanicusPlayerController::InitializeSharedFundsWidget()
 
 void ABotanicusPlayerController::InitializeShopObjectivesWidget()
 {
-	if (!IsLocalPlayerController() || ShopObjectivesWidget)
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+	InitializeHudLayoutWidget();
+	if (ShopObjectivesWidget)
 	{
 		return;
 	}
@@ -2527,7 +2627,12 @@ void ABotanicusPlayerController::InitializeDaySummaryWidget()
 
 void ABotanicusPlayerController::InitializeClockWidget()
 {
-	if (!IsLocalPlayerController() || ClockWidget)
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+	InitializeHudLayoutWidget();
+	if (ClockWidget)
 	{
 		return;
 	}
@@ -2576,8 +2681,14 @@ void ABotanicusPlayerController::InitializeStorageQuantityWidget()
 
 void ABotanicusPlayerController::InitializeInteractionTargetWidget()
 {
-	if (!IsLocalPlayerController() || InteractionTargetWidget)
+	if (!IsLocalPlayerController())
 	{
+		return;
+	}
+	InitializeHudLayoutWidget();
+	if (InteractionTargetWidget)
+	{
+		InteractionTargetWidget->ClearTarget();
 		return;
 	}
 	InteractionTargetWidget =
@@ -2589,20 +2700,117 @@ void ABotanicusPlayerController::InitializeInteractionTargetWidget()
 		return;
 	}
 	InteractionTargetWidget->AddToPlayerScreen(48);
+	InteractionTargetWidget->SetAnchorsInViewport(
+		FAnchors(0.5f, 1.0f));
 	InteractionTargetWidget->SetAlignmentInViewport(
-		FVector2D(0.5f, 0.5f));
+		FVector2D(0.5f, 1.0f));
 	InteractionTargetWidget->SetDesiredSizeInViewport(
-		FVector2D(340.0f, 40.0f));
-
-	int32 ViewportWidth = 0;
-	int32 ViewportHeight = 0;
-	GetViewportSize(ViewportWidth, ViewportHeight);
+		FVector2D(310.0f, 108.0f));
 	InteractionTargetWidget->SetPositionInViewport(
-		FVector2D(
-			static_cast<float>(ViewportWidth) * 0.5f,
-			static_cast<float>(ViewportHeight) * 0.5f - 62.0f),
+		FVector2D(0.0f, -112.0f),
 		true);
 	InteractionTargetWidget->ClearTarget();
+}
+
+void ABotanicusPlayerController::InitializeHudMessageWidget()
+{
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+	InitializeHudLayoutWidget();
+	if (HudMessageWidget)
+	{
+		return;
+	}
+	HudMessageWidget =
+		CreateWidget<UBotanicusHudMessageWidget>(
+			this,
+			UBotanicusHudMessageWidget::StaticClass());
+	if (!HudMessageWidget)
+	{
+		return;
+	}
+	HudMessageWidget->AddToPlayerScreen(49);
+	HudMessageWidget->SetAnchorsInViewport(FAnchors(0.5f, 1.0f));
+	HudMessageWidget->SetAlignmentInViewport(FVector2D(0.5f, 1.0f));
+	HudMessageWidget->SetDesiredSizeInViewport(FVector2D(460.0f, 108.0f));
+	HudMessageWidget->SetPositionInViewport(FVector2D(0.0f, -226.0f), true);
+}
+
+void ABotanicusPlayerController::ClientMessage_Implementation(
+	const FString& S,
+	FName Type,
+	float MsgLifeTime)
+{
+	if (!IsLocalPlayerController() || S.IsEmpty())
+	{
+		return;
+	}
+	InitializeHudMessageWidget();
+	if (HudMessageWidget)
+	{
+		HudMessageWidget->ShowMessage(
+			FText::FromString(S),
+			MsgLifeTime > 0.0f ? MsgLifeTime : 3.0f);
+	}
+}
+
+void ABotanicusPlayerController::SetHudCursorMode(bool bEnabled)
+{
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+
+	if (bEnabled)
+	{
+		const bool bAnotherUiOwnsInput =
+			bQuickBarReorganizationMode ||
+			bBuildingTopDownViewActive ||
+			(DevelopmentPanelWidget &&
+			 DevelopmentPanelWidget->GetVisibility() == ESlateVisibility::Visible) ||
+			(BuildingCatalogWidget &&
+			 BuildingCatalogWidget->GetVisibility() == ESlateVisibility::Visible) ||
+			(OrderCatalogWidget &&
+			 OrderCatalogWidget->GetVisibility() == ESlateVisibility::Visible) ||
+			(WorkbenchUpgradeWidget &&
+			 WorkbenchUpgradeWidget->GetVisibility() == ESlateVisibility::Visible);
+		if (bAnotherUiOwnsInput)
+		{
+			return;
+		}
+
+		bHudCursorModeActive = true;
+		bShowMouseCursor = true;
+		FInputModeGameAndUI InputMode;
+		InputMode.SetHideCursorDuringCapture(false);
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		SetInputMode(InputMode);
+		return;
+	}
+
+	if (bHudCursorModeActive)
+	{
+		bHudCursorModeActive = false;
+		const bool bAnotherUiOwnsInput =
+			bQuickBarReorganizationMode ||
+			bBuildingTopDownViewActive ||
+			(DevelopmentPanelWidget &&
+			 DevelopmentPanelWidget->GetVisibility() == ESlateVisibility::Visible) ||
+			(BuildingCatalogWidget &&
+			 BuildingCatalogWidget->GetVisibility() == ESlateVisibility::Visible) ||
+			(OrderCatalogWidget &&
+			 OrderCatalogWidget->GetVisibility() == ESlateVisibility::Visible) ||
+			(WorkbenchUpgradeWidget &&
+			 WorkbenchUpgradeWidget->GetVisibility() == ESlateVisibility::Visible);
+		if (bAnotherUiOwnsInput)
+		{
+			return;
+		}
+		bShowMouseCursor = false;
+		SetInputMode(FInputModeGameOnly());
+	}
 }
 
 void ABotanicusPlayerController::InitializeTopDownToolbarWidget()
@@ -2756,6 +2964,26 @@ void ABotanicusPlayerController::HideEbsDemoHud()
 			Display,
 			TEXT("EBS demonstration HUD hidden; Botanicus UI is authoritative."));
 		return;
+	}
+}
+
+void ABotanicusPlayerController::HideLegacyWorldGuidance()
+{
+	if (!GetWorld() || bBuildingTopDownViewActive)
+	{
+		return;
+	}
+
+	for (TActorIterator<AActor> ActorIt(GetWorld()); ActorIt; ++ActorIt)
+	{
+		TInlineComponentArray<UTextRenderComponent*> TextComponents(*ActorIt);
+		for (UTextRenderComponent* TextComponent : TextComponents)
+		{
+			if (IsValid(TextComponent) && TextComponent->IsVisible())
+			{
+				TextComponent->SetVisibility(false, true);
+			}
+		}
 	}
 }
 
@@ -3017,7 +3245,8 @@ FText ABotanicusPlayerController::ResolveTopDownBuildingName(
 		}
 	}
 	return IsValid(BuildingActor)
-		? BuildingActor->GetClass()->GetDisplayNameText()
+		? FText::FromString(BuildingActor->GetClass()->GetName().Replace(
+			TEXT("_C"), TEXT("")))
 		: FText::GetEmpty();
 }
 
@@ -5442,16 +5671,14 @@ void ABotanicusPlayerController::UpdateEquippedQuickBarItem()
 			LocalEquippedQuickBarSource->OnQuickBarChanged.
 				RemoveDynamic(
 					this,
-					&ABotanicusPlayerController::
-						HandleEquippedQuickBarChanged);
+					&ABotanicusPlayerController::HandleEquippedQuickBarChanged);
 		}
 		LocalEquippedQuickBarSource = QuickBar;
 		if (QuickBar)
 		{
 			QuickBar->OnQuickBarChanged.AddUniqueDynamic(
 				this,
-				&ABotanicusPlayerController::
-					HandleEquippedQuickBarChanged);
+				&ABotanicusPlayerController::HandleEquippedQuickBarChanged);
 		}
 		bLocalEquippedQuickBarDirty = true;
 	}

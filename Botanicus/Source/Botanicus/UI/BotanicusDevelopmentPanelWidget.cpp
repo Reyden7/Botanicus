@@ -212,16 +212,14 @@ void UBotanicusDevelopmentPanelWidget::BuildLayout()
 		FLinearColor(0.55f, 0.24f, 0.08f, 1.0f));
 	DecreaseLevelButton->OnPressed.AddDynamic(
 		this,
-		&UBotanicusDevelopmentPanelWidget::
-			HandleDecreaseLevelClicked);
+		&UBotanicusDevelopmentPanelWidget::HandleDecreaseLevelClicked);
 	IncreaseLevelButton = AddButton(
 		LevelButtons,
 		TEXT("NIVEAU BOUTIQUE +1"),
 		FLinearColor(0.10f, 0.42f, 0.72f, 1.0f));
 	IncreaseLevelButton->OnPressed.AddDynamic(
 		this,
-		&UBotanicusDevelopmentPanelWidget::
-			HandleIncreaseLevelClicked);
+		&UBotanicusDevelopmentPanelWidget::HandleIncreaseLevelClicked);
 
 	FundsLabel = WidgetTree->ConstructWidget<UTextBlock>();
 	FundsLabel->SetColorAndOpacity(
@@ -238,8 +236,7 @@ void UBotanicusDevelopmentPanelWidget::BuildLayout()
 		FLinearColor(0.82f, 0.36f, 0.06f, 1.0f));
 	AddCreditsButton->OnPressed.AddDynamic(
 		this,
-		&UBotanicusDevelopmentPanelWidget::
-			HandleAddCreditsClicked);
+		&UBotanicusDevelopmentPanelWidget::HandleAddCreditsClicked);
 
 	TimeScaleLabel = WidgetTree->ConstructWidget<UTextBlock>();
 	TimeScaleLabel->SetColorAndOpacity(
@@ -256,8 +253,7 @@ void UBotanicusDevelopmentPanelWidget::BuildLayout()
 		FLinearColor(0.48f, 0.20f, 0.72f, 1.0f));
 	TimeScaleButton->OnPressed.AddDynamic(
 		this,
-		&UBotanicusDevelopmentPanelWidget::
-			HandleTimeScaleClicked);
+		&UBotanicusDevelopmentPanelWidget::HandleTimeScaleClicked);
 
 	ActionFeedbackLabel =
 		WidgetTree->ConstructWidget<UTextBlock>();

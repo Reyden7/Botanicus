@@ -36,6 +36,7 @@ public:
 		int32 InSlotIndex);
 	UBorder* GetBackground() const { return Background; }
 	UImage* GetBackgroundIcon() const { return BackgroundIcon; }
+	UImage* GetFrameIcon() const { return FrameIcon; }
 	UVerticalBox* GetContentContainer() const
 	{
 		return ContentContainer;
@@ -64,6 +65,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UImage> BackgroundIcon;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UImage> FrameIcon;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UVerticalBox> ContentContainer;
@@ -127,6 +131,9 @@ private:
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UImage>> ItemIcons;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UImage>> FrameIcons;
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UTextBlock>> QuantityLabels;
