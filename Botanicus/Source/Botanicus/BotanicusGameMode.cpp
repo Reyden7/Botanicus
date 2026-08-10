@@ -229,7 +229,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 
 	CurrentSaveGame->MapName =
 		UGameplayStatics::GetCurrentLevelName(this, true);
-	CurrentSaveGame->SaveVersion = 23;
+	CurrentSaveGame->SaveVersion = 26;
 	if (const ABotanicusGameState* BotanicusGameState =
 		World->GetGameState<ABotanicusGameState>())
 	{
@@ -486,6 +486,10 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		{
 			SavedItem.DisplayedPlantItemKey =
 				SalesDisplay->GetDisplayedPlantItemKey();
+			SavedItem.DisplayedSoilItemKey =
+				SalesDisplay->GetDisplayedSoilItemKey();
+			SavedItem.DisplayedPotItemKey =
+				SalesDisplay->GetDisplayedPotItemKey();
 		}
 		else if (const ABotanicusWateringCanActor* WateringCan =
 			Cast<ABotanicusWateringCanActor>(*ItemIt))
@@ -1212,7 +1216,13 @@ void ABotanicusGameMode::RestoreWorldState()
 				Cast<ABotanicusSalesDisplayActor>(PlacedItem))
 			{
 				SalesDisplay->RestoreDisplayedPlant(
-					SavedItem.DisplayedPlantItemKey);
+					SavedItem.DisplayedPlantItemKey,
+					CurrentSaveGame->SaveVersion >= 24
+						? SavedItem.DisplayedSoilItemKey
+						: FName(TEXT("PottingSoil")),
+					CurrentSaveGame->SaveVersion >= 26
+						? SavedItem.DisplayedPotItemKey
+						: FName(TEXT("SalePot")));
 			}
 			else if (ABotanicusWateringCanActor* WateringCan =
 				Cast<ABotanicusWateringCanActor>(PlacedItem))
@@ -1465,6 +1475,22 @@ void ABotanicusGameMode::CapturePlayerInventory(
 	SavedInventory->Slots = QuickBar->GetSlots();
 	SavedInventory->SelectedSlotIndex =
 		QuickBar->GetSelectedSlotIndex();
+	if (const ABotanicusPlayerController* BotanicusController =
+			Cast<ABotanicusPlayerController>(Controller))
+	{
+		SavedInventory->CarriedTransplantPlantKey =
+			BotanicusController->GetCarriedTransplantPlantKey();
+		SavedInventory->CarriedTransplantItemKey =
+			BotanicusController->GetCarriedTransplantItemKey();
+		SavedInventory->CarriedTransplantGrowth =
+			BotanicusController->GetCarriedTransplantGrowth();
+		SavedInventory->CarriedTransplantCare =
+			BotanicusController->GetCarriedTransplantCare();
+		SavedInventory->CarriedTransplantWateringCount =
+			BotanicusController->GetCarriedTransplantWateringCount();
+		SavedInventory->bCarriedTransplantElementalDead =
+			BotanicusController->IsCarriedTransplantElementalDead();
+	}
 	if (const APawn* Pawn = Controller->GetPawn())
 	{
 		SavedInventory->bHasPawnTransform = true;
@@ -1620,6 +1646,17 @@ void ABotanicusGameMode::RestorePlayerInventory(AController* Controller)
 	QuickBar->ApplySavedState(
 		SavedInventory->Slots,
 		SavedInventory->SelectedSlotIndex);
+	if (ABotanicusPlayerController* BotanicusController =
+			Cast<ABotanicusPlayerController>(Controller))
+	{
+		BotanicusController->RestoreCarriedTransplantState(
+			SavedInventory->CarriedTransplantPlantKey,
+			SavedInventory->CarriedTransplantItemKey,
+			SavedInventory->CarriedTransplantGrowth,
+			SavedInventory->CarriedTransplantCare,
+			SavedInventory->CarriedTransplantWateringCount,
+			SavedInventory->bCarriedTransplantElementalDead);
+	}
 	// Always ensure that every player owns the cutter required to open
 	// delivery cartons. This also repairs version-16 saves made before the
 	// cutter could be inserted into an available quickbar slot.

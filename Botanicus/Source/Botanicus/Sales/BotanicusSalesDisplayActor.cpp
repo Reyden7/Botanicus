@@ -87,7 +87,11 @@ ABotanicusSalesDisplayActor::ABotanicusSalesDisplayActor()
 		CylinderFinder.Succeeded() ? CylinderFinder.Object : nullptr);
 	PotVisual->SetRelativeLocation(FVector(0.0f, 0.0f, 76.0f));
 	PotVisual->SetRelativeScale3D(FVector(0.25f, 0.25f, 0.2f));
-	PotVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	PotVisual->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	PotVisual->SetCollisionResponseToAllChannels(ECR_Ignore);
+	PotVisual->SetCollisionResponseToChannel(
+		ECC_Visibility,
+		ECR_Block);
 
 	StatusText = CreateDefaultSubobject<UTextRenderComponent>(
 		TEXT("SalesStatus"));
@@ -174,6 +178,12 @@ void ABotanicusSalesDisplayActor::GetLifetimeReplicatedProps(
 		DisplayedPlantItemKey);
 	DOREPLIFETIME(
 		ABotanicusSalesDisplayActor,
+		DisplayedSoilItemKey);
+	DOREPLIFETIME(
+		ABotanicusSalesDisplayActor,
+		DisplayedPotItemKey);
+	DOREPLIFETIME(
+		ABotanicusSalesDisplayActor,
 		SaleEndServerTime);
 	DOREPLIFETIME(
 		ABotanicusSalesDisplayActor,
@@ -193,7 +203,7 @@ ABotanicusSalesDisplayActor::GetInteractionPrompt_Implementation(
 		? NSLOCTEXT(
 			"BotanicusSales",
 			"NeedsPreparedSalePot",
-			"Placer un pot de vente prepare")
+			"Clic gauche : placer le pot de vente prepare")
 		: NSLOCTEXT(
 			"BotanicusSales",
 			"DisplayOccupied",
@@ -263,12 +273,38 @@ bool ABotanicusSalesDisplayActor::TryMountSalePot(
 	{
 		return false;
 	}
-	DisplayedPlantItemKey = SalePot->GetPlantItemKey();
+	if (!TryMountSalePotState(
+			SalePot->GetSoilItemKey(),
+			SalePot->GetPlantItemKey(),
+			Seller,
+			SalePot->GetItemKey()))
+	{
+		return false;
+	}
+	SalePot->Destroy();
+	return true;
+}
+
+bool ABotanicusSalesDisplayActor::TryMountSalePotState(
+	FName SoilItemKey,
+	FName PlantItemKey,
+	ABotanicusPlayerController* Seller,
+	FName SalePotItemKey)
+{
+	if (!HasAuthority() || !IsEmpty() || SoilItemKey.IsNone() ||
+		PlantItemKey.IsNone() || !IsValid(Seller))
+	{
+		return false;
+	}
+	DisplayedPlantItemKey = PlantItemKey;
+	DisplayedSoilItemKey = SoilItemKey;
+	DisplayedPotItemKey = SalePotItemKey.IsNone()
+		? FName(TEXT("SalePot"))
+		: SalePotItemKey;
 	SellerController = Seller;
 	SaleEndServerTime = 0.0f;
 	bVisitorEnRoute = false;
 	bPlantTakenByVisitor = false;
-	SalePot->Destroy();
 	RefreshVisuals();
 	ForceNetUpdate();
 	Seller->ClientMessage(
@@ -305,6 +341,8 @@ bool ABotanicusSalesDisplayActor::CompleteVisitorPurchase(
 			: 0;
 	SellerController->CreditPlantSale(SoldPlant, SalePrice);
 	DisplayedPlantItemKey = NAME_None;
+	DisplayedSoilItemKey = NAME_None;
+	DisplayedPotItemKey = TEXT("SalePot");
 	SaleEndServerTime = 0.0f;
 	bVisitorEnRoute = false;
 	bPlantTakenByVisitor = false;
@@ -383,14 +421,157 @@ FTransform ABotanicusSalesDisplayActor::
 			FVector(0.0f, 0.0f, 105.0f)));
 }
 
+bool ABotanicusSalesDisplayActor::
+	CanRetrieveDisplayedSalePot() const
+{
+	return !DisplayedPlantItemKey.IsNone() &&
+		!bPlantTakenByVisitor;
+}
+
+bool ABotanicusSalesDisplayActor::
+	IsDisplayedSalePotTargeted(const AActor* Interactor) const
+{
+	const APawn* Pawn = Cast<APawn>(Interactor);
+	const APlayerController* Controller =
+		Pawn ? Cast<APlayerController>(Pawn->GetController()) : nullptr;
+	UWorld* World = GetWorld();
+	if (!Pawn || !Controller || !World || !PotVisual ||
+		!CanRetrieveDisplayedSalePot() ||
+		FVector::DistSquared(
+			Pawn->GetActorLocation(),
+			PotVisual->GetComponentLocation()) > FMath::Square(450.0f))
+	{
+		return false;
+	}
+
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	Controller->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	const FVector ToPot =
+		PotVisual->Bounds.Origin - ViewLocation;
+	const float Distance = ToPot.Size();
+	if (Distance <= KINDA_SMALL_NUMBER ||
+		FVector::DotProduct(
+			ViewRotation.Vector(),
+			ToPot / Distance) <
+			FMath::Cos(FMath::DegreesToRadians(22.0f)))
+	{
+		return false;
+	}
+
+	FCollisionQueryParams QueryParams(
+		SCENE_QUERY_STAT(BotanicusDisplayedSalePotTarget),
+		false,
+		Pawn);
+	FHitResult Hit;
+	return World->LineTraceSingleByChannel(
+			Hit,
+			ViewLocation,
+			PotVisual->Bounds.Origin,
+			ECC_Visibility,
+			QueryParams) &&
+		Hit.GetActor() == this &&
+		Hit.GetComponent() == PotVisual;
+}
+
+void ABotanicusSalesDisplayActor::
+	SetDisplayedSalePotHighlighted(
+		bool bHighlighted,
+		UMaterialInterface* HighlightMaterial)
+{
+	for (UStaticMeshComponent* Visual : {PotVisual.Get(), PlantVisual.Get()})
+	{
+		if (!Visual)
+		{
+			continue;
+		}
+		Visual->SetRenderCustomDepth(bHighlighted);
+		Visual->SetCustomDepthStencilValue(bHighlighted ? 2 : 0);
+		Visual->SetOverlayMaterial(
+			bHighlighted ? HighlightMaterial : nullptr);
+	}
+}
+
+bool ABotanicusSalesDisplayActor::TryRetrieveDisplayedSalePot(
+	AActor* Interactor)
+{
+	if (!HasAuthority() ||
+		!CanRetrieveDisplayedSalePot() ||
+		!IsDisplayedSalePotTargeted(Interactor))
+	{
+		return false;
+	}
+
+	ABotanicusCharacter* Character =
+		Cast<ABotanicusCharacter>(Interactor);
+	UBotanicusQuickBarComponent* QuickBar =
+		Character ? Character->GetQuickBarComponent() : nullptr;
+	if (!QuickBar)
+	{
+		return false;
+	}
+
+	FBotanicusCarriedItemState State;
+	State.bHasSalePotState = true;
+	State.SaleSoilItemKey = DisplayedSoilItemKey.IsNone()
+		? FName(TEXT("PottingSoil"))
+		: DisplayedSoilItemKey;
+	State.SalePlantItemKey = DisplayedPlantItemKey;
+	int32 AddedSlotIndex = INDEX_NONE;
+	if (!QuickBar->AddUniqueItem(
+			DisplayedPotItemKey.IsNone()
+				? FName(TEXT("SalePot"))
+				: DisplayedPotItemKey,
+			State,
+			AddedSlotIndex))
+	{
+		SendInteractorMessage(
+			Interactor,
+			TEXT("Hotbar pleine : liberez un emplacement pour reprendre le pot."));
+		return false;
+	}
+	if (ABotanicusVisitorCharacter* ReservedVisitor =
+			ActiveVisitor.Get())
+	{
+		// The pot is still physically on the display, so the owner may take
+		// it back.  Release the visitor cleanly before clearing the display.
+		ReservedVisitor->BeginDeparture(false);
+	}
+
+	DisplayedPlantItemKey = NAME_None;
+	DisplayedSoilItemKey = NAME_None;
+	DisplayedPotItemKey = TEXT("SalePot");
+	SellerController = nullptr;
+	SaleEndServerTime = 0.0f;
+	bVisitorEnRoute = false;
+	bPlantTakenByVisitor = false;
+	QuickBar->SelectSlotAuthoritative(AddedSlotIndex);
+	RefreshVisuals();
+	ForceNetUpdate();
+	SendInteractorMessage(
+		Interactor,
+		TEXT("Pot de vente repris et place dans la hotbar."));
+	return true;
+}
+
 void ABotanicusSalesDisplayActor::RestoreDisplayedPlant(
-	FName InDisplayedPlantItemKey)
+	FName InDisplayedPlantItemKey,
+	FName InDisplayedSoilItemKey,
+	FName InDisplayedPotItemKey)
 {
 	if (!HasAuthority())
 	{
 		return;
 	}
 	DisplayedPlantItemKey = InDisplayedPlantItemKey;
+	DisplayedSoilItemKey = DisplayedPlantItemKey.IsNone()
+		? NAME_None
+		: InDisplayedSoilItemKey.IsNone()
+			? FName(TEXT("PottingSoil"))
+			: InDisplayedSoilItemKey;
+	DisplayedPotItemKey = InDisplayedPotItemKey.IsNone()
+		? FName(TEXT("SalePot"))
+		: InDisplayedPotItemKey;
 	SaleEndServerTime = 0.0f;
 	bVisitorEnRoute = false;
 	bPlantTakenByVisitor = false;
@@ -529,6 +710,41 @@ void ABotanicusSalesDisplayActor::RefreshVisuals()
 	}
 	if (PotVisual)
 	{
+		const UGameInstance* GameInstance = GetGameInstance();
+		const UBotanicusItemCatalogSubsystem* Catalog =
+			GameInstance
+				? GameInstance->GetSubsystem<
+					UBotanicusItemCatalogSubsystem>()
+				: nullptr;
+		const FBotanicusItemDefinition* PotDefinition =
+			Catalog ? Catalog->FindItem(DisplayedPotItemKey) : nullptr;
+		if (DisplayedPotItemKey == TEXT("SalePotSquare") && PotDefinition)
+		{
+			if (UStaticMesh* PotMesh =
+					PotDefinition->WorldMesh.LoadSynchronous())
+			{
+				PotVisual->SetStaticMesh(PotMesh);
+				const FBox Bounds = PotMesh->GetBoundingBox();
+				const FVector Extent = Bounds.GetExtent().GetAbs();
+				const float UniformScale = FMath::Min3(
+					25.0f / FMath::Max(1.0f, Extent.X),
+					25.0f / FMath::Max(1.0f, Extent.Y),
+					40.0f / FMath::Max(1.0f, Extent.Z));
+				PotVisual->SetRelativeScale3D(FVector(UniformScale));
+				PotVisual->SetRelativeLocation(FVector(
+					0.0f,
+					0.0f,
+					66.0f - Bounds.Min.Z * UniformScale));
+			}
+		}
+		else if (UStaticMesh* DefaultPotMesh = LoadObject<UStaticMesh>(
+			nullptr,
+			TEXT("/Engine/BasicShapes/Cylinder.Cylinder")))
+		{
+			PotVisual->SetStaticMesh(DefaultPotMesh);
+			PotVisual->SetRelativeLocation(FVector(0.0f, 0.0f, 76.0f));
+			PotVisual->SetRelativeScale3D(FVector(0.25f, 0.25f, 0.2f));
+		}
 		PotVisual->SetVisibility(
 			bHasPlant && !bPlantTakenByVisitor);
 	}

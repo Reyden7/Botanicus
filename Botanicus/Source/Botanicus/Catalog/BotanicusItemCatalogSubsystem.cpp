@@ -37,11 +37,13 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 					}))
 		{
 			// Runtime migration for catalogues generated before soil was
-			// allowed on the floor. The asset generator writes this value
-			// permanently the next time the catalogue is regenerated.
+			// allowed on the floor or limited to bags of five. The asset
+			// generator writes these values permanently the next time the
+			// catalogue is regenerated.
 			PottingSoil->AllowedPlacementSurfaces =
 				static_cast<int32>(
 					EBotanicusPlacementSurface::Floor);
+			PottingSoil->MaximumStack = 5;
 		}
 	}
 
@@ -97,6 +99,31 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	PlantPot.Price = 75;
 	PlantPot.DeliveryQuantity = 1;
 	PlantPot.DeliveryDelaySeconds = 2.0f;
+
+	FBotanicusItemDefinition& SquarePlantPot =
+		NativeFallbackItems.AddDefaulted_GetRef();
+	SquarePlantPot.ItemKey = TEXT("PlantPotSquare");
+	SquarePlantPot.DisplayName = NSLOCTEXT(
+		"BotanicusCatalog",
+		"PlantPotSquare",
+		"Pot de culture carre");
+	SquarePlantPot.Category = EBotanicusItemCategory::Decoration;
+	SquarePlantPot.CatalogTabs =
+		static_cast<int32>(EBotanicusCatalogTab::Preparation);
+	SquarePlantPot.WorldMesh = TSoftObjectPtr<UStaticMesh>(
+		FSoftObjectPath(TEXT(
+			"/Game/Botanicus/Items/itemsMesh/potPreparation/carré/pot_preparation-carré.pot_preparation-carré")));
+	SquarePlantPot.WorldScale = FVector::OneVector;
+	SquarePlantPot.WorldActorClass = TSoftClassPtr<AActor>(
+		FSoftObjectPath(TEXT(
+			"/Game/Botanicus/blueprints/BP_Item_PlantPotSquare.BP_Item_PlantPotSquare_C")));
+	SquarePlantPot.MaximumStack = 10;
+	SquarePlantPot.WeightClass = EBotanicusItemWeightClass::Hotbar;
+	SquarePlantPot.Price = 85;
+	SquarePlantPot.DeliveryQuantity = 1;
+	SquarePlantPot.DeliveryDelaySeconds = 2.0f;
+	SquarePlantPot.CollisionHalfExtentOverride =
+		FVector(50.0f, 47.0f, 21.0f);
 
 	const auto AddPreparationPlanter =
 		[this](
@@ -169,7 +196,7 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	PottingSoil.WorldMesh = TSoftObjectPtr<UStaticMesh>(
 		FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube.Cube")));
 	PottingSoil.WorldScale = FVector(0.24f);
-	PottingSoil.MaximumStack = 20;
+	PottingSoil.MaximumStack = 5;
 	PottingSoil.bSaleSoil = true;
 	PottingSoil.WeightClass = EBotanicusItemWeightClass::Hotbar;
 	PottingSoil.Price = 25;
@@ -595,6 +622,31 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	SalePot.DeliveryDelaySeconds = 2.0f;
 	SalePot.CollisionHalfExtentOverride =
 		FVector(28.0f, 28.0f, 22.0f);
+
+	FBotanicusItemDefinition& SquareSalePot =
+		NativeFallbackItems.AddDefaulted_GetRef();
+	SquareSalePot.ItemKey = TEXT("SalePotSquare");
+	SquareSalePot.DisplayName = NSLOCTEXT(
+		"BotanicusCatalog",
+		"SalePotSquare",
+		"Pot de vente carre");
+	SquareSalePot.Category = EBotanicusItemCategory::Decoration;
+	SquareSalePot.CatalogTabs =
+		static_cast<int32>(EBotanicusCatalogTab::Sales);
+	SquareSalePot.WorldMesh = TSoftObjectPtr<UStaticMesh>(
+		FSoftObjectPath(TEXT(
+			"/Game/Botanicus/Items/itemsMesh/potDeVente/carré/pot_vente-carré.pot_vente-carré")));
+	SquareSalePot.WorldScale = FVector::OneVector;
+	SquareSalePot.WorldActorClass = TSoftClassPtr<AActor>(
+		FSoftObjectPath(TEXT(
+			"/Game/Botanicus/blueprints/BP_Item_SalePotSquare.BP_Item_SalePotSquare_C")));
+	SquareSalePot.MaximumStack = 10;
+	SquareSalePot.WeightClass = EBotanicusItemWeightClass::Hotbar;
+	SquareSalePot.Price = 12;
+	SquareSalePot.DeliveryQuantity = 1;
+	SquareSalePot.DeliveryDelaySeconds = 2.0f;
+	SquareSalePot.CollisionHalfExtentOverride =
+		FVector(28.0f, 28.0f, 24.0f);
 
 	FBotanicusItemDefinition& PreparationWorkbench =
 		NativeFallbackItems.AddDefaulted_GetRef();

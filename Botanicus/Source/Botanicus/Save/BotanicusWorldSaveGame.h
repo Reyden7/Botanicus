@@ -47,6 +47,24 @@ struct BOTANICUS_API FBotanicusSavedPlayerInventory
 
 	UPROPERTY()
 	FTransform PawnTransform = FTransform::Identity;
+
+	UPROPERTY()
+	FName CarriedTransplantPlantKey = NAME_None;
+
+	UPROPERTY()
+	FName CarriedTransplantItemKey = NAME_None;
+
+	UPROPERTY()
+	float CarriedTransplantGrowth = 0.0f;
+
+	UPROPERTY()
+	float CarriedTransplantCare = 0.0f;
+
+	UPROPERTY()
+	int32 CarriedTransplantWateringCount = 0;
+
+	UPROPERTY()
+	bool bCarriedTransplantElementalDead = false;
 };
 
 USTRUCT()
@@ -200,6 +218,12 @@ struct BOTANICUS_API FBotanicusSavedWorldItem
 	FName DisplayedPlantItemKey = NAME_None;
 
 	UPROPERTY()
+	FName DisplayedSoilItemKey = NAME_None;
+
+	UPROPERTY()
+	FName DisplayedPotItemKey = TEXT("SalePot");
+
+	UPROPERTY()
 	float WateringCanWaterLevel = 1.0f;
 
 	UPROPERTY()
@@ -220,7 +244,7 @@ class BOTANICUS_API UBotanicusWorldSaveGame : public USaveGame
 
 public:
 	UPROPERTY()
-	int32 SaveVersion = 23;
+	int32 SaveVersion = 26;
 
 	UPROPERTY()
 	FString MapName;

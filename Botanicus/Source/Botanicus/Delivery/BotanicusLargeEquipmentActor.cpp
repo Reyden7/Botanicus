@@ -399,7 +399,8 @@ void ABotanicusLargeEquipmentActor::ApplyItemDefinition()
 	UStaticMesh* ResolvedMesh = nullptr;
 	bUsingItemDataMesh = false;
 
-	if (IsFurnitureEquipmentKey(ItemKey))
+	if (!UsesBlueprintAppearance() &&
+		IsFurnitureEquipmentKey(ItemKey))
 	{
 		const UItemDataAsset* ItemData =
 			UItemDataSubsystem::Get(this).GetItemDataAsset(ItemKey);
@@ -424,18 +425,21 @@ void ABotanicusLargeEquipmentActor::ApplyItemDefinition()
 		return;
 	}
 
-	if (!ResolvedMesh)
+	if (!UsesBlueprintAppearance() && !ResolvedMesh)
 	{
 		ResolvedMesh = Definition->WorldMesh.LoadSynchronous();
 	}
-	if (ResolvedMesh)
+	if (!UsesBlueprintAppearance() && ResolvedMesh)
 	{
 		Mesh->SetStaticMesh(ResolvedMesh);
 	}
-	Mesh->SetRelativeScale3D(
-		bUsingItemDataMesh
-			? FVector::OneVector
-			: Definition->WorldScale);
+	if (!UsesBlueprintAppearance())
+	{
+		Mesh->SetRelativeScale3D(
+			bUsingItemDataMesh
+				? FVector::OneVector
+				: Definition->WorldScale);
+	}
 	InteractionName = Definition->DisplayName;
 	bCooperativeCarry =
 		Definition->WeightClass ==

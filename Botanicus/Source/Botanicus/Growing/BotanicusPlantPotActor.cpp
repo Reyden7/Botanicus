@@ -7,6 +7,7 @@
 #include "Camera/PlayerCameraManager.h"
 #include "Building/BotanicusElementalGreenhouseActor.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/ChildActorComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/StaticMesh.h"
@@ -19,6 +20,53 @@
 #include "Net/UnrealNetwork.h"
 #include "QuickBar/BotanicusQuickBarComponent.h"
 #include "UObject/ConstructorHelpers.h"
+#include "UObject/UnrealType.h"
+#include "Visuals/BotanicusPotSoilVisualActor.h"
+
+namespace
+{
+float ReadBlueprintFloatSetting(
+	const UObject* Object,
+	const FName PropertyName,
+	const float Fallback)
+{
+	if (const FFloatProperty* Property =
+		FindFProperty<FFloatProperty>(Object->GetClass(), PropertyName))
+	{
+		return Property->GetPropertyValue_InContainer(Object);
+	}
+	return Fallback;
+}
+
+FVector2D ReadBlueprintVector2DSetting(
+	const UObject* Object,
+	const FName PropertyName,
+	const FVector2D& Fallback)
+{
+	if (const FStructProperty* Property =
+		FindFProperty<FStructProperty>(Object->GetClass(), PropertyName))
+	{
+		if (Property->Struct == TBaseStructure<FVector2D>::Get())
+		{
+			return *Property->ContainerPtrToValuePtr<FVector2D>(Object);
+		}
+	}
+	return Fallback;
+}
+
+bool ReadBlueprintBoolSetting(
+	const UObject* Object,
+	const FName PropertyName,
+	const bool bFallback)
+{
+	if (const FBoolProperty* Property =
+		FindFProperty<FBoolProperty>(Object->GetClass(), PropertyName))
+	{
+		return Property->GetPropertyValue_InContainer(Object);
+	}
+	return bFallback;
+}
+}
 
 ABotanicusPlantPotActor::ABotanicusPlantPotActor()
 {
@@ -42,11 +90,15 @@ ABotanicusPlantPotActor::ABotanicusPlantPotActor()
 	SoilMesh = CreateDefaultSubobject<UStaticMeshComponent>(
 		TEXT("Soil"));
 	SoilMesh->SetupAttachment(SceneRoot);
-	SoilMesh->SetStaticMesh(
-		CylinderFinder.Succeeded() ? CylinderFinder.Object : nullptr);
-	SoilMesh->SetRelativeLocation(FVector(0.0f, 0.0f, 31.0f));
-	SoilMesh->SetRelativeScale3D(FVector(0.34f, 0.34f, 0.035f));
+	SoilMesh->SetStaticMesh(nullptr);
 	SoilMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	SoilMesh->SetVisibility(false);
+
+	SoilShapeVisual = CreateDefaultSubobject<UChildActorComponent>(
+		TEXT("Adaptive Pot Soil"));
+	SoilShapeVisual->SetupAttachment(SceneRoot);
+	SoilShapeVisual->SetChildActorClass(
+		ABotanicusPotSoilVisualActor::StaticClass());
 
 	StemMesh = CreateDefaultSubobject<UStaticMeshComponent>(
 		TEXT("Stem"));
@@ -84,6 +136,61 @@ ABotanicusPlantPotActor::ABotanicusPlantPotActor()
 	ContextActionText->SetVisibility(false);
 
 	RefreshVisuals();
+}
+
+float ABotanicusPlantPotActor::GetSoilMaximumHeight() const
+{
+	return GetConfiguredSoilMaximumHeight();
+}
+
+FVector2D ABotanicusPlantPotActor::GetConfiguredSoilHorizontalOffset() const
+{
+	return ReadBlueprintVector2DSetting(
+		this, TEXT("SoilHorizontalPosition"), SoilHorizontalOffset);
+}
+
+float ABotanicusPlantPotActor::GetConfiguredSoilMaximumHeight() const
+{
+	return ReadBlueprintFloatSetting(
+		this, TEXT("SoilMaximumHeightSetting"), SoilSurfaceHeight);
+}
+
+FVector2D ABotanicusPlantPotActor::GetConfiguredSoilBottomRadii() const
+{
+	return ReadBlueprintVector2DSetting(
+		this, TEXT("SoilBottomRadiiSetting"), SoilBottomRadii);
+}
+
+FVector2D ABotanicusPlantPotActor::GetConfiguredSoilTopRadii() const
+{
+	return ReadBlueprintVector2DSetting(
+		this, TEXT("SoilTopRadiiSetting"), SoilTopRadii);
+}
+
+float ABotanicusPlantPotActor::GetConfiguredSoilVolumeHeight() const
+{
+	return FMath::Max(
+		1.0f,
+		ReadBlueprintFloatSetting(
+			this, TEXT("SoilVolumeHeightSetting"), SoilVolumeHeight));
+}
+
+bool ABotanicusPlantPotActor::GetConfiguredSquareSoilProfile() const
+{
+	return ReadBlueprintBoolSetting(
+		this, TEXT("UseSquareSoilProfile"), bSquareSoilProfile);
+}
+
+float ABotanicusPlantPotActor::GetConfiguredPlantBaseHeight() const
+{
+	return ReadBlueprintFloatSetting(
+		this, TEXT("PlantingHeightSetting"), PlantBaseHeight);
+}
+
+void ABotanicusPlantPotActor::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	RefreshSoilVisual();
 }
 
 void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
@@ -236,7 +343,16 @@ ABotanicusPlantPotActor::GetInteractionPrompt_Implementation(
 	Prompt.bCanInteract = CanInteract_Implementation(Interactor);
 	const FName SelectedItemKey = GetSelectedItemKey(Interactor);
 
-	if (!bHasSoil)
+	if (SelectedItemKey == TEXT("GardenTrowel") &&
+		PlantKey.IsNone() &&
+		GetSoilLevel() > KINDA_SMALL_NUMBER)
+	{
+		Prompt.ActionText = NSLOCTEXT(
+			"BotanicusGrowing",
+			"RemovePotSoil",
+			"Retirer le terreau");
+	}
+	else if (!IsSoilFull())
 	{
 		Prompt.ActionText =
 			SelectedItemKey == TEXT("PottingSoil")
@@ -396,7 +512,20 @@ void ABotanicusPlantPotActor::BeginPrimaryUse(AActor* Interactor)
 		return;
 	}
 
-	if (!bHasSoil)
+	if (SelectedItemKey == TEXT("GardenTrowel") &&
+		PlantKey.IsNone() &&
+		GetSoilLevel() > KINDA_SMALL_NUMBER)
+	{
+		SoilFillProgress = GetSoilLevel();
+		ActivePrimaryUser = Character;
+		PrimaryUseMode = EPrimaryUseMode::RemoveSoil;
+		SendInteractorMessage(
+			Interactor,
+			FString::Printf(
+				TEXT("Maintenez le clic gauche pour retirer le terreau (%d%% restant)."),
+				FMath::RoundToInt(SoilFillProgress * 100.0f)));
+	}
+	else if (!IsSoilFull())
 	{
 		if (SelectedItemKey != TEXT("PottingSoil"))
 		{
@@ -405,12 +534,15 @@ void ABotanicusPlantPotActor::BeginPrimaryUse(AActor* Interactor)
 				TEXT("Sélectionnez une dose de terreau dans la hotbar."));
 			return;
 		}
+		// A partially emptied pot can be filled again from its current level.
+		bHasSoil = false;
 		ActivePrimaryUser = Character;
 		PrimaryUseMode = EPrimaryUseMode::FillSoil;
-		SoilFillProgress = 0.0f;
 		SendInteractorMessage(
 			Interactor,
-			TEXT("Maintenez le clic gauche pour verser le terreau."));
+			FString::Printf(
+				TEXT("Maintenez le clic gauche pour verser le terreau (%d%%)."),
+				FMath::RoundToInt(SoilFillProgress * 100.0f)));
 	}
 	else if (PlantKey.IsNone())
 	{
@@ -521,12 +653,21 @@ void ABotanicusPlantPotActor::EndPrimaryUse(AActor* Interactor)
 	}
 
 	if (PrimaryUseMode == EPrimaryUseMode::FillSoil &&
-		SoilFillProgress > 0.0f &&
-		!bHasSoil)
+		!IsSoilFull())
 	{
 		SendInteractorMessage(
 			Interactor,
-			TEXT("Remplissage du pot annule."));
+			FString::Printf(
+				TEXT("Remplissage interrompu : %d%% conserve."),
+				FMath::RoundToInt(SoilFillProgress * 100.0f)));
+	}
+	else if (PrimaryUseMode == EPrimaryUseMode::RemoveSoil)
+	{
+		SendInteractorMessage(
+			Interactor,
+			FString::Printf(
+				TEXT("Retrait interrompu : %d%% de terreau restant."),
+				FMath::RoundToInt(GetSoilLevel() * 100.0f)));
 	}
 	else if (PrimaryUseMode == EPrimaryUseMode::Water)
 	{
@@ -546,7 +687,6 @@ void ABotanicusPlantPotActor::EndPrimaryUse(AActor* Interactor)
 
 	ActivePrimaryUser.Reset();
 	PrimaryUseMode = EPrimaryUseMode::None;
-	SoilFillProgress = 0.0f;
 	HarvestProgress = 0.0f;
 	bWateringActive = false;
 	RefreshVisuals();
@@ -600,6 +740,37 @@ bool ABotanicusPlantPotActor::UpdatePrimaryUse(float DeltaSeconds)
 			ActivePrimaryUser.Reset();
 			PrimaryUseMode = EPrimaryUseMode::None;
 			SoilFillProgress = 0.0f;
+		}
+		return true;
+	}
+
+	if (PrimaryUseMode == EPrimaryUseMode::RemoveSoil)
+	{
+		if (!bCharacterValid ||
+			SelectedItemKey != TEXT("GardenTrowel") ||
+			!PlantKey.IsNone() ||
+			GetSoilLevel() <= KINDA_SMALL_NUMBER)
+		{
+			EndPrimaryUse(Character);
+			return true;
+		}
+
+		SoilFillProgress = FMath::Clamp(
+			GetSoilLevel() -
+				DeltaSeconds / FMath::Max(0.1f, SoilRemovalDuration),
+			0.0f,
+			1.0f);
+		if (SoilFillProgress <= KINDA_SMALL_NUMBER)
+		{
+			SoilFillProgress = 0.0f;
+			bHasSoil = false;
+			WaterLevel = 0.0f;
+			WateringCount = 0;
+			SendInteractorMessage(
+				Character,
+				TEXT("Le terreau a ete retire du pot."));
+			ActivePrimaryUser.Reset();
+			PrimaryUseMode = EPrimaryUseMode::None;
 		}
 		return true;
 	}
@@ -767,6 +938,7 @@ void ABotanicusPlantPotActor::RestoreGrowingState(
 		return;
 	}
 	bHasSoil = bInHasSoil;
+	SoilFillProgress = 0.0f;
 	PlantKey = InPlantKey;
 	WaterLevel = FMath::Clamp(InWaterLevel, 0.0f, 1.0f);
 	GrowthProgress = FMath::Clamp(InGrowthProgress, 0.0f, 1.0f);
@@ -774,6 +946,14 @@ void ABotanicusPlantPotActor::RestoreGrowingState(
 	bElementalDead = bInElementalDead && !PlantKey.IsNone();
 	RefreshVisuals();
 	ForceNetUpdate();
+}
+
+FName ABotanicusPlantPotActor::GetCurrentHarvestItemKey() const
+{
+	const FBotanicusPlantDefinition* Definition = GetPlantDefinition();
+	return Definition
+		? GetQualityHarvestItemKey(*Definition)
+		: NAME_None;
 }
 
 void ABotanicusPlantPotActor::ApplyElementalInfluence(
@@ -992,13 +1172,31 @@ void ABotanicusPlantPotActor::RefreshLocalContextAction()
 	const APlayerController* Controller =
 		World ? World->GetFirstPlayerController() : nullptr;
 	APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
+	const bool bTrowelSelected =
+		IsValid(Pawn) &&
+		GetSelectedItemKey(Pawn) == TEXT("GardenTrowel");
+	const bool bCanRemoveSoil =
+		PlantKey.IsNone() &&
+		GetSoilLevel() > KINDA_SMALL_NUMBER;
 	const bool bShowAction =
 		IsValid(Pawn) &&
 		IsInteractorStillTargeting(Pawn) &&
-		CanHarvestWithInteractor(Pawn);
+		bTrowelSelected &&
+		(!PlantKey.IsNone() || bCanRemoveSoil);
 	ContextActionText->SetVisibility(bShowAction);
 	if (!bShowAction)
 	{
+		return;
+	}
+
+	if (bCanRemoveSoil)
+	{
+		ContextActionText->SetText(
+			FText::FromString(
+				FString::Printf(
+					TEXT("MAINTENIR CLIC GAUCHE : RETIRER LE TERREAU (%d%%)"),
+					FMath::RoundToInt(GetSoilLevel() * 100.0f))));
+		ContextActionText->SetTextRenderColor(FColor(80, 180, 255));
 		return;
 	}
 
@@ -1010,10 +1208,13 @@ void ABotanicusPlantPotActor::RefreshLocalContextAction()
 			: PlantKey.ToString();
 	ContextActionText->SetText(
 		FText::FromString(
-			FString::Printf(
-				TEXT(
-					"MAINTENIR CLIC GAUCHE 1 S\nUTILISER PETITE PELLE POUR RECOLTER %s"),
-				*PlantName.ToUpper())));
+			GrowthProgress <= 0.0201f
+				? FString::Printf(
+					TEXT("CLIC GAUCHE : RECUPERER LA GRAINE DE %s"),
+					*PlantName.ToUpper())
+				: FString::Printf(
+					TEXT("CLIC GAUCHE : DEPOTER %s POUR LA REMPOTER"),
+					*PlantName.ToUpper())));
 	ContextActionText->SetTextRenderColor(
 		FColor(80, 255, 110));
 }
@@ -1030,12 +1231,25 @@ FName ABotanicusPlantPotActor::GetSelectedItemKey(
 		: NAME_None;
 }
 
+float ABotanicusPlantPotActor::GetSoilLevel() const
+{
+	if (!bHasSoil)
+	{
+		return FMath::Clamp(SoilFillProgress, 0.0f, 1.0f);
+	}
+	return SoilFillProgress > KINDA_SMALL_NUMBER
+		? FMath::Clamp(SoilFillProgress, 0.0f, 1.0f)
+		: 1.0f;
+}
+
+bool ABotanicusPlantPotActor::IsSoilFull() const
+{
+	return bHasSoil && GetSoilLevel() >= 1.0f - KINDA_SMALL_NUMBER;
+}
+
 void ABotanicusPlantPotActor::RefreshVisuals()
 {
-	if (SoilMesh)
-	{
-		SoilMesh->SetVisibility(bHasSoil);
-	}
+	RefreshSoilVisual();
 	const bool bHasPlant = !PlantKey.IsNone();
 	const FBotanicusPlantDefinition* Definition =
 		GetPlantDefinition();
@@ -1066,11 +1280,16 @@ void ABotanicusPlantPotActor::RefreshVisuals()
 	const float StemHeight =
 		FMath::Lerp(8.0f, 80.0f, VisualGrowth) *
 		HeightMultiplier;
+	const float ConfiguredPlantBaseHeight =
+		GetConfiguredPlantBaseHeight();
 	if (StemMesh)
 	{
 		StemMesh->SetVisibility(bHasPlant);
 		StemMesh->SetRelativeLocation(
-			FVector(0.0f, 0.0f, 34.0f + StemHeight * 0.5f));
+			FVector(
+				0.0f,
+				0.0f,
+				ConfiguredPlantBaseHeight + StemHeight * 0.5f));
 		StemMesh->SetRelativeScale3D(
 			FVector(0.035f, 0.035f, StemHeight / 100.0f));
 	}
@@ -1078,7 +1297,10 @@ void ABotanicusPlantPotActor::RefreshVisuals()
 	{
 		FoliageMesh->SetVisibility(bHasPlant);
 		FoliageMesh->SetRelativeLocation(
-			FVector(0.0f, 0.0f, 34.0f + StemHeight));
+			FVector(
+				0.0f,
+				0.0f,
+				ConfiguredPlantBaseHeight + StemHeight));
 		const float FoliageScale =
 			FMath::Lerp(0.06f, 0.32f, VisualGrowth);
 		FoliageMesh->SetRelativeScale3D(
@@ -1117,11 +1339,18 @@ void ABotanicusPlantPotActor::RefreshVisuals()
 			EnvironmentStatus = TEXT("PLANTE MORTE");
 		}
 		FString ActionStatus = TEXT("AUCUNE");
-		if (SoilFillProgress > 0.0f)
+		if (PrimaryUseMode == EPrimaryUseMode::FillSoil &&
+			SoilFillProgress > 0.0f)
 		{
 			ActionStatus = FString::Printf(
 				TEXT("TERREAU %d%%"),
 				FMath::RoundToInt(SoilFillProgress * 100.0f));
+		}
+		else if (PrimaryUseMode == EPrimaryUseMode::RemoveSoil)
+		{
+			ActionStatus = FString::Printf(
+				TEXT("RETRAIT TERREAU %d%% RESTANT"),
+				FMath::RoundToInt(GetSoilLevel() * 100.0f));
 		}
 		else if (bWateringActive)
 		{
@@ -1156,6 +1385,45 @@ void ABotanicusPlantPotActor::RefreshVisuals()
 				: bHasSoil
 				? FColor(120, 255, 150)
 				: FColor(255, 190, 80));
+	}
+}
+
+void ABotanicusPlantPotActor::RefreshSoilVisual()
+{
+	if (SoilMesh)
+	{
+		SoilMesh->SetVisibility(false);
+	}
+	if (!SoilShapeVisual)
+	{
+		return;
+	}
+
+	const float FillAlpha = GetSoilLevel();
+	const bool bIsFilling =
+		PrimaryUseMode == EPrimaryUseMode::FillSoil ||
+		PrimaryUseMode == EPrimaryUseMode::RemoveSoil;
+	const FVector2D ConfiguredHorizontalOffset =
+		GetConfiguredSoilHorizontalOffset();
+	const float ConfiguredMaximumHeight =
+		GetConfiguredSoilMaximumHeight();
+	const float ConfiguredVolumeHeight =
+		GetConfiguredSoilVolumeHeight();
+	SoilShapeVisual->SetRelativeLocation(FVector(
+		ConfiguredHorizontalOffset.X,
+		ConfiguredHorizontalOffset.Y,
+		ConfiguredMaximumHeight - ConfiguredVolumeHeight));
+	if (ABotanicusPotSoilVisualActor* SoilActor =
+			Cast<ABotanicusPotSoilVisualActor>(
+				SoilShapeVisual->GetChildActor()))
+	{
+		SoilActor->ConfigureSoilShape(
+			GetConfiguredSoilBottomRadii(),
+			GetConfiguredSoilTopRadii(),
+			ConfiguredVolumeHeight,
+			FillAlpha,
+			FillAlpha > KINDA_SMALL_NUMBER || bIsFilling,
+			GetConfiguredSquareSoilProfile());
 	}
 }
 

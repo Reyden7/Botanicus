@@ -3,6 +3,7 @@
 #include "Interaction/BotanicusInteractableActor.h"
 
 #include "Components/SceneComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Net/UnrealNetwork.h"
 
@@ -16,6 +17,32 @@ ABotanicusInteractableActor::ABotanicusInteractableActor()
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	Mesh->SetupAttachment(SceneRoot);
 	Mesh->SetCollisionProfileName(TEXT("BlockAllDynamic"));
+
+	SkeletalMeshVisual = CreateDefaultSubobject<USkeletalMeshComponent>(
+		TEXT("Skeletal Mesh Visual"));
+	SkeletalMeshVisual->SetupAttachment(SceneRoot);
+	SkeletalMeshVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	SkeletalMeshVisual->SetVisibility(false);
+}
+
+void ABotanicusInteractableActor::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+
+	const bool bShowSkeletalMesh =
+		UsesSkeletalMeshAppearance() &&
+		SkeletalMeshVisual &&
+		SkeletalMeshVisual->GetSkeletalMeshAsset();
+	if (Mesh)
+	{
+		// The static component remains registered and can still serve as the
+		// placement/collision proxy for an animated appearance.
+		Mesh->SetVisibility(!bShowSkeletalMesh, true);
+	}
+	if (SkeletalMeshVisual)
+	{
+		SkeletalMeshVisual->SetVisibility(bShowSkeletalMesh, true);
+	}
 }
 
 void ABotanicusInteractableActor::GetLifetimeReplicatedProps(

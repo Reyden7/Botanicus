@@ -23,6 +23,7 @@ public class Botanicus : ModuleRules
 			"StateTreeModule",
 			"GameplayStateTreeModule",
 			"Landscape",
+			"ProceduralMeshComponent",
 			"UMG",
 			"Slate",
 			"SlateCore"

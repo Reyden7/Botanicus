@@ -8,6 +8,7 @@
 #include "BotanicusInteractableActor.generated.h"
 
 class USceneComponent;
+class USkeletalMeshComponent;
 class UStaticMeshComponent;
 
 /**
@@ -20,6 +21,7 @@ class BOTANICUS_API ABotanicusInteractableActor : public AActor, public IBotanic
 
 public:
 	ABotanicusInteractableActor();
+	virtual void OnConstruction(const FTransform& Transform) override;
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
@@ -38,6 +40,40 @@ public:
 	/** Optional mesh with Visibility collision enabled by default. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
 	TObjectPtr<UStaticMeshComponent> Mesh;
+
+	/** Optional animated visual. Enable Use Skeletal Mesh Appearance in a child Blueprint to display it. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
+	TObjectPtr<USkeletalMeshComponent> SkeletalMeshVisual;
+
+	/**
+	 * Keeps the meshes, materials and transforms authored on a child
+	 * Blueprint instead of replacing them from the item catalogue at runtime.
+	 */
+	UPROPERTY(
+		EditDefaultsOnly,
+		BlueprintReadOnly,
+		Category="Botanicus|Appearance")
+	bool bUseBlueprintAppearance = false;
+
+	/** Uses SkeletalMeshVisual for rendering while keeping Mesh as the collision proxy. */
+	UPROPERTY(
+		EditDefaultsOnly,
+		BlueprintReadOnly,
+		Category="Botanicus|Appearance",
+		meta=(EditCondition="bUseBlueprintAppearance"))
+	bool bUseSkeletalMeshAppearance = false;
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Appearance")
+	bool UsesBlueprintAppearance() const
+	{
+		return bUseBlueprintAppearance;
+	}
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Appearance")
+	bool UsesSkeletalMeshAppearance() const
+	{
+		return bUseBlueprintAppearance && bUseSkeletalMeshAppearance;
+	}
 
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Interaction")

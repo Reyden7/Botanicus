@@ -41,7 +41,8 @@ public:
 		bool bIsValid) override;
 
 	FTransform GetSalePotPreparationTransform(
-		int32 SlotIndex = 0) const;
+		int32 SlotIndex = 0,
+		const ABotanicusSalePotActor* Pot = nullptr) const;
 	bool FindClosestAvailableSalePotSlot(
 		const FVector& ReferenceLocation,
 		FTransform& OutTransform,
@@ -82,6 +83,7 @@ private:
 		int32 SlotIndex,
 		const ABotanicusSalePotActor* IgnoredPot) const;
 	void RefreshLevelVisuals();
+	void AlignPreparedPotsToSlots();
 	void AttachPreparedPotsForMove();
 	void DetachPreparedPotsAfterMove();
 	void RefreshLocalPlacementPrompt();
@@ -120,6 +122,18 @@ private:
 	int32 WorkbenchLevel = 1;
 
 	float SlotSpacing = 75.0f;
+
+	/**
+	 * Vertical correction applied to sale pots, independently from the slot
+	 * marker mesh. Imported pots commonly have their pivot near their centre.
+	 */
+	UPROPERTY(
+		EditDefaultsOnly,
+		BlueprintReadOnly,
+		Category="Botanicus|Preparation",
+		meta=(AllowPrivateAccess="true", Units="cm"))
+	float SalePotPlacementHeightOffset = 15.0f;
+
 	TArray<TWeakObjectPtr<ABotanicusSalePotActor>> MovingPreparedPots;
 	bool bMoveContentsWithFurniture = false;
 };

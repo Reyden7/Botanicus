@@ -177,6 +177,11 @@ void ABotanicusPlaceableItemActor::OnRep_ItemKey()
 
 void ABotanicusPlaceableItemActor::ApplyItemDefinition()
 {
+	if (UsesBlueprintAppearance())
+	{
+		return;
+	}
+
 	UStaticMesh* ResolvedMesh = nullptr;
 	bool bUsesItemDataMesh = false;
 

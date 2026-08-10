@@ -252,6 +252,54 @@ bool UBotanicusQuickBarComponent::AddItem(
 	return RemainingQuantity == 0;
 }
 
+bool UBotanicusQuickBarComponent::AddUniqueItem(
+	FName ItemKey,
+	const FBotanicusCarriedItemState& State,
+	int32& OutSlotIndex)
+{
+	OutSlotIndex = INDEX_NONE;
+	AActor* OwnerActor = GetOwner();
+	if (!OwnerActor || !OwnerActor->HasAuthority() ||
+		!IsItemKeyValid(ItemKey))
+	{
+		return false;
+	}
+
+	for (int32 SlotIndex = 0; SlotIndex < Slots.Num(); ++SlotIndex)
+	{
+		if (!Slots[SlotIndex].IsEmpty())
+		{
+			continue;
+		}
+
+		FBotanicusQuickBarSlot& Slot = Slots[SlotIndex];
+		Slot.ItemKey = ItemKey;
+		Slot.Quantity = 1;
+		Slot.InstanceId = FGuid::NewGuid();
+		Slot.CarriedState = State;
+		OutSlotIndex = SlotIndex;
+		break;
+	}
+
+	if (OutSlotIndex == INDEX_NONE)
+	{
+		return false;
+	}
+
+	OnQuickBarChanged.Broadcast();
+	if (OutSlotIndex == SelectedSlotIndex)
+	{
+		BroadcastSelection();
+	}
+	OwnerActor->ForceNetUpdate();
+	if (ABotanicusGameMode* GameMode =
+			GetWorld()->GetAuthGameMode<ABotanicusGameMode>())
+	{
+		GameMode->ScheduleInventoryAutosave();
+	}
+	return true;
+}
+
 bool UBotanicusQuickBarComponent::RemoveQuantity(int32 SlotIndex, int32 Quantity)
 {
 	AActor* OwnerActor = GetOwner();

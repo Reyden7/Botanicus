@@ -310,6 +310,38 @@ public:
 	/** Server-only reward issued when a prepared plant is sold. */
 	void CreditPlantSale(FName PlantItemKey, int32 SalePrice);
 
+	FName GetCarriedTransplantPlantKey() const
+	{
+		return CarriedTransplantPlantKey;
+	}
+	FName GetCarriedTransplantItemKey() const
+	{
+		return CarriedTransplantItemKey;
+	}
+	float GetCarriedTransplantGrowth() const
+	{
+		return CarriedTransplantGrowth;
+	}
+	float GetCarriedTransplantCare() const
+	{
+		return CarriedTransplantCare;
+	}
+	int32 GetCarriedTransplantWateringCount() const
+	{
+		return CarriedTransplantWateringCount;
+	}
+	bool IsCarriedTransplantElementalDead() const
+	{
+		return bCarriedTransplantElementalDead;
+	}
+	void RestoreCarriedTransplantState(
+		FName PlantKey,
+		FName ItemKey,
+		float Growth,
+		float Care,
+		int32 WateringCount,
+		bool bElementalDead);
+
 	/** Cancels and refunds an unconfirmed building before logout is saved. */
 	void CancelPendingBuildingPurchaseForLogout();
 
@@ -463,7 +495,13 @@ protected:
 	void CancelPlaceableItemMoveCharge();
 	bool TryBeginNearbyPlantPotAction();
 	bool TryBeginNearbySalePotAction();
+	bool TryUseGardenTrowelForTransplant();
+	bool HasCarriedTransplant() const;
+	void ClearCarriedTransplant();
 	bool TryPlaceSelectedSalePotOnWorkbench();
+	bool TryBeginDisplayedSalePotPickup();
+	void UpdateDisplayedSalePotPickup(float DeltaTime);
+	void CancelDisplayedSalePotPickup();
 	bool TryBeginNearbyParcelCut();
 	void EndParcelCut();
 	bool TryPlacePlantOnNearbySalesDisplay();
@@ -489,6 +527,9 @@ protected:
 		ABotanicusLargeEquipmentActor* Equipment);
 	void UpdateLargeEquipmentPlacement(float DeltaTime);
 	void RotateLargeEquipmentPlacement(float Direction);
+	FVector GetViewDirectedGroundPlacementLocation(
+		float MinimumDistance,
+		float MaximumDistance) const;
 	void DrawLargeEquipmentAlignmentGuides(
 		const FTransform& PlacementTransform) const;
 	void ConfirmLargeEquipmentPlacement();
@@ -541,7 +582,8 @@ protected:
 		float RequestedYaw,
 		FTransform& OutTransform,
 		const AActor* IgnoredWorldItem = nullptr,
-		int32 RequestedQuantity = 1) const;
+		int32 RequestedQuantity = 1,
+		bool bFloorOnlyPlacement = false) const;
 	bool FindAimedStorageSlot(
 		ABotanicusStorageShelfActor*& OutShelf,
 		int32& OutSlotIndex) const;
@@ -657,12 +699,22 @@ protected:
 		ABotanicusSalePotActor* SalePot);
 
 	UFUNCTION(Server, Reliable)
+	void ServerUseGardenTrowelForTransplant(AActor* TargetPot);
+
+	UFUNCTION(Server, Reliable)
+	void ServerRetrieveDisplayedSalePot(
+		ABotanicusSalesDisplayActor* SalesDisplay);
+
+	UFUNCTION(Server, Reliable)
 	void ServerPlacePlantOnSalesDisplay(
 		ABotanicusSalesDisplayActor* SalesDisplay);
 
 	UFUNCTION(Server, Reliable)
 	void ServerCheckoutRegister(
 		ABotanicusCashRegisterActor* CashRegister);
+
+	UFUNCTION()
+	void OnRep_CarriedTransplantState();
 
 	UFUNCTION(Server, Reliable)
 	void ServerPlaceCatalogOrder(FName ItemKey);
@@ -752,7 +804,8 @@ protected:
 		FName ItemKey,
 		FVector_NetQuantize10 RequestedLocation,
 		float RequestedYaw,
-		int32 Quantity);
+		int32 Quantity,
+		bool bFloorOnlyPlacement);
 
 	UFUNCTION(Server, Reliable)
 	void ServerThrowQuickBarItem(
@@ -995,8 +1048,8 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Interaction", meta=(ClampMin="0.1", ClampMax="5.0"))
 	float StarterFixtureMoveHoldDuration = 2.0f;
 
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Equipment Placement", meta=(ClampMin="50.0"))
-	float EquipmentPlacementDistance = 300.0f;
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Equipment Placement", meta=(ClampMin="25.0"))
+	float MinimumEquipmentPlacementDistance = 100.0f;
 
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Equipment Placement", meta=(ClampMin="1.0"))
 	float EquipmentRotationStep = 5.0f;
@@ -1016,8 +1069,8 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Equipment Placement", meta=(ClampMin="100.0"))
 	float MaximumEquipmentPlacementDistance = 650.0f;
 
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Item Placement", meta=(ClampMin="50.0"))
-	float QuickBarItemPlacementDistance = 250.0f;
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Item Placement", meta=(ClampMin="25.0"))
+	float MinimumQuickBarItemPlacementDistance = 100.0f;
 
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Item Placement", meta=(ClampMin="100.0"))
 	float MaximumQuickBarItemPlacementDistance = 600.0f;
@@ -1118,6 +1171,26 @@ protected:
 	int32 LocalEquippedQuickBarQuantity = 0;
 	bool bLocalEquippedQuickBarDirty = true;
 
+	/** A growing plant is carried directly by the player until it is repotted. */
+	UPROPERTY(ReplicatedUsing=OnRep_CarriedTransplantState)
+	FName CarriedTransplantPlantKey = NAME_None;
+
+	/** Exact harvest/sale item key, including its quality suffix when relevant. */
+	UPROPERTY(ReplicatedUsing=OnRep_CarriedTransplantState)
+	FName CarriedTransplantItemKey = NAME_None;
+
+	UPROPERTY(ReplicatedUsing=OnRep_CarriedTransplantState)
+	float CarriedTransplantGrowth = 0.0f;
+
+	UPROPERTY(ReplicatedUsing=OnRep_CarriedTransplantState)
+	float CarriedTransplantCare = 0.0f;
+
+	UPROPERTY(ReplicatedUsing=OnRep_CarriedTransplantState)
+	int32 CarriedTransplantWateringCount = 0;
+
+	UPROPERTY(ReplicatedUsing=OnRep_CarriedTransplantState)
+	bool bCarriedTransplantElementalDead = false;
+
 	UPROPERTY(Transient)
 	TObjectPtr<ABotanicusPlaceableItemActor>
 		LocalStorageCollectionItem;
@@ -1149,6 +1222,10 @@ protected:
 	UPROPERTY(Transient)
 	TObjectPtr<ABotanicusSalePotActor>
 		LocalActiveSalePot;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ABotanicusSalesDisplayActor>
+		LocalDisplayedSalePotPickupCandidate;
 
 	UPROPERTY(Transient)
 	TObjectPtr<ABotanicusDeliveryParcelActor>
@@ -1205,6 +1282,7 @@ protected:
 	double QuickBarThrowChargeStartTime = 0.0;
 	float EquipmentCarryChargeElapsed = 0.0f;
 	float PlaceableItemMoveChargeElapsed = 0.0f;
+	float DisplayedSalePotPickupElapsed = 0.0f;
 	float ParcelMoveChargeElapsed = 0.0f;
 	float WaterRefillRequestAccumulator = 0.0f;
 	double LastServerWaterRefillPulseTime = -1000.0;

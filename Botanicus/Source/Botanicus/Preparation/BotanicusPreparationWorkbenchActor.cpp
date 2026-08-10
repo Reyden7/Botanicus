@@ -85,7 +85,7 @@ ABotanicusPreparationWorkbenchActor()
 		NSLOCTEXT(
 			"BotanicusPreparation",
 			"PlaceSalePotPrompt",
-			"E POUR DEPOSER LE POT SUR L'ATELIER"));
+			"CLIC GAUCHE POUR POSER LE POT SUR CE SLOT"));
 	PlacementPrompt->SetTextRenderColor(FColor(90, 235, 255));
 	PlacementPrompt->SetHorizontalAlignment(EHTA_Center);
 	PlacementPrompt->SetVerticalAlignment(EVRTA_TextCenter);
@@ -105,6 +105,10 @@ void ABotanicusPreparationWorkbenchActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	RefreshLocalPlacementPrompt();
+	if (HasAuthority() && !GetCarrier() && !IsInPlacementMode())
+	{
+		AlignPreparedPotsToSlots();
+	}
 }
 
 void ABotanicusPreparationWorkbenchActor::GetLifetimeReplicatedProps(
@@ -198,7 +202,9 @@ void ABotanicusPreparationWorkbenchActor::SetLocalPlacementPreview(
 }
 
 FTransform ABotanicusPreparationWorkbenchActor::
-GetSalePotPreparationTransform(int32 SlotIndex) const
+GetSalePotPreparationTransform(
+	int32 SlotIndex,
+	const ABotanicusSalePotActor* Pot) const
 {
 	const int32 SafeSlotIndex =
 		FMath::Clamp(
@@ -212,9 +218,19 @@ GetSalePotPreparationTransform(int32 SlotIndex) const
 		FTransform SlotTransform =
 			SlotMarkers[SafeSlotIndex]->GetComponentTransform();
 
-		// Le marqueur sert uniquement à définir la position
-		// et la rotation. Le pot doit garder sa taille normale.
+		// Le marqueur définit la position horizontale et la rotation. Le pot
+		// garde sa taille normale et reçoit sa propre correction verticale :
+		// déplacer visuellement la plaque ne doit pas enfoncer le pot.
 		SlotTransform.SetScale3D(FVector::OneVector);
+		SlotTransform.AddToTranslation(
+			SlotTransform.GetRotation().RotateVector(
+				FVector(
+					0.0f,
+					0.0f,
+					SalePotPlacementHeightOffset +
+						(IsValid(Pot)
+							? Pot->GetPreparationHeightAdjustment()
+							: 0.0f))));
 
 		return SlotTransform;
 	}
@@ -579,20 +595,46 @@ bool ABotanicusPreparationWorkbenchActor::IsSlotOccupied(
 	const ABotanicusSalePotActor* IgnoredPot) const
 {
 	const UWorld* World = GetWorld();
-	if (!World || !SlotMarkers.IsValidIndex(SlotIndex))
+	if (!World ||
+		SlotIndex < 0 ||
+		SlotIndex >= GetSlotCount() ||
+		!SlotMarkers.IsValidIndex(SlotIndex))
 	{
 		return true;
 	}
-	const FVector SlotLocation =
-		GetSalePotPreparationTransform(SlotIndex).GetLocation();
+
 	for (TActorIterator<ABotanicusSalePotActor> PotIt(World);
-		PotIt;
-		++PotIt)
+		 PotIt;
+		 ++PotIt)
 	{
-		if (*PotIt != IgnoredPot &&
-			FVector::DistSquared(
+		if (*PotIt == IgnoredPot ||
+			PotIt->ActorHasTag(TEXT("BotanicusPlacementPreview")))
+		{
+			continue;
+		}
+
+		// Attribute each pot to one and only one active slot. Testing every
+		// slot with an independent radius allowed a pot to occupy two nearby
+		// markers on the final workbench meshes, effectively limiting a level
+		// 2 workbench to one usable slot.
+		int32 ClosestSlotIndex = INDEX_NONE;
+		float ClosestDistanceSquared = FMath::Square(60.0f);
+		for (int32 CandidateSlotIndex = 0;
+			 CandidateSlotIndex < GetSlotCount();
+			 ++CandidateSlotIndex)
+		{
+			const float DistanceSquared = FVector::DistSquared(
 				PotIt->GetActorLocation(),
-				SlotLocation) <= FMath::Square(45.0f))
+				GetSalePotPreparationTransform(CandidateSlotIndex).
+					GetLocation());
+			if (DistanceSquared < ClosestDistanceSquared)
+			{
+				ClosestDistanceSquared = DistanceSquared;
+				ClosestSlotIndex = CandidateSlotIndex;
+			}
+		}
+
+		if (ClosestSlotIndex == SlotIndex)
 		{
 			return true;
 		}
@@ -661,6 +703,51 @@ void ABotanicusPreparationWorkbenchActor::
 OnEquipmentDefinitionApplied()
 {
 	RefreshLevelVisuals();
+}
+
+void ABotanicusPreparationWorkbenchActor::AlignPreparedPotsToSlots()
+{
+	TArray<ABotanicusSalePotActor*> Pots;
+	GetPreparedPots(Pots);
+	for (ABotanicusSalePotActor* Pot : Pots)
+	{
+		if (!IsValid(Pot))
+		{
+			continue;
+		}
+
+		int32 ClosestSlotIndex = INDEX_NONE;
+		float ClosestDistanceSquared = FMath::Square(60.0f);
+		for (int32 SlotIndex = 0; SlotIndex < GetSlotCount(); ++SlotIndex)
+		{
+			const FTransform SlotTransform =
+				GetSalePotPreparationTransform(SlotIndex);
+			const float DistanceSquared = FVector::DistSquared2D(
+				Pot->GetActorLocation(),
+				SlotTransform.GetLocation());
+			if (DistanceSquared < ClosestDistanceSquared)
+			{
+				ClosestDistanceSquared = DistanceSquared;
+				ClosestSlotIndex = SlotIndex;
+			}
+		}
+
+		if (ClosestSlotIndex == INDEX_NONE)
+		{
+			continue;
+		}
+		const FTransform SlotTransform =
+			GetSalePotPreparationTransform(ClosestSlotIndex, Pot);
+		if (!Pot->GetActorTransform().Equals(SlotTransform, 0.1f))
+		{
+			Pot->SetActorTransform(
+				SlotTransform,
+				false,
+				nullptr,
+				ETeleportType::TeleportPhysics);
+			Pot->ForceNetUpdate();
+		}
+	}
 }
 
 void ABotanicusPreparationWorkbenchActor::OnRep_WorkbenchLevel()
@@ -740,7 +827,8 @@ RefreshLocalPlacementPrompt()
 		!Controller->PlayerCameraManager ||
 		!Character ||
 		!QuickBar ||
-		QuickBar->GetSelectedSlot().ItemKey != TEXT("SalePot") ||
+		(QuickBar->GetSelectedSlot().ItemKey != TEXT("SalePot") &&
+		 QuickBar->GetSelectedSlot().ItemKey != TEXT("SalePotSquare")) ||
 		!IsSalePotSlotAvailable())
 	{
 		return;

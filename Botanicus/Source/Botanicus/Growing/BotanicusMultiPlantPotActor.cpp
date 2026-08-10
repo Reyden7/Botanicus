@@ -696,7 +696,7 @@ void ABotanicusMultiPlantPotActor::RefreshVisuals()
 	Mesh->SetRelativeScale3D(
 		FVector(LengthScale, 0.42f, 0.3f));
 	MultiSoilMesh->SetRelativeLocation(
-		FVector(0.0f, 0.0f, 16.0f));
+		FVector(0.0f, 0.0f, GetSoilMaximumHeight()));
 	MultiSoilMesh->SetRelativeScale3D(
 		FVector(
 			LengthScale * 0.88f,

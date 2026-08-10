@@ -37,7 +37,11 @@ public:
 		float Tolerance = 35.0f) const;
 	static constexpr int32 SelfCheckoutSlotCount = 6;
 
+protected:
+	virtual void BeginPlay() override;
+
 private:
+	void InitializeVisualMaterials();
 	bool IsInsideCheckoutZone() const;
 	bool IsLocalPlayerTargetingRegister() const;
 	void RefreshVisuals();

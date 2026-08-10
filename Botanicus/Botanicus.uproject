@@ -47,6 +47,10 @@
 			]
 		},
 		{
+			"Name": "ProceduralMeshComponent",
+			"Enabled": true
+		},
+		{
 			"Name": "AllToolsets",
 			"Enabled": true
 		},

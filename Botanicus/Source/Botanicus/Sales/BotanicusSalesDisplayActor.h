@@ -9,6 +9,7 @@
 class UStaticMeshComponent;
 class UTextRenderComponent;
 class UMaterialInstanceDynamic;
+class UMaterialInterface;
 class ABotanicusSalePotActor;
 class ABotanicusPlayerController;
 class ABotanicusVisitorCharacter;
@@ -40,7 +41,18 @@ public:
 	bool TryMountSalePot(
 		ABotanicusSalePotActor* SalePot,
 		ABotanicusPlayerController* Seller);
+	bool TryMountSalePotState(
+		FName SoilItemKey,
+		FName PlantItemKey,
+		ABotanicusPlayerController* Seller,
+		FName SalePotItemKey = TEXT("SalePot"));
 	bool IsEmpty() const { return DisplayedPlantItemKey.IsNone(); }
+	bool CanRetrieveDisplayedSalePot() const;
+	bool IsDisplayedSalePotTargeted(const AActor* Interactor) const;
+	void SetDisplayedSalePotHighlighted(
+		bool bHighlighted,
+		UMaterialInterface* HighlightMaterial);
+	bool TryRetrieveDisplayedSalePot(AActor* Interactor);
 	FTransform GetSalePotPlacementTransform() const;
 	bool TryReserveForVisitor(
 		ABotanicusVisitorCharacter* Visitor);
@@ -53,10 +65,21 @@ public:
 	void NotifyVisitorEnded(
 		ABotanicusVisitorCharacter* Visitor);
 
-	void RestoreDisplayedPlant(FName InDisplayedPlantItemKey);
+	void RestoreDisplayedPlant(
+		FName InDisplayedPlantItemKey,
+		FName InDisplayedSoilItemKey = NAME_None,
+		FName InDisplayedPotItemKey = TEXT("SalePot"));
 	FName GetDisplayedPlantItemKey() const
 	{
 		return DisplayedPlantItemKey;
+	}
+	FName GetDisplayedSoilItemKey() const
+	{
+		return DisplayedSoilItemKey;
+	}
+	FName GetDisplayedPotItemKey() const
+	{
+		return DisplayedPotItemKey;
 	}
 	const FBotanicusItemDefinition*
 		GetDisplayedPlantDefinitionForVisitor() const
@@ -96,6 +119,12 @@ private:
 
 	UPROPERTY(ReplicatedUsing=OnRep_DisplayedPlant)
 	FName DisplayedPlantItemKey = NAME_None;
+
+	UPROPERTY(ReplicatedUsing=OnRep_DisplayedPlant)
+	FName DisplayedSoilItemKey = NAME_None;
+
+	UPROPERTY(ReplicatedUsing=OnRep_DisplayedPlant)
+	FName DisplayedPotItemKey = TEXT("SalePot");
 
 	UPROPERTY(ReplicatedUsing=OnRep_DisplayedPlant)
 	float SaleEndServerTime = 0.0f;

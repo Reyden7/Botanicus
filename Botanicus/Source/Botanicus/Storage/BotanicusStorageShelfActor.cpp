@@ -220,7 +220,9 @@ int32 ABotanicusStorageShelfActor::GetStorageStackLimit(
 		return 20;
 	}
 	if (InItemKey == TEXT("PlantPot") ||
-		InItemKey == TEXT("SalePot"))
+		InItemKey == TEXT("PlantPotSquare") ||
+		InItemKey == TEXT("SalePot") ||
+		InItemKey == TEXT("SalePotSquare"))
 	{
 		return 1;
 	}

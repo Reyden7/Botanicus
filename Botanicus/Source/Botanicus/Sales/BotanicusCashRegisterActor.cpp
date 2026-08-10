@@ -52,13 +52,6 @@ ABotanicusCashRegisterActor::ABotanicusCashRegisterActor()
 	ScreenVisual->SetRelativeLocation(FVector(20.0f, 0.0f, 119.0f));
 	ScreenVisual->SetRelativeScale3D(FVector(0.20f, 0.08f, 0.16f));
 	ScreenVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	if (UMaterialInstanceDynamic* ScreenMaterial =
-			ScreenVisual->CreateAndSetMaterialInstanceDynamic(0))
-	{
-		ScreenMaterial->SetVectorParameterValue(
-			TEXT("Color"),
-			FLinearColor(0.03f, 0.65f, 0.30f, 1.0f));
-	}
 
 	StatusText = CreateDefaultSubobject<UTextRenderComponent>(
 		TEXT("Checkout Status"));
@@ -102,14 +95,6 @@ ABotanicusCashRegisterActor::ABotanicusCashRegisterActor()
 			FVector(0.60f, 0.40f, 0.04f));
 		SlotVisual->SetCollisionEnabled(
 			ECollisionEnabled::NoCollision);
-		if (UMaterialInstanceDynamic* SlotMaterial =
-				SlotVisual->
-					CreateAndSetMaterialInstanceDynamic(0))
-		{
-			SlotMaterial->SetVectorParameterValue(
-				TEXT("Color"),
-				FLinearColor(0.08f, 0.42f, 0.95f, 1.0f));
-		}
 		SelfCheckoutSlotVisuals.Add(SlotVisual);
 	}
 	SelfCheckoutZoneLabel =
@@ -131,6 +116,43 @@ ABotanicusCashRegisterActor::ABotanicusCashRegisterActor()
 	SelfCheckoutZoneLabel->SetVisibility(false);
 
 	RefreshVisuals();
+}
+
+void ABotanicusCashRegisterActor::BeginPlay()
+{
+	Super::BeginPlay();
+	InitializeVisualMaterials();
+}
+
+void ABotanicusCashRegisterActor::InitializeVisualMaterials()
+{
+	// Dynamic material instances are runtime objects. Creating them in the
+	// native constructor makes child Blueprint defaults reference transient
+	// objects and prevents those Blueprints from being saved.
+	if (ScreenVisual)
+	{
+		if (UMaterialInstanceDynamic* ScreenMaterial =
+				ScreenVisual->CreateAndSetMaterialInstanceDynamic(0))
+		{
+			ScreenMaterial->SetVectorParameterValue(
+				TEXT("Color"),
+				FLinearColor(0.03f, 0.65f, 0.30f, 1.0f));
+		}
+	}
+
+	for (UStaticMeshComponent* SlotVisual : SelfCheckoutSlotVisuals)
+	{
+		if (SlotVisual)
+		{
+			if (UMaterialInstanceDynamic* SlotMaterial =
+					SlotVisual->CreateAndSetMaterialInstanceDynamic(0))
+			{
+				SlotMaterial->SetVectorParameterValue(
+					TEXT("Color"),
+					FLinearColor(0.08f, 0.42f, 0.95f, 1.0f));
+			}
+		}
+	}
 }
 
 void ABotanicusCashRegisterActor::Tick(float DeltaSeconds)

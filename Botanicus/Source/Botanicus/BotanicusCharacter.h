@@ -79,7 +79,14 @@ protected:
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void PawnClientRestart() override;
 	virtual bool CanJumpInternal_Implementation() const override;
+	virtual void OnStartCrouch(
+		float HalfHeightAdjust,
+		float ScaledHalfHeightAdjust) override;
+	virtual void OnEndCrouch(
+		float HalfHeightAdjust,
+		float ScaledHalfHeightAdjust) override;
 	void ConfigureTrueFirstPersonLocalView();
+	void RefreshFirstPersonCrouchOffset();
 
 	bool bTrueFirstPersonConfigured = false;
 
@@ -127,6 +134,12 @@ public:
 	UBotanicusQuickBarComponent* GetQuickBarComponent() const { return QuickBarComponent; }
 
 	void SetCarryMovementMultiplier(float InMultiplier);
+	void SetSprinting(bool bNewSprinting);
+	void ToggleCrouching();
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Movement")
+	bool IsSprinting() const { return bIsSprinting; }
+
 	void SetEquipmentCarryState(
 		EBotanicusEquipmentCarryRole InRole,
 		float InMovementMultiplier);
@@ -167,6 +180,12 @@ private:
 	UFUNCTION()
 	void OnRep_EquipmentCarryRole();
 
+	UFUNCTION()
+	void OnRep_IsSprinting();
+
+	UFUNCTION(Server, Reliable)
+	void ServerSetSprinting(bool bNewSprinting);
+
 	void ApplyCarryMovementMultiplier();
 
 	UPROPERTY(ReplicatedUsing=OnRep_CarryMovementMultiplier)
@@ -178,6 +197,18 @@ private:
 
 	UPROPERTY(Replicated)
 	TObjectPtr<ABotanicusWateringCanActor> HeldWateringCan;
+
+	UPROPERTY(ReplicatedUsing=OnRep_IsSprinting)
+	bool bIsSprinting = false;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Movement", meta=(ClampMin="1.0"))
+	float SprintSpeedMultiplier = 1.5f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Movement", meta=(ClampMin="0.1", ClampMax="1.0"))
+	float CrouchedSpeedMultiplier = 0.5f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Movement", meta=(ClampMin="0.0"))
+	float CrouchedCameraOffset = 48.0f;
 
 	float DefaultMaxWalkSpeed = 0.0f;
 };

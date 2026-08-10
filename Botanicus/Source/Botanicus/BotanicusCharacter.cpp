@@ -61,12 +61,14 @@ ABotanicusCharacter::ABotanicusCharacter()
 	GetCharacterMovement()->AirControl = 0.5f;
 	GetCharacterMovement()->bOrientRotationToMovement = false;
 	GetCharacterMovement()->bUseControllerDesiredRotation = false;
+	GetCharacterMovement()->GetNavAgentPropertiesRef().bCanCrouch = true;
 }
 
 void ABotanicusCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
+	GetCharacterMovement()->GetNavAgentPropertiesRef().bCanCrouch = true;
 	DefaultMaxWalkSpeed = GetCharacterMovement()->MaxWalkSpeed;
 	if (const ABotanicusGameState* GameState =
 			GetWorld()
@@ -84,6 +86,25 @@ void ABotanicusCharacter::BeginPlay()
 
 }
 
+void ABotanicusCharacter::ToggleCrouching()
+{
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	if (!Movement)
+	{
+		return;
+	}
+	Movement->GetNavAgentPropertiesRef().bCanCrouch = true;
+	SetSprinting(false);
+	if (bIsCrouched || Movement->bWantsToCrouch)
+	{
+		UnCrouch();
+	}
+	else
+	{
+		Crouch();
+	}
+}
+
 void ABotanicusCharacter::GetLifetimeReplicatedProps(
 	TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
@@ -97,6 +118,29 @@ void ABotanicusCharacter::GetLifetimeReplicatedProps(
 	DOREPLIFETIME(
 		ABotanicusCharacter,
 		HeldWateringCan);
+	DOREPLIFETIME(
+		ABotanicusCharacter,
+		bIsSprinting);
+}
+
+void ABotanicusCharacter::SetSprinting(bool bNewSprinting)
+{
+	bIsSprinting = bNewSprinting && !bIsCrouched;
+	ApplyCarryMovementMultiplier();
+	if (!HasAuthority() && IsLocallyControlled())
+	{
+		ServerSetSprinting(bIsSprinting);
+	}
+	else
+	{
+		ForceNetUpdate();
+	}
+}
+
+void ABotanicusCharacter::ServerSetSprinting_Implementation(
+	bool bNewSprinting)
+{
+	SetSprinting(bNewSprinting);
 }
 
 void ABotanicusCharacter::SetHeldWateringCan(
@@ -162,6 +206,11 @@ void ABotanicusCharacter::OnRep_EquipmentCarryRole()
 	ReceiveEquipmentCarryStateChanged(EquipmentCarryRole);
 }
 
+void ABotanicusCharacter::OnRep_IsSprinting()
+{
+	ApplyCarryMovementMultiplier();
+}
+
 void ABotanicusCharacter::ApplyCarryMovementMultiplier()
 {
 	UCharacterMovementComponent* Movement = GetCharacterMovement();
@@ -173,8 +222,15 @@ void ABotanicusCharacter::ApplyCarryMovementMultiplier()
 	{
 		DefaultMaxWalkSpeed = Movement->MaxWalkSpeed;
 	}
+	const float SprintMultiplier =
+		bIsSprinting && !bIsCrouched
+			? SprintSpeedMultiplier
+			: 1.0f;
 	Movement->MaxWalkSpeed =
-		DefaultMaxWalkSpeed * CarryMovementMultiplier;
+		DefaultMaxWalkSpeed * CarryMovementMultiplier * SprintMultiplier;
+	Movement->MaxWalkSpeedCrouched =
+		DefaultMaxWalkSpeed * CarryMovementMultiplier *
+		CrouchedSpeedMultiplier;
 }
 
 bool ABotanicusCharacter::CanJumpInternal_Implementation() const
@@ -206,6 +262,7 @@ void ABotanicusCharacter::Tick(float DeltaSeconds)
 	bUseControllerRotationRoll = false;
 	GetCharacterMovement()->bOrientRotationToMovement = false;
 	GetCharacterMovement()->bUseControllerDesiredRotation = false;
+	GetCharacterMovement()->GetNavAgentPropertiesRef().bCanCrouch = true;
 
 	if (AController* CharacterController = GetController())
 	{
@@ -220,6 +277,48 @@ void ABotanicusCharacter::Tick(float DeltaSeconds)
 	{
 		ConfigureTrueFirstPersonLocalView();
 	}
+	RefreshFirstPersonCrouchOffset();
+}
+
+void ABotanicusCharacter::OnStartCrouch(
+	float HalfHeightAdjust,
+	float ScaledHalfHeightAdjust)
+{
+	Super::OnStartCrouch(HalfHeightAdjust, ScaledHalfHeightAdjust);
+	SetSprinting(false);
+	RefreshFirstPersonCrouchOffset();
+}
+
+void ABotanicusCharacter::OnEndCrouch(
+	float HalfHeightAdjust,
+	float ScaledHalfHeightAdjust)
+{
+	Super::OnEndCrouch(HalfHeightAdjust, ScaledHalfHeightAdjust);
+	RefreshFirstPersonCrouchOffset();
+}
+
+void ABotanicusCharacter::RefreshFirstPersonCrouchOffset()
+{
+	if (!FirstPersonCameraComponent || !GetMesh() ||
+		!IsLocallyControlled())
+	{
+		return;
+	}
+
+	const FVector StandingRelativeLocation(-2.8f, 5.89f, 0.0f);
+	const FTransform HeadSocketTransform =
+		GetMesh()->GetSocketTransform(TEXT("head"), RTS_World);
+	const FVector StandingWorldLocation =
+		HeadSocketTransform.TransformPosition(StandingRelativeLocation);
+	const FVector DesiredWorldLocation =
+		StandingWorldLocation -
+		FVector(
+			0.0f,
+			0.0f,
+			bIsCrouched ? CrouchedCameraOffset : 0.0f);
+	FirstPersonCameraComponent->SetRelativeLocation(
+		HeadSocketTransform.InverseTransformPosition(
+			DesiredWorldLocation));
 }
 
 void ABotanicusCharacter::ConfigureTrueFirstPersonLocalView()
@@ -247,6 +346,7 @@ void ABotanicusCharacter::ConfigureTrueFirstPersonLocalView()
 	FirstPersonCameraComponent->SetRelativeLocationAndRotation(
 		FVector(-2.8f, 5.89f, 0.0f),
 		FRotator(0.0f, 90.0f, -90.0f));
+	RefreshFirstPersonCrouchOffset();
 	FirstPersonCameraComponent->bUsePawnControlRotation = true;
 	FirstPersonCameraComponent->Activate(true);
 

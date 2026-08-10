@@ -195,6 +195,12 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Botanicus|Inventory")
 	bool AddItem(FName ItemKey, int32 Quantity, int32& OutSlotIndex);
 
+	/** Adds one non-stackable stateful instance to a dedicated empty slot. */
+	bool AddUniqueItem(
+		FName ItemKey,
+		const FBotanicusCarriedItemState& State,
+		int32& OutSlotIndex);
+
 	/** Removes a quantity from one slot, clearing it when it reaches zero. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Botanicus|Inventory")
 	bool RemoveQuantity(int32 SlotIndex, int32 Quantity);
