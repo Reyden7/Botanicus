@@ -1433,60 +1433,141 @@ void ABotanicusPlantPotActor::RefreshVisuals()
 	}
 	const float VisualGrowth =
 		FMath::Clamp(GrowthProgress, 0.02f, 1.0f);
-	const float StemHeight =
+	const float LegacyStemHeight =
 		FMath::Lerp(8.0f, 80.0f, VisualGrowth) *
 		HeightMultiplier;
 	const float ConfiguredPlantBaseHeight =
 		GetConfiguredPlantBaseHeight();
-	const float FoliageScale =
+	const float LegacyFoliageScale =
 		FMath::Lerp(0.06f, 0.32f, VisualGrowth);
+
+	TSoftObjectPtr<UStaticMesh> GrowthStageMeshReference;
+	if (Definition)
+	{
+		if (GrowthProgress >= 1.0f - KINDA_SMALL_NUMBER)
+		{
+			GrowthStageMeshReference = Definition->MatureGrowthMesh;
+		}
+		else if (GrowthProgress >= 0.70f)
+		{
+			GrowthStageMeshReference = Definition->LargeGrowthMesh;
+		}
+		else if (GrowthProgress >= 0.30f)
+		{
+			GrowthStageMeshReference = Definition->MediumGrowthMesh;
+		}
+		else
+		{
+			GrowthStageMeshReference = Definition->SmallGrowthMesh;
+		}
+	}
+	UStaticMesh* GrowthStageMesh =
+		GrowthStageMeshReference.IsNull()
+			? nullptr
+			: GrowthStageMeshReference.LoadSynchronous();
+	const bool bUsesGrowthStageMesh = GrowthStageMesh != nullptr;
+	float FoliageTop = 0.0f;
+
 	if (StemMesh)
 	{
-		StemMesh->SetVisibility(bHasPlant);
-		StemMesh->SetRelativeLocation(
-			FVector(
+		StemMesh->SetVisibility(bHasPlant && !bUsesGrowthStageMesh);
+		if (!bUsesGrowthStageMesh)
+		{
+			StemMesh->SetRelativeLocation(FVector(
 				0.0f,
 				0.0f,
-				ConfiguredPlantBaseHeight + StemHeight * 0.5f));
-		StemMesh->SetRelativeScale3D(
-			FVector(0.035f, 0.035f, StemHeight / 100.0f));
+				ConfiguredPlantBaseHeight +
+					LegacyStemHeight * 0.5f));
+			StemMesh->SetRelativeScale3D(FVector(
+				0.035f,
+				0.035f,
+				LegacyStemHeight / 100.0f));
+		}
 	}
 	if (FoliageMesh)
 	{
 		FoliageMesh->SetVisibility(bHasPlant);
-		FoliageMesh->SetRelativeLocation(
-			FVector(
-				0.0f,
-				0.0f,
-				ConfiguredPlantBaseHeight + StemHeight));
-		FoliageMesh->SetRelativeScale3D(
-			FoliageShape * FoliageScale);
-		if (Definition)
+		if (bUsesGrowthStageMesh)
 		{
-			if (!FoliageMaterial)
+			if (FoliageMesh->GetStaticMesh() != GrowthStageMesh)
 			{
-				FoliageMaterial =
-					FoliageMesh->
-						CreateAndSetMaterialInstanceDynamic(0);
+				FoliageMesh->SetStaticMesh(GrowthStageMesh);
+				FoliageMesh->EmptyOverrideMaterials();
+				FoliageMaterial = nullptr;
 			}
-			if (FoliageMaterial)
+
+			const FBox MeshBounds = GrowthStageMesh->GetBoundingBox();
+			const float MeshHeight =
+				FMath::Max(0.01f, MeshBounds.GetSize().Z);
+			const float MinimumHeight = FMath::Max(
+				0.1f, Definition->MinimumGrowthVisualHeight);
+			const float MatureHeight = FMath::Max(
+				MinimumHeight, Definition->MatureGrowthVisualHeight);
+			// The target height depends only on the global growth percentage,
+			// not on the selected mesh. Therefore both meshes have exactly the
+			// same height on either side of the 30% and 70% transitions.
+			const float DesiredHeight = FMath::Lerp(
+				MinimumHeight, MatureHeight, VisualGrowth);
+			const float UniformScale = DesiredHeight / MeshHeight;
+			const FVector MeshCentre = MeshBounds.GetCenter();
+			FoliageMesh->SetRelativeScale3D(FVector(UniformScale));
+			FoliageMesh->SetRelativeLocation(FVector(
+				-MeshCentre.X * UniformScale,
+				-MeshCentre.Y * UniformScale,
+				ConfiguredPlantBaseHeight -
+					MeshBounds.Min.Z * UniformScale));
+			FoliageTop = ConfiguredPlantBaseHeight + DesiredHeight;
+			if (bElementalDead)
 			{
-				FoliageMaterial->SetVectorParameterValue(
+				FoliageMesh->SetVectorParameterValueOnMaterials(
 					TEXT("Color"),
-					bElementalDead
-						? FLinearColor(0.03f, 0.03f, 0.03f, 1.0f)
-						: Definition->MatureColor);
+					FVector(0.03f, 0.03f, 0.03f));
+			}
+		}
+		else
+		{
+			static UStaticMesh* FallbackFoliageMesh =
+				LoadObject<UStaticMesh>(
+					nullptr,
+					TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+			if (FallbackFoliageMesh &&
+				FoliageMesh->GetStaticMesh() != FallbackFoliageMesh)
+			{
+				FoliageMesh->SetStaticMesh(FallbackFoliageMesh);
+				FoliageMesh->EmptyOverrideMaterials();
+				FoliageMaterial = nullptr;
+			}
+			FoliageMesh->SetRelativeLocation(FVector(
+				0.0f,
+				0.0f,
+				ConfiguredPlantBaseHeight + LegacyStemHeight));
+			FoliageMesh->SetRelativeScale3D(
+				FoliageShape * LegacyFoliageScale);
+			FoliageTop = bHasPlant
+				? ConfiguredPlantBaseHeight + LegacyStemHeight +
+					50.0f * FoliageShape.Z * LegacyFoliageScale
+				: 0.0f;
+			if (Definition)
+			{
+				if (!FoliageMaterial)
+				{
+					FoliageMaterial = FoliageMesh->
+						CreateAndSetMaterialInstanceDynamic(0);
+				}
+				if (FoliageMaterial)
+				{
+					FoliageMaterial->SetVectorParameterValue(
+						TEXT("Color"),
+						bElementalDead
+							? FLinearColor(
+								0.03f, 0.03f, 0.03f, 1.0f)
+							: Definition->MatureColor);
+				}
 			}
 		}
 	}
 	if (PlantGrowthWidget)
 	{
-		// The engine sphere used by the foliage has a 50 cm radius. Its
-		// scaled upper bound gives a stable UI height for every plant shape.
-		const float FoliageTop = bHasPlant
-			? ConfiguredPlantBaseHeight + StemHeight +
-				50.0f * FoliageShape.Z * FoliageScale
-			: 0.0f;
 		const float WidgetHalfHeight =
 			PlantGrowthWidget->GetDrawSize().Y *
 			PlantGrowthWidgetScale * 0.5f;

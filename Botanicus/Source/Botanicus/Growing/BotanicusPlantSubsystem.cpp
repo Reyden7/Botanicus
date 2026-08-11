@@ -109,6 +109,39 @@ void UBotanicusPlantSubsystem::Initialize(
 		0.0025f,
 		FLinearColor(0.38f, 0.12f, 0.72f, 1.0f));
 	AddPlant(
+		TEXT("AureliaSweet"),
+		TEXT("SeedPacket_AureliaSweet"),
+		NSLOCTEXT(
+			"BotanicusGrowing",
+			"AureliaSweetName",
+			"Aurélia Douce"),
+		TEXT("Harvest_AureliaSweet"),
+		240.0f,
+		0.30f,
+		0.80f,
+		0.30f,
+		0.002f,
+		FLinearColor(0.42f, 0.72f, 0.20f, 1.0f),
+		EBotanicusPlantElement::Normal);
+	FBotanicusPlantDefinition& AureliaSweet =
+		NativeFallbackPlants.Last();
+	AureliaSweet.SmallGrowthMesh = TSoftObjectPtr<UStaticMesh>(
+		FSoftObjectPath(TEXT(
+			"/Game/Botanicus/Items/itemsMesh/plantes/normal/"
+			"AuréliaDouce/niv1/niv1.niv1")));
+	AureliaSweet.MediumGrowthMesh = TSoftObjectPtr<UStaticMesh>(
+		FSoftObjectPath(TEXT(
+			"/Game/Botanicus/Items/itemsMesh/plantes/normal/"
+			"AuréliaDouce/niv2/niv2.niv2")));
+	AureliaSweet.LargeGrowthMesh = TSoftObjectPtr<UStaticMesh>(
+		FSoftObjectPath(TEXT(
+			"/Game/Botanicus/Items/itemsMesh/plantes/normal/"
+			"AuréliaDouce/niv3/niv3.niv3")));
+	AureliaSweet.MatureGrowthMesh = TSoftObjectPtr<UStaticMesh>(
+		FSoftObjectPath(TEXT(
+			"/Game/Botanicus/Items/itemsMesh/plantes/normal/"
+			"AuréliaDouce/niv4/niv4.niv4")));
+	AddPlant(
 		TEXT("FireBloom"),
 		TEXT("SeedPacket_FireBloom"),
 		NSLOCTEXT(

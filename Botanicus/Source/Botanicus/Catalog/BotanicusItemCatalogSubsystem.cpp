@@ -297,6 +297,14 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 		38,
 		5);
 	AddSeedDefinition(
+		TEXT("SeedPacket_AureliaSweet"),
+		NSLOCTEXT(
+			"BotanicusCatalog",
+			"AureliaSweetSeeds",
+			"Graines d'Aurélia Douce"),
+		45,
+		5);
+	AddSeedDefinition(
 		TEXT("SeedPacket_FireBloom"),
 		NSLOCTEXT(
 			"BotanicusCatalog",
@@ -500,6 +508,21 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 		TEXT("Flowering"),
 		78);
 	AddHarvestDefinition(
+		TEXT("Harvest_AureliaSweet"),
+		NSLOCTEXT(
+			"BotanicusCatalog",
+			"AureliaSweetHarvest",
+			"Aurélia Douce"),
+		105,
+		TEXT("Green"),
+		TEXT("Flowering"),
+		80);
+	NativeFallbackItems.Last().WorldMesh = TSoftObjectPtr<UStaticMesh>(
+		FSoftObjectPath(TEXT(
+			"/Game/Botanicus/Items/itemsMesh/plantes/normal/"
+			"AuréliaDouce/niv4/niv4.niv4")));
+	NativeFallbackItems.Last().WorldScale = FVector(1.0f);
+	AddHarvestDefinition(
 		TEXT("Harvest_FireBloom"),
 		NSLOCTEXT(
 			"BotanicusCatalog",
@@ -597,6 +620,7 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	AddQualityVariants(TEXT("Harvest_Monstera"));
 	AddQualityVariants(TEXT("Harvest_Lavender"));
 	AddQualityVariants(TEXT("Harvest_Violet"));
+	AddQualityVariants(TEXT("Harvest_AureliaSweet"));
 	AddQualityVariants(TEXT("Harvest_FireBloom"));
 	AddQualityVariants(TEXT("Harvest_WaterLily"));
 	AddQualityVariants(TEXT("Harvest_FrostFlower"));

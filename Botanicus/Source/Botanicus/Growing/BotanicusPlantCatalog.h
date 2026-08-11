@@ -7,6 +7,8 @@
 #include "Engine/DeveloperSettings.h"
 #include "BotanicusPlantCatalog.generated.h"
 
+class UStaticMesh;
+
 UENUM(BlueprintType)
 enum class EBotanicusPlantElement : uint8
 {
@@ -73,6 +75,38 @@ struct BOTANICUS_API FBotanicusPlantDefinition
 		Category="Growth",
 		meta=(ClampMin="1.0", Units="s"))
 	float GrowthDurationSeconds = 120.0f;
+
+	/** Mesh displayed from 0% up to (but excluding) 30% growth. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Growth|Visual Stages",
+		meta=(DisplayName="Mesh stade 1 - Petite plante (0-30%)"))
+	TSoftObjectPtr<UStaticMesh> SmallGrowthMesh;
+
+	/** Mesh displayed from 30% up to (but excluding) 70% growth. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Growth|Visual Stages",
+		meta=(DisplayName="Mesh stade 2 - Plante moyenne (30-70%)"))
+	TSoftObjectPtr<UStaticMesh> MediumGrowthMesh;
+
+	/** Mesh displayed from 70% up to (but excluding) 100% growth. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Growth|Visual Stages",
+		meta=(DisplayName="Mesh stade 3 - Grande plante (70-99%)"))
+	TSoftObjectPtr<UStaticMesh> LargeGrowthMesh;
+
+	/** Final mesh displayed when growth reaches 100%. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Growth|Visual Stages",
+		meta=(DisplayName="Mesh stade 4 - Croissance terminee (100%)"))
+	TSoftObjectPtr<UStaticMesh> MatureGrowthMesh;
+
+	/** Visual height of the plant when growth begins, in centimetres. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Growth|Visual Stages",
+		meta=(DisplayName="Hauteur visuelle a 0%", Units="cm",
+			ClampMin="0.1", UIMin="1.0", UIMax="30.0"))
+	float MinimumGrowthVisualHeight = 8.0f;
+
+	/** Visual height shared by the large and mature meshes at 100%. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Growth|Visual Stages",
+		meta=(DisplayName="Hauteur visuelle a 100%", Units="cm",
+			ClampMin="1.0", UIMin="30.0", UIMax="250.0"))
+	float MatureGrowthVisualHeight = 100.0f;
 
 	UPROPERTY(
 		EditAnywhere,

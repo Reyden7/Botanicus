@@ -717,12 +717,13 @@ void ABotanicusMultiPlantPotActor::RefreshVisuals()
 				: FBotanicusMultiPlantSlotState();
 		const bool bPlanted =
 			bActive && !Slot.PlantKey.IsNone();
+		const FBotanicusPlantDefinition* Definition =
+			bPlanted ? FindPlant(Slot.PlantKey) : nullptr;
 		PlantedCount += bPlanted ? 1 : 0;
 		DeadCount += Slot.bElementalDead ? 1 : 0;
 		if (bPlanted && !Slot.bElementalDead)
 		{
-			if (const FBotanicusPlantDefinition* Definition =
-				FindPlant(Slot.PlantKey))
+			if (Definition)
 			{
 				bWrongGreenhouse |=
 					!IsInCompatibleGreenhouse(*Definition);
@@ -731,17 +732,83 @@ void ABotanicusMultiPlantPotActor::RefreshVisuals()
 		const float Growth =
 			FMath::Clamp(Slot.GrowthProgress, 0.02f, 1.0f);
 		const FVector BaseLocation = GetSlotLocalLocation(Index);
-		MultiStemMeshes[Index]->SetVisibility(bPlanted);
+		TSoftObjectPtr<UStaticMesh> StageMeshReference;
+		if (Definition)
+		{
+			if (Slot.GrowthProgress >= 1.0f - KINDA_SMALL_NUMBER)
+			{
+				StageMeshReference = Definition->MatureGrowthMesh;
+			}
+			else if (Slot.GrowthProgress >= 0.70f)
+			{
+				StageMeshReference = Definition->LargeGrowthMesh;
+			}
+			else if (Slot.GrowthProgress >= 0.30f)
+			{
+				StageMeshReference = Definition->MediumGrowthMesh;
+			}
+			else
+			{
+				StageMeshReference = Definition->SmallGrowthMesh;
+			}
+		}
+		UStaticMesh* StageMesh = StageMeshReference.IsNull()
+			? nullptr
+			: StageMeshReference.LoadSynchronous();
+		const bool bUsesStageMesh = StageMesh != nullptr;
+		MultiStemMeshes[Index]->SetVisibility(
+			bPlanted && !bUsesStageMesh);
 		MultiFlowerMeshes[Index]->SetVisibility(bPlanted);
-		MultiStemMeshes[Index]->SetRelativeLocation(
-			BaseLocation + FVector(0.0f, 0.0f, 9.0f * Growth));
-		MultiStemMeshes[Index]->SetRelativeScale3D(
-			FVector(0.045f, 0.045f, 0.18f * Growth));
-		MultiFlowerMeshes[Index]->SetRelativeLocation(
-			BaseLocation +
-				FVector(0.0f, 0.0f, 18.0f * Growth + 8.0f));
-		MultiFlowerMeshes[Index]->SetRelativeScale3D(
-			FVector(0.16f * Growth));
+		if (bUsesStageMesh)
+		{
+			if (MultiFlowerMeshes[Index]->GetStaticMesh() != StageMesh)
+			{
+				MultiFlowerMeshes[Index]->SetStaticMesh(StageMesh);
+				MultiFlowerMeshes[Index]->EmptyOverrideMaterials();
+			}
+			const FBox Bounds = StageMesh->GetBoundingBox();
+			const float MeshHeight =
+				FMath::Max(0.01f, Bounds.GetSize().Z);
+			const float MinimumHeight = FMath::Max(
+				0.1f, Definition->MinimumGrowthVisualHeight);
+			const float MatureHeight = FMath::Max(
+				MinimumHeight, Definition->MatureGrowthVisualHeight);
+			const float DesiredHeight = FMath::Lerp(
+				MinimumHeight, MatureHeight, Growth);
+			const float UniformScale = DesiredHeight / MeshHeight;
+			const FVector Centre = Bounds.GetCenter();
+			MultiFlowerMeshes[Index]->SetRelativeScale3D(
+				FVector(UniformScale));
+			MultiFlowerMeshes[Index]->SetRelativeLocation(
+				BaseLocation + FVector(
+					-Centre.X * UniformScale,
+					-Centre.Y * UniformScale,
+					-Bounds.Min.Z * UniformScale));
+		}
+		else
+		{
+			static UStaticMesh* FallbackFlowerMesh =
+				LoadObject<UStaticMesh>(
+					nullptr,
+					TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+			if (FallbackFlowerMesh &&
+				MultiFlowerMeshes[Index]->GetStaticMesh() !=
+					FallbackFlowerMesh)
+			{
+				MultiFlowerMeshes[Index]->SetStaticMesh(
+					FallbackFlowerMesh);
+				MultiFlowerMeshes[Index]->EmptyOverrideMaterials();
+			}
+			MultiStemMeshes[Index]->SetRelativeLocation(
+				BaseLocation + FVector(0.0f, 0.0f, 9.0f * Growth));
+			MultiStemMeshes[Index]->SetRelativeScale3D(
+				FVector(0.045f, 0.045f, 0.18f * Growth));
+			MultiFlowerMeshes[Index]->SetRelativeLocation(
+				BaseLocation +
+					FVector(0.0f, 0.0f, 18.0f * Growth + 8.0f));
+			MultiFlowerMeshes[Index]->SetRelativeScale3D(
+				FVector(0.16f * Growth));
+		}
 	}
 	if (MultiStatusText)
 	{

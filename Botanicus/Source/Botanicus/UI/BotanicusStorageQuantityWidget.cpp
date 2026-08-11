@@ -14,7 +14,7 @@
 
 namespace
 {
-	UCanvasPanelSlot* AddToCanvas(
+	UCanvasPanelSlot* AddStorageQuantityToCanvas(
 		UCanvasPanel* Parent,
 		UWidget* Child,
 		const FVector2D& Position,
@@ -45,11 +45,11 @@ void UBotanicusStorageQuantityWidget::NativeOnInitialized()
 		Background->SetBrushFromTexture(
 			BotanicusHudStyle::LoadTexture(TEXT("T_HUD_ActionBackground")),
 			true);
-		AddToCanvas(Canvas, Background, FVector2D::ZeroVector,
+		AddStorageQuantityToCanvas(Canvas, Background, FVector2D::ZeroVector,
 			FVector2D(310.0f, 108.0f));
 
 		InputIcon = WidgetTree->ConstructWidget<UImage>();
-		AddToCanvas(Canvas, InputIcon, FVector2D(22.0f, 32.0f),
+		AddStorageQuantityToCanvas(Canvas, InputIcon, FVector2D(22.0f, 32.0f),
 			FVector2D(48.0f, 43.0f), 2);
 
 		QuantityText = WidgetTree->ConstructWidget<UTextBlock>();
@@ -57,7 +57,7 @@ void UBotanicusStorageQuantityWidget::NativeOnInitialized()
 			FSlateColor(BotanicusHudStyle::PrimaryText()));
 		QuantityText->SetFont(FSlateFontInfo(
 			FCoreStyle::GetDefaultFont(), 14, TEXT("Bold")));
-		AddToCanvas(Canvas, QuantityText, FVector2D(84.0f, 28.0f),
+		AddStorageQuantityToCanvas(Canvas, QuantityText, FVector2D(84.0f, 28.0f),
 			FVector2D(190.0f, 28.0f), 2);
 
 		InstructionText = WidgetTree->ConstructWidget<UTextBlock>();
@@ -66,7 +66,7 @@ void UBotanicusStorageQuantityWidget::NativeOnInitialized()
 			FLinearColor(0.75f, 0.80f, 0.69f, 1.0f)));
 		InstructionText->SetFont(FSlateFontInfo(
 			FCoreStyle::GetDefaultFont(), 12));
-		AddToCanvas(Canvas, InstructionText, FVector2D(84.0f, 54.0f),
+		AddStorageQuantityToCanvas(Canvas, InstructionText, FVector2D(84.0f, 54.0f),
 			FVector2D(190.0f, 38.0f), 2);
 
 		WidgetTree->RootWidget = SizeBox;

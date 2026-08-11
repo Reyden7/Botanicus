@@ -25,12 +25,17 @@ public:
 		const FText& ActionText,
 		const FText& TargetName,
 		bool bRequiresHold);
+	void BeginLocalHoldProgress(float DurationSeconds);
+	void EndLocalHoldProgress();
 	void SetHoldProgress(float InProgress);
 	void ClearTarget();
 	void SetLayoutOwner(UBotanicusHudLayoutWidget* InLayoutOwner);
 
 protected:
 	virtual void NativeOnInitialized() override;
+	virtual void NativeTick(
+		const FGeometry& MyGeometry,
+		float InDeltaTime) override;
 	virtual int32 NativePaint(
 		const FPaintArgs& Args,
 		const FGeometry& AllottedGeometry,
@@ -61,4 +66,7 @@ private:
 
 	float HoldProgress = 0.0f;
 	bool bShowHoldProgress = false;
+	bool bLocalHoldProgressActive = false;
+	float LocalHoldElapsed = 0.0f;
+	float LocalHoldDuration = 1.0f;
 };

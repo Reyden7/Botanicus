@@ -834,6 +834,12 @@ protected:
 	void ServerBeginPlaceableItemMove(
 		ABotanicusPlaceableItemActor* WorldItem);
 
+	UFUNCTION(Client, Reliable)
+	void ClientBeginPlaceableItemHold(float DurationSeconds);
+
+	UFUNCTION(Client, Reliable)
+	void ClientEndPlaceableItemHold();
+
 	UFUNCTION(Server, Reliable)
 	void ServerCollectStorageItem(
 		ABotanicusPlaceableItemActor* WorldItem,

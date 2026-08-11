@@ -104,12 +104,25 @@ void UBotanicusInteractionTargetWidget::SetTargetName(const FText& TargetName)
 		return;
 	}
 	TargetNameText->SetText(TargetName);
-	bShowHoldProgress = false;
-	HoldProgress = 0.0f;
+	// The target label is refreshed periodically. Preserve a hold animation
+	// started by this widget's owning local controller while that happens.
+	if (!bLocalHoldProgressActive)
+	{
+		bShowHoldProgress = false;
+		HoldProgress = 0.0f;
+	}
 	if (ActionLabel)
 	{
-		ActionLabel->SetText(NSLOCTEXT(
-			"BotanicusInteraction", "Interact", "INTERAGIR"));
+		ActionLabel->SetText(
+			bLocalHoldProgressActive
+				? NSLOCTEXT(
+					"BotanicusInteraction",
+					"PickUpHold",
+					"PRENDRE")
+				: NSLOCTEXT(
+					"BotanicusInteraction",
+					"Interact",
+					"INTERAGIR"));
 	}
 	if (KeyIcon)
 	{
@@ -121,6 +134,68 @@ void UBotanicusInteractionTargetWidget::SetTargetName(const FText& TargetName)
 	SetVisibility(ESlateVisibility::HitTestInvisible);
 }
 
+void UBotanicusInteractionTargetWidget::BeginLocalHoldProgress(
+	float DurationSeconds)
+{
+	if (bLocalHoldProgressActive)
+	{
+		// The server also confirms the hold to the owning client. Do not restart
+		// an animation which was already started immediately from local input.
+		LocalHoldDuration = FMath::Max(0.1f, DurationSeconds);
+		bShowHoldProgress = true;
+		SetVisibility(ESlateVisibility::HitTestInvisible);
+		return;
+	}
+	bLocalHoldProgressActive = true;
+	bShowHoldProgress = true;
+	LocalHoldElapsed = 0.0f;
+	LocalHoldDuration = FMath::Max(0.1f, DurationSeconds);
+	HoldProgress = 0.0f;
+	if (ActionLabel)
+	{
+		ActionLabel->SetText(NSLOCTEXT(
+			"BotanicusInteraction",
+			"PickUpHold",
+			"PRENDRE"));
+	}
+	if (KeyIcon)
+	{
+		KeyIcon->SetBrushFromTexture(LoadObject<UTexture2D>(nullptr,
+			TEXT("/Game/PCKeyboardMouseIconPack/Textures/T_KeyboardE.T_KeyboardE")),
+			true);
+	}
+	SetVisibility(ESlateVisibility::HitTestInvisible);
+	InvalidateLayoutAndVolatility();
+}
+
+void UBotanicusInteractionTargetWidget::EndLocalHoldProgress()
+{
+	bLocalHoldProgressActive = false;
+	bShowHoldProgress = false;
+	LocalHoldElapsed = 0.0f;
+	HoldProgress = 0.0f;
+	InvalidateLayoutAndVolatility();
+}
+
+void UBotanicusInteractionTargetWidget::NativeTick(
+	const FGeometry& MyGeometry,
+	float InDeltaTime)
+{
+	Super::NativeTick(MyGeometry, InDeltaTime);
+	if (!bLocalHoldProgressActive)
+	{
+		return;
+	}
+
+	LocalHoldElapsed += InDeltaTime;
+	HoldProgress = FMath::Clamp(
+		LocalHoldElapsed / LocalHoldDuration,
+		0.0f,
+		1.0f);
+	bShowHoldProgress = true;
+	InvalidateLayoutAndVolatility();
+}
+
 void UBotanicusInteractionTargetWidget::SetPlantInspectPrompt(
 	const FText& PlantName)
 {
@@ -130,6 +205,14 @@ void UBotanicusInteractionTargetWidget::SetPlantInspectPrompt(
 		return;
 	}
 	TargetNameText->SetText(PlantName);
+	if (bLocalHoldProgressActive)
+	{
+		// Picking up a planted pot with E temporarily takes priority over the
+		// passive right-click inspection hint.
+		UpdateAdaptiveHeight();
+		SetVisibility(ESlateVisibility::HitTestInvisible);
+		return;
+	}
 	bShowHoldProgress = false;
 	HoldProgress = 0.0f;
 	if (ActionLabel)
@@ -158,6 +241,12 @@ void UBotanicusInteractionTargetWidget::SetLeftMousePrompt(
 		return;
 	}
 	TargetNameText->SetText(InTargetName);
+	if (bLocalHoldProgressActive)
+	{
+		UpdateAdaptiveHeight();
+		SetVisibility(ESlateVisibility::HitTestInvisible);
+		return;
+	}
 	if (ActionLabel)
 	{
 		ActionLabel->SetText(InActionText);
@@ -187,11 +276,22 @@ void UBotanicusInteractionTargetWidget::SetHoldProgress(float InProgress)
 
 void UBotanicusInteractionTargetWidget::ClearTarget()
 {
+	// A short-lived focus miss must not cancel an input action which is still
+	// being held by the owning player. Remote clients encounter these misses
+	// more often while replicated actors update. The controller explicitly
+	// ends the hold on release, cancellation or completion.
+	if (bLocalHoldProgressActive)
+	{
+		SetVisibility(ESlateVisibility::HitTestInvisible);
+		return;
+	}
 	if (TargetNameText)
 	{
 		TargetNameText->SetText(FText::GetEmpty());
 	}
 	ApplyPanelHeight(108.0f);
+	bLocalHoldProgressActive = false;
+	LocalHoldElapsed = 0.0f;
 	HoldProgress = 0.0f;
 	bShowHoldProgress = false;
 	SetVisibility(ESlateVisibility::Collapsed);
@@ -215,11 +315,15 @@ int32 UBotanicusInteractionTargetWidget::NativePaint(
 	}
 
 	const FGeometry KeyGeometry = KeyIcon->GetCachedGeometry();
+	const FVector2D KeyLocalSize = KeyGeometry.GetLocalSize();
+	// Convert the key's own local centre through Slate's complete accumulated
+	// transform. Building the point from AbsolutePosition + AbsoluteSize was
+	// only correct at DPI scale 1 and could place the arc outside the widget in
+	// a smaller remote-client PIE window.
 	const FVector2D Center = AllottedGeometry.AbsoluteToLocal(
-		KeyGeometry.GetAbsolutePosition() + KeyGeometry.GetAbsoluteSize() * 0.5f);
+		KeyGeometry.LocalToAbsolute(KeyLocalSize * 0.5f));
 	const float Radius = FMath::Max(
-		25.0f, FMath::Max(KeyGeometry.GetLocalSize().X,
-			KeyGeometry.GetLocalSize().Y) * 0.5f + 5.0f);
+		25.0f, FMath::Max(KeyLocalSize.X, KeyLocalSize.Y) * 0.5f + 5.0f);
 	constexpr int32 SegmentCount = 40;
 	auto BuildArc = [Center, Radius](float Fraction, TArray<FVector2D>& Points)
 	{

@@ -2797,7 +2797,10 @@ void ABotanicusPlayerController::InitializeInteractionTargetWidget()
 	InitializeHudLayoutWidget();
 	if (InteractionTargetWidget)
 	{
-		InteractionTargetWidget->ClearTarget();
+		// Initialization can be requested again while refreshing the current
+		// target. Do not clear an already initialized widget here: doing so
+		// erases a locally running hold loader and is timing-dependent between
+		// the listen-server player and remote clients.
 		return;
 	}
 	InteractionTargetWidget =
@@ -4873,6 +4876,14 @@ void ABotanicusPlayerController::BeginEquipmentCarryCharge(
 	EquipmentCarryChargeElapsed = 0.0f;
 	bEquipmentCarryHoldActivated = false;
 	bEquipmentCarryKeyHeld = true;
+	InitializeInteractionTargetWidget();
+	if (InteractionTargetWidget)
+	{
+		InteractionTargetWidget->BeginLocalHoldProgress(
+			GetMoveHoldDurationForActor(
+				Equipment,
+				EquipmentLiftHoldDuration));
+	}
 
 	if (!CarryProgressWidget)
 	{
@@ -4936,6 +4947,13 @@ void ABotanicusPlayerController::UpdateEquipmentCarryCharge(
 	if (CarryProgressWidget)
 	{
 		CarryProgressWidget->SetCarryProgress(ChargeProgress);
+	}
+	// The interaction card belongs to this local controller. Update it
+	// directly instead of relying on the legacy carry widget's visibility,
+	// which is not guaranteed to match on remote multiplayer clients.
+	if (InteractionTargetWidget)
+	{
+		InteractionTargetWidget->SetHoldProgress(ChargeProgress);
 	}
 
 	if (ChargeProgress < 1.0f)
@@ -5029,6 +5047,10 @@ void ABotanicusPlayerController::CancelEquipmentCarryCharge(
 	EquipmentCarryChargeElapsed = 0.0f;
 	bEquipmentCarryHoldActivated = false;
 	bEquipmentCarryKeyHeld = false;
+	if (InteractionTargetWidget)
+	{
+		InteractionTargetWidget->EndLocalHoldProgress();
+	}
 	if (CarryProgressWidget)
 	{
 		CarryProgressWidget->SetVisibility(
@@ -7118,6 +7140,12 @@ void ABotanicusPlayerController::BeginParcelMoveCharge(
 	LocalParcelMoveCandidate = Parcel;
 	ParcelMoveChargeElapsed = 0.0f;
 	bEquipmentCarryKeyHeld = true;
+	InitializeInteractionTargetWidget();
+	if (InteractionTargetWidget)
+	{
+		InteractionTargetWidget->BeginLocalHoldProgress(
+			PlaceableItemMoveHoldDuration);
+	}
 
 	if (!CarryProgressWidget)
 	{
@@ -7178,6 +7206,10 @@ void ABotanicusPlayerController::UpdateParcelMoveCharge(
 	{
 		CarryProgressWidget->SetCarryProgress(ChargeProgress);
 	}
+	if (InteractionTargetWidget)
+	{
+		InteractionTargetWidget->SetHoldProgress(ChargeProgress);
+	}
 	if (ChargeProgress < 1.0f)
 	{
 		return;
@@ -7188,6 +7220,10 @@ void ABotanicusPlayerController::UpdateParcelMoveCharge(
 	LocalParcelMoveCandidate = nullptr;
 	ParcelMoveChargeElapsed = 0.0f;
 	bEquipmentCarryKeyHeld = false;
+	if (InteractionTargetWidget)
+	{
+		InteractionTargetWidget->EndLocalHoldProgress();
+	}
 	if (CarryProgressWidget)
 	{
 		CarryProgressWidget->SetVisibility(
@@ -7202,6 +7238,10 @@ void ABotanicusPlayerController::CancelParcelMoveCharge()
 	LocalParcelMoveCandidate = nullptr;
 	ParcelMoveChargeElapsed = 0.0f;
 	bEquipmentCarryKeyHeld = false;
+	if (InteractionTargetWidget)
+	{
+		InteractionTargetWidget->EndLocalHoldProgress();
+	}
 	if (CarryProgressWidget)
 	{
 		CarryProgressWidget->SetVisibility(
@@ -7743,6 +7783,14 @@ void ABotanicusPlayerController::BeginPlaceableItemMoveCharge(
 	LocalPlaceableItemMoveCandidate = WorldItem;
 	PlaceableItemMoveChargeElapsed = 0.0f;
 	bEquipmentCarryKeyHeld = true;
+	InitializeInteractionTargetWidget();
+	if (InteractionTargetWidget)
+	{
+		InteractionTargetWidget->BeginLocalHoldProgress(
+			GetMoveHoldDurationForActor(
+				WorldItem,
+				PlaceableItemMoveHoldDuration));
+	}
 	ServerBeginPlaceableItemMove(WorldItem);
 
 	if (!CarryProgressWidget)
@@ -7809,6 +7857,10 @@ void ABotanicusPlayerController::UpdatePlaceableItemMoveCharge(
 	{
 		CarryProgressWidget->SetCarryProgress(ChargeProgress);
 	}
+	if (InteractionTargetWidget)
+	{
+		InteractionTargetWidget->SetHoldProgress(ChargeProgress);
+	}
 	if (ChargeProgress < 1.0f)
 	{
 		return;
@@ -7819,6 +7871,10 @@ void ABotanicusPlayerController::UpdatePlaceableItemMoveCharge(
 	LocalPlaceableItemMoveCandidate = nullptr;
 	PlaceableItemMoveChargeElapsed = 0.0f;
 	bEquipmentCarryKeyHeld = false;
+	if (InteractionTargetWidget)
+	{
+		InteractionTargetWidget->EndLocalHoldProgress();
+	}
 	if (CarryProgressWidget)
 	{
 		CarryProgressWidget->SetVisibility(
@@ -7839,6 +7895,10 @@ void ABotanicusPlayerController::CancelPlaceableItemMoveCharge()
 	LocalPlaceableItemMoveCandidate = nullptr;
 	PlaceableItemMoveChargeElapsed = 0.0f;
 	bEquipmentCarryKeyHeld = false;
+	if (InteractionTargetWidget)
+	{
+		InteractionTargetWidget->EndLocalHoldProgress();
+	}
 	if (CarryProgressWidget)
 	{
 		CarryProgressWidget->SetVisibility(
@@ -8519,6 +8579,12 @@ bool ABotanicusPlayerController::
 	LocalDisplayedSalePotPickupCandidate = SalesDisplay;
 	DisplayedSalePotPickupElapsed = 0.0f;
 	bEquipmentCarryKeyHeld = true;
+	InitializeInteractionTargetWidget();
+	if (InteractionTargetWidget)
+	{
+		InteractionTargetWidget->BeginLocalHoldProgress(
+			PlaceableItemMoveHoldDuration);
+	}
 
 	if (!CarryProgressWidget)
 	{
@@ -8582,6 +8648,10 @@ void ABotanicusPlayerController::UpdateDisplayedSalePotPickup(
 	{
 		CarryProgressWidget->SetCarryProgress(ChargeProgress);
 	}
+	if (InteractionTargetWidget)
+	{
+		InteractionTargetWidget->SetHoldProgress(ChargeProgress);
+	}
 	if (ChargeProgress < 1.0f)
 	{
 		return;
@@ -8592,6 +8662,10 @@ void ABotanicusPlayerController::UpdateDisplayedSalePotPickup(
 	LocalDisplayedSalePotPickupCandidate = nullptr;
 	DisplayedSalePotPickupElapsed = 0.0f;
 	bEquipmentCarryKeyHeld = false;
+	if (InteractionTargetWidget)
+	{
+		InteractionTargetWidget->EndLocalHoldProgress();
+	}
 	if (CarryProgressWidget)
 	{
 		CarryProgressWidget->SetVisibility(
@@ -8606,6 +8680,10 @@ void ABotanicusPlayerController::CancelDisplayedSalePotPickup()
 	LocalDisplayedSalePotPickupCandidate = nullptr;
 	DisplayedSalePotPickupElapsed = 0.0f;
 	bEquipmentCarryKeyHeld = false;
+	if (InteractionTargetWidget)
+	{
+		InteractionTargetWidget->EndLocalHoldProgress();
+	}
 	if (CarryProgressWidget)
 	{
 		CarryProgressWidget->SetVisibility(
@@ -11599,6 +11677,7 @@ void ABotanicusPlayerController::
 		ClientMessage(
 			TEXT(
 				"Activez le mode meubles avec B pour deplacer ce meuble."));
+		ClientEndPlaceableItemHold();
 		return;
 	}
 
@@ -11615,6 +11694,7 @@ void ABotanicusPlayerController::
 	{
 		ClientMessage(
 			TEXT("Regardez l'objet et rapprochez-vous pour le deplacer."));
+		ClientEndPlaceableItemHold();
 		return;
 	}
 
@@ -11629,11 +11709,46 @@ void ABotanicusPlayerController::
 			ClientMessage(
 				TEXT(
 					"Cet objet est deja pris par un autre joueur."));
+			ClientEndPlaceableItemHold();
 			return;
 		}
 	}
 
 	ServerMovedPlaceableItem = WorldItem;
+	ClientBeginPlaceableItemHold(
+		GetMoveHoldDurationForActor(
+			WorldItem,
+			PlaceableItemMoveHoldDuration));
+}
+
+void ABotanicusPlayerController::
+	ClientBeginPlaceableItemHold_Implementation(float DurationSeconds)
+{
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+
+	InitializeHudLayoutWidget();
+	if (HudLayoutWidget && HudLayoutWidget->GetInteractionWidget())
+	{
+		InteractionTargetWidget =
+			HudLayoutWidget->GetInteractionWidget();
+	}
+	InitializeInteractionTargetWidget();
+	if (InteractionTargetWidget)
+	{
+		InteractionTargetWidget->BeginLocalHoldProgress(DurationSeconds);
+	}
+}
+
+void ABotanicusPlayerController::
+	ClientEndPlaceableItemHold_Implementation()
+{
+	if (IsLocalPlayerController() && InteractionTargetWidget)
+	{
+		InteractionTargetWidget->EndLocalHoldProgress();
+	}
 }
 
 void ABotanicusPlayerController::
@@ -11641,6 +11756,7 @@ void ABotanicusPlayerController::
 		ABotanicusPlaceableItemActor* WorldItem,
 		int32 Quantity)
 {
+	ClientEndPlaceableItemHold();
 	ABotanicusCharacter* BotanicusCharacter =
 		Cast<ABotanicusCharacter>(GetPawn());
 	UBotanicusQuickBarComponent* QuickBar =
@@ -11938,6 +12054,7 @@ void ABotanicusPlayerController::
 	ServerCancelPlaceableItemMove_Implementation(
 		ABotanicusPlaceableItemActor* WorldItem)
 {
+	ClientEndPlaceableItemHold();
 	if (ServerMovedPlaceableItem == WorldItem)
 	{
 		ServerMovedPlaceableItem = nullptr;
