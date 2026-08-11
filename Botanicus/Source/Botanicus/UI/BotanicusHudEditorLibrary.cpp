@@ -374,6 +374,33 @@ bool UBotanicusHudEditorLibrary::BuildEditableHudElement(
 				TEXT("/Game/Botanicus/UI/Sales/Textures/T_SalesEmpty_Action.T_SalesEmpty_Action"),
 				FVector2D(100.0f, 222.0f), FVector2D(520.0f, 174.0f), 2);
 		}
+		else if (Type == TEXT("SalesDisplayOccupied"))
+		{
+			AddImage(Tree, Root, TEXT("PlantDecoration"),
+				TEXT("/Game/Botanicus/UI/Sales/Textures/T_SalesOccupied_Decoration.T_SalesOccupied_Decoration"),
+				FVector2D(70.0f, -105.0f), FVector2D(480.0f, 320.0f));
+			AddText(Tree, Root, TEXT("PlantNameText"), TEXT("ORCHIDEE ROSE"),
+				FVector2D(45.0f, 62.0f), FVector2D(530.0f, 52.0f),
+				34, true, ETextJustify::Center);
+			AddImage(Tree, Root, TEXT("QualityBackground"),
+				TEXT("/Game/Botanicus/UI/Plant/Inspection/Textures/T_PlantInspect_QualityBackground.T_PlantInspect_QualityBackground"),
+				FVector2D(42.0f, 103.0f), FVector2D(270.0f, 108.0f), 1);
+			AddImage(Tree, Root, TEXT("PriceBackground"),
+				TEXT("/Game/Botanicus/UI/Plant/Inspection/Textures/T_PlantInspect_PriceBackground.T_PlantInspect_PriceBackground"),
+				FVector2D(308.0f, 103.0f), FVector2D(270.0f, 108.0f), 1);
+			AddImage(Tree, Root, TEXT("QualityIcon"),
+				TEXT("/Game/Botanicus/UI/Sales/Textures/T_SalesOccupied_QualityStar.T_SalesOccupied_QualityStar"),
+				FVector2D(67.0f, 125.0f), FVector2D(62.0f, 62.0f), 2);
+			AddImage(Tree, Root, TEXT("CreditIcon"),
+				TEXT("/Game/Botanicus/UI/HUD/Textures/T_HUD_Credit.T_HUD_Credit"),
+				FVector2D(330.0f, 129.0f), FVector2D(54.0f, 54.0f), 2);
+			AddText(Tree, Root, TEXT("QualityText"), TEXT("BELLE"),
+				FVector2D(126.0f, 137.0f), FVector2D(164.0f, 38.0f),
+				24, true, ETextJustify::Center);
+			AddText(Tree, Root, TEXT("PriceText"), TEXT("85 credits"),
+				FVector2D(382.0f, 137.0f), FVector2D(174.0f, 38.0f),
+				22, true, ETextJustify::Center);
+		}
 		else if (Type == TEXT("PlantGrowthInfo"))
 		{
 			AddText(Tree, Root, TEXT("PlantNameText"), TEXT("ORCHIDEE ROSE"),

@@ -257,9 +257,26 @@ void ABotanicusDeliveryParcelActor::UpdateCutterTrace()
 		return;
 	}
 
-	FVector ViewLocation;
-	FRotator ViewRotation;
-	Controller->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	FVector TraceStart;
+	FVector TraceDirection;
+	int32 ViewportWidth = 0;
+	int32 ViewportHeight = 0;
+	Controller->GetViewportSize(ViewportWidth, ViewportHeight);
+	const bool bHasExactCrosshairRay =
+		ViewportWidth > 0 &&
+		ViewportHeight > 0 &&
+		Controller->DeprojectScreenPositionToWorld(
+			ViewportWidth * 0.5f,
+			ViewportHeight * 0.5f,
+			TraceStart,
+			TraceDirection);
+	if (!bHasExactCrosshairRay)
+	{
+		FRotator ViewRotation;
+		Controller->GetPlayerViewPoint(TraceStart, ViewRotation);
+		TraceDirection = ViewRotation.Vector();
+	}
+	TraceDirection.Normalize();
 	FCollisionQueryParams QueryParams(
 		SCENE_QUERY_STAT(BotanicusParcelCut),
 		false,
@@ -267,8 +284,8 @@ void ABotanicusDeliveryParcelActor::UpdateCutterTrace()
 	FHitResult Hit;
 	if (!GetWorld()->LineTraceSingleByChannel(
 			Hit,
-			ViewLocation,
-			ViewLocation + ViewRotation.Vector() * 700.0f,
+			TraceStart,
+			TraceStart + TraceDirection * 700.0f,
 			ECC_Visibility,
 			QueryParams) ||
 		Hit.GetActor() != this)
@@ -280,8 +297,9 @@ void ABotanicusDeliveryParcelActor::UpdateCutterTrace()
 	const FVector LocalHit =
 		GetActorTransform().InverseTransformPosition(Hit.ImpactPoint);
 	const float TapeHalfLength = ParcelHalfExtent.X * 0.92f;
-	const float TapeHalfWidth =
-		FMath::Max(7.0f, ParcelHalfExtent.Y * 0.18f);
+	const float VisibleTapeWidth =
+		FMath::Clamp(ParcelHalfExtent.Y * 0.24f, 8.0f, 16.0f);
+	const float TapeHalfWidth = VisibleTapeWidth * 0.5f + 1.0f;
 	if (FMath::Abs(LocalHit.X) > TapeHalfLength + 4.0f ||
 		FMath::Abs(LocalHit.Y) > TapeHalfWidth ||
 		FMath::Abs(LocalHit.Z - ParcelHalfExtent.Z) > 18.0f)

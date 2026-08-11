@@ -630,8 +630,10 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	SalePot.CatalogTabs =
 		static_cast<int32>(EBotanicusCatalogTab::Sales);
 	SalePot.WorldMesh = TSoftObjectPtr<UStaticMesh>(
-		FSoftObjectPath(TEXT("/Engine/BasicShapes/Cylinder.Cylinder")));
-	SalePot.WorldScale = FVector(0.28f, 0.28f, 0.22f);
+		FSoftObjectPath(TEXT(
+			"/Game/Botanicus/Items/itemsMesh/potDeVente/rond/"
+			"pot_de_vente.pot_de_vente")));
+	SalePot.WorldScale = FVector::OneVector;
 	SalePot.WorldActorClass =
 		ABotanicusSalePotActor::StaticClass();
 	SalePot.MaximumStack = 10;

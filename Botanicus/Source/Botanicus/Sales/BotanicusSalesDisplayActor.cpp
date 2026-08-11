@@ -8,6 +8,7 @@
 #include "Camera/PlayerCameraManager.h"
 #include "Catalog/BotanicusItemCatalogSubsystem.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SceneComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "Components/WidgetComponent.h"
 #include "Engine/GameInstance.h"
@@ -22,6 +23,7 @@
 #include "Visitors/BotanicusVisitorCharacter.h"
 #include "UObject/ConstructorHelpers.h"
 #include "UI/BotanicusSalesDisplayEmptyWidget.h"
+#include "UI/BotanicusSalesDisplayOccupiedWidget.h"
 
 namespace
 {
@@ -50,6 +52,39 @@ FString SalesDisplayPlantQualityLabel(FName QualityTag)
 	}
 	return TEXT("STANDARD");
 }
+
+void GetMatureDisplayedPlantShape(
+	FName PlantItemKey,
+	float& OutStemHeight,
+	FVector& OutFoliageShape)
+{
+	FString BaseKey = PlantItemKey.ToString();
+	BaseKey.RemoveFromEnd(TEXT("_Beautiful"));
+	BaseKey.RemoveFromEnd(TEXT("_Exceptional"));
+	float HeightMultiplier = 1.0f;
+	OutFoliageShape = FVector(1.0f, 1.0f, 0.7f);
+	if (BaseKey == TEXT("Harvest_Orchid"))
+	{
+		HeightMultiplier = 1.15f;
+		OutFoliageShape = FVector(0.7f, 0.7f, 1.3f);
+	}
+	else if (BaseKey == TEXT("Harvest_Monstera"))
+	{
+		HeightMultiplier = 0.9f;
+		OutFoliageShape = FVector(1.55f, 1.3f, 0.65f);
+	}
+	else if (BaseKey == TEXT("Harvest_Lavender"))
+	{
+		HeightMultiplier = 1.3f;
+		OutFoliageShape = FVector(0.62f, 0.62f, 1.5f);
+	}
+	else if (BaseKey == TEXT("Harvest_Violet"))
+	{
+		HeightMultiplier = 0.62f;
+		OutFoliageShape = FVector(1.35f, 1.35f, 0.58f);
+	}
+	OutStemHeight = 80.0f * HeightMultiplier;
+}
 }
 
 ABotanicusSalesDisplayActor::ABotanicusSalesDisplayActor()
@@ -73,18 +108,33 @@ ABotanicusSalesDisplayActor::ABotanicusSalesDisplayActor()
 		Mesh->SetRelativeScale3D(FVector(1.15f, 0.45f, 0.65f));
 	}
 
+	SalePotSlot = CreateDefaultSubobject<USceneComponent>(
+		TEXT("SalePotSlot"));
+	SalePotSlot->SetupAttachment(SceneRoot);
+
+	DisplayedContentRoot = CreateDefaultSubobject<USceneComponent>(
+		TEXT("DisplayedPotAndPlantRoot"));
+	DisplayedContentRoot->SetupAttachment(SalePotSlot);
+
 	PlantVisual = CreateDefaultSubobject<UStaticMeshComponent>(
 		TEXT("DisplayedPlant"));
-	PlantVisual->SetupAttachment(SceneRoot);
+	PlantVisual->SetupAttachment(DisplayedContentRoot);
 	PlantVisual->SetStaticMesh(
 		SphereFinder.Succeeded() ? SphereFinder.Object : nullptr);
 	PlantVisual->SetRelativeLocation(FVector(0.0f, 0.0f, 95.0f));
 	PlantVisual->SetRelativeScale3D(FVector(0.32f, 0.32f, 0.45f));
 	PlantVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
+	StemVisual = CreateDefaultSubobject<UStaticMeshComponent>(
+		TEXT("DisplayedPlantStem"));
+	StemVisual->SetupAttachment(DisplayedContentRoot);
+	StemVisual->SetStaticMesh(
+		CylinderFinder.Succeeded() ? CylinderFinder.Object : nullptr);
+	StemVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
 	PotVisual = CreateDefaultSubobject<UStaticMeshComponent>(
 		TEXT("DisplayedSalePot"));
-	PotVisual->SetupAttachment(SceneRoot);
+	PotVisual->SetupAttachment(DisplayedContentRoot);
 	PotVisual->SetStaticMesh(
 		CylinderFinder.Succeeded() ? CylinderFinder.Object : nullptr);
 	PotVisual->SetRelativeLocation(FVector(0.0f, 0.0f, 76.0f));
@@ -137,6 +187,25 @@ ABotanicusSalesDisplayActor::ABotanicusSalesDisplayActor()
 		UBotanicusSalesDisplayEmptyWidget::StaticClass());
 	EmptyDisplayWidget->SetVisibility(false);
 
+	OccupiedDisplayWidget = CreateDefaultSubobject<UWidgetComponent>(
+		TEXT("OccupiedSalesDisplayWidget"));
+	OccupiedDisplayWidget->SetupAttachment(SceneRoot);
+	OccupiedDisplayWidget->SetWidgetSpace(EWidgetSpace::World);
+	OccupiedDisplayWidget->SetDrawSize(FVector2D(620.0f, 220.0f));
+	OccupiedDisplayWidget->SetPivot(FVector2D(0.5f, 0.5f));
+	OccupiedDisplayWidget->SetRelativeLocation(
+		FVector(0.0f, 0.0f, OccupiedDisplayWidgetHeight));
+	OccupiedDisplayWidget->SetRelativeScale3D(
+		FVector(OccupiedDisplayWidgetScale));
+	OccupiedDisplayWidget->SetTintColorAndOpacity(FLinearColor(
+		OccupiedDisplayWidgetBrightness, OccupiedDisplayWidgetBrightness,
+		OccupiedDisplayWidgetBrightness, 1.0f));
+	OccupiedDisplayWidget->SetTwoSided(true);
+	OccupiedDisplayWidget->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	OccupiedDisplayWidget->SetWidgetClass(
+		UBotanicusSalesDisplayOccupiedWidget::StaticClass());
+	OccupiedDisplayWidget->SetVisibility(false);
+
 	RefreshVisuals();
 }
 
@@ -144,6 +213,7 @@ void ABotanicusSalesDisplayActor::OnConstruction(
 	const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
+	RefreshSalePotSlotTransform();
 	if (EmptyDisplayWidget)
 	{
 		EmptyDisplayWidget->SetRelativeLocation(
@@ -155,7 +225,28 @@ void ABotanicusSalesDisplayActor::OnConstruction(
 				EmptyDisplayWidgetBrightness,
 				1.0f));
 	}
+	if (OccupiedDisplayWidget)
+	{
+		OccupiedDisplayWidget->SetRelativeLocation(
+			FVector(0.0f, 0.0f, OccupiedDisplayWidgetHeight));
+		OccupiedDisplayWidget->SetRelativeScale3D(
+			FVector(OccupiedDisplayWidgetScale));
+		OccupiedDisplayWidget->SetTintColorAndOpacity(FLinearColor(
+			OccupiedDisplayWidgetBrightness, OccupiedDisplayWidgetBrightness,
+			OccupiedDisplayWidgetBrightness, 1.0f));
+	}
+	RefreshVisuals();
 }
+
+#if WITH_EDITOR
+void ABotanicusSalesDisplayActor::PostEditChangeProperty(
+	FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+	RefreshSalePotSlotTransform();
+	RefreshVisuals();
+}
+#endif
 
 void ABotanicusSalesDisplayActor::BeginPlay()
 {
@@ -168,6 +259,15 @@ void ABotanicusSalesDisplayActor::BeginPlay()
 			EmptyDisplayWidget->SetWidgetClass(WidgetClass);
 		}
 		EmptyDisplayWidget->InitWidget();
+	}
+	if (OccupiedDisplayWidget)
+	{
+		if (UClass* WidgetClass = LoadClass<UUserWidget>(nullptr,
+			TEXT("/Game/Botanicus/UI/Sales/WBP_SalesDisplayOccupied.WBP_SalesDisplayOccupied_C")))
+		{
+			OccupiedDisplayWidget->SetWidgetClass(WidgetClass);
+		}
+		OccupiedDisplayWidget->InitWidget();
 	}
 }
 
@@ -200,6 +300,11 @@ void ABotanicusSalesDisplayActor::Tick(float DeltaSeconds)
 			EmptyDisplayWidget->SetWorldRotation(
 				(CameraLocation -
 				 EmptyDisplayWidget->GetComponentLocation()).Rotation());
+		}
+		if (OccupiedDisplayWidget)
+		{
+			OccupiedDisplayWidget->SetWorldRotation(
+				(CameraLocation - OccupiedDisplayWidget->GetComponentLocation()).Rotation());
 		}
 	}
 	RefreshLocalAction();
@@ -487,10 +592,63 @@ void ABotanicusSalesDisplayActor::NotifyVisitorEnded(
 FTransform ABotanicusSalesDisplayActor::
 	GetSalePotPlacementTransform() const
 {
+	if (SalePotSlot)
+	{
+		return SalePotSlot->GetComponentTransform();
+	}
+	const FVector SlotOffset = GetConfiguredDisplayedContentOffset();
 	return FTransform(
 		GetActorRotation(),
 		GetActorTransform().TransformPosition(
-			FVector(0.0f, 0.0f, 105.0f)));
+			FVector(
+				SlotOffset.X,
+				SlotOffset.Y,
+				GetDisplaySurfaceHeight() +
+					SlotOffset.Z)));
+}
+
+FVector ABotanicusSalesDisplayActor::
+	GetConfiguredDisplayedContentOffset() const
+{
+	return FVector(
+		SalePotSlotPosition.X,
+		SalePotSlotPosition.Y,
+		SalePotSlotHeight);
+}
+
+float ABotanicusSalesDisplayActor::GetDisplaySurfaceHeight() const
+{
+	if (Mesh && Mesh->GetStaticMesh())
+	{
+		const FBoxSphereBounds FurnitureBounds =
+			Mesh->CalcBounds(Mesh->GetRelativeTransform());
+		return FurnitureBounds.Origin.Z +
+			FurnitureBounds.BoxExtent.Z + DisplayedPotSurfaceOffset;
+	}
+	return 32.5f + DisplayedPotSurfaceOffset;
+}
+
+void ABotanicusSalesDisplayActor::RefreshSalePotSlotTransform()
+{
+	const FVector SlotOffset = GetConfiguredDisplayedContentOffset();
+	if (SalePotSlot)
+	{
+		SalePotSlot->SetRelativeLocation(FVector(
+			SlotOffset.X,
+			SlotOffset.Y,
+			GetDisplaySurfaceHeight() + SlotOffset.Z));
+	}
+	if (DisplayedContentRoot)
+	{
+		if (SalePotSlot &&
+			DisplayedContentRoot->GetAttachParent() != SalePotSlot)
+		{
+			DisplayedContentRoot->AttachToComponent(
+				SalePotSlot,
+				FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+		}
+		DisplayedContentRoot->SetRelativeLocation(FVector::ZeroVector);
+	}
 }
 
 bool ABotanicusSalesDisplayActor::
@@ -551,7 +709,8 @@ void ABotanicusSalesDisplayActor::
 		bool bHighlighted,
 		UMaterialInterface* HighlightMaterial)
 {
-	for (UStaticMeshComponent* Visual : {PotVisual.Get(), PlantVisual.Get()})
+	for (UStaticMeshComponent* Visual :
+		 {PotVisual.Get(), StemVisual.Get(), PlantVisual.Get()})
 	{
 		if (!Visual)
 		{
@@ -742,6 +901,7 @@ bool ABotanicusSalesDisplayActor::IsLocalPlayerTargetingDisplay(
 
 void ABotanicusSalesDisplayActor::RefreshVisuals()
 {
+	RefreshSalePotSlotTransform();
 	const FBotanicusItemDefinition* Definition =
 		GetDisplayedPlantDefinition();
 	const bool bHasPlant =
@@ -750,21 +910,13 @@ void ABotanicusSalesDisplayActor::RefreshVisuals()
 	{
 		PlantVisual->SetVisibility(
 			bHasPlant && !bPlantTakenByVisitor);
-		FVector PlantScale(0.32f, 0.32f, 0.45f);
+		float StemHeight = 80.0f;
+		FVector FoliageShape;
+		GetMatureDisplayedPlantShape(
+			DisplayedPlantItemKey, StemHeight, FoliageShape);
+		const FVector PlantScale = FoliageShape * 0.32f;
 		if (Definition)
 		{
-			if (Definition->PlantTypeTag == TEXT("Flowering"))
-			{
-				PlantScale = FVector(0.25f, 0.25f, 0.55f);
-			}
-			else if (Definition->PlantTypeTag == TEXT("Foliage"))
-			{
-				PlantScale = FVector(0.48f, 0.40f, 0.34f);
-			}
-			else if (Definition->PlantColorTag == TEXT("Purple"))
-			{
-				PlantScale = FVector(0.22f, 0.22f, 0.58f);
-			}
 			if (!PlantMaterial)
 			{
 				PlantMaterial =
@@ -780,6 +932,7 @@ void ABotanicusSalesDisplayActor::RefreshVisuals()
 		}
 		PlantVisual->SetRelativeScale3D(PlantScale);
 	}
+	float DisplayedPlantBaseHeight = 86.0f;
 	if (PotVisual)
 	{
 		const UGameInstance* GameInstance = GetGameInstance();
@@ -790,74 +943,179 @@ void ABotanicusSalesDisplayActor::RefreshVisuals()
 				: nullptr;
 		const FBotanicusItemDefinition* PotDefinition =
 			Catalog ? Catalog->FindItem(DisplayedPotItemKey) : nullptr;
-		if (DisplayedPotItemKey == TEXT("SalePotSquare") && PotDefinition)
+		UStaticMesh* DisplayedPotMesh = nullptr;
+		FVector DisplayedPotScale = FVector::OneVector;
+		FRotator DisplayedPotRotation = FRotator::ZeroRotator;
+		const UStaticMeshComponent* AuthoredPotComponent = nullptr;
+		if (PotDefinition)
 		{
-			if (UStaticMesh* PotMesh =
-					PotDefinition->WorldMesh.LoadSynchronous())
+			if (UClass* PotActorClass =
+					PotDefinition->WorldActorClass.LoadSynchronous())
 			{
-				PotVisual->SetStaticMesh(PotMesh);
-				const FBox Bounds = PotMesh->GetBoundingBox();
-				const FVector Extent = Bounds.GetExtent().GetAbs();
-				const float UniformScale = FMath::Min3(
-					25.0f / FMath::Max(1.0f, Extent.X),
-					25.0f / FMath::Max(1.0f, Extent.Y),
-					40.0f / FMath::Max(1.0f, Extent.Z));
-				PotVisual->SetRelativeScale3D(FVector(UniformScale));
-				PotVisual->SetRelativeLocation(FVector(
-					0.0f,
-					0.0f,
-					66.0f - Bounds.Min.Z * UniformScale));
+				if (const ABotanicusInteractableActor* PotDefaults =
+						Cast<ABotanicusInteractableActor>(
+							PotActorClass->GetDefaultObject()))
+				{
+					AuthoredPotComponent = PotDefaults->Mesh;
+				}
 			}
+			if (AuthoredPotComponent &&
+				AuthoredPotComponent->GetStaticMesh())
+			{
+				DisplayedPotMesh = AuthoredPotComponent->GetStaticMesh();
+				DisplayedPotScale =
+					AuthoredPotComponent->GetRelativeScale3D();
+				DisplayedPotRotation =
+					AuthoredPotComponent->GetRelativeRotation();
+			}
+			else
+			{
+				DisplayedPotMesh =
+					PotDefinition->WorldMesh.LoadSynchronous();
+				DisplayedPotScale = PotDefinition->WorldScale;
+			}
+		}
+		if (DisplayedPotMesh)
+		{
+			PotVisual->SetStaticMesh(DisplayedPotMesh);
+			PotVisual->SetRelativeRotation(DisplayedPotRotation);
+			PotVisual->SetRelativeScale3D(DisplayedPotScale);
+			PotVisual->EmptyOverrideMaterials();
+			if (AuthoredPotComponent)
+			{
+				for (int32 MaterialIndex = 0;
+					 MaterialIndex < AuthoredPotComponent->GetNumMaterials();
+					 ++MaterialIndex)
+				{
+					PotVisual->SetMaterial(
+						MaterialIndex,
+						AuthoredPotComponent->GetMaterial(MaterialIndex));
+				}
+			}
+
+			const FBox AuthoredBounds =
+				DisplayedPotMesh->GetBoundingBox().TransformBy(FTransform(
+					DisplayedPotRotation,
+					FVector::ZeroVector,
+					DisplayedPotScale));
+			PotVisual->SetRelativeLocation(FVector(
+				0.0f,
+				0.0f,
+				-AuthoredBounds.Min.Z));
+			DisplayedPlantBaseHeight =
+				AuthoredBounds.GetSize().Z * 0.82f;
 		}
 		else if (UStaticMesh* DefaultPotMesh = LoadObject<UStaticMesh>(
 			nullptr,
 			TEXT("/Engine/BasicShapes/Cylinder.Cylinder")))
 		{
 			PotVisual->SetStaticMesh(DefaultPotMesh);
-			PotVisual->SetRelativeLocation(FVector(0.0f, 0.0f, 76.0f));
+			PotVisual->SetRelativeLocation(FVector(
+				0.0f,
+				0.0f,
+				10.0f));
 			PotVisual->SetRelativeScale3D(FVector(0.25f, 0.25f, 0.2f));
+			DisplayedPlantBaseHeight = 17.0f;
 		}
 		PotVisual->SetVisibility(
 			bHasPlant && !bPlantTakenByVisitor);
+	}
+	float StemHeight = 80.0f;
+	FVector FoliageShape;
+	GetMatureDisplayedPlantShape(
+		DisplayedPlantItemKey, StemHeight, FoliageShape);
+	StemHeight *= DisplayedPlantHeightMultiplier;
+	if (StemVisual)
+	{
+		StemVisual->SetVisibility(
+			bHasPlant && !bPlantTakenByVisitor);
+		StemVisual->SetRelativeLocation(FVector(
+			0.0f,
+			0.0f,
+			DisplayedPlantBaseHeight + StemHeight * 0.5f));
+		StemVisual->SetRelativeScale3D(FVector(
+			0.035f, 0.035f, StemHeight / 100.0f));
+	}
+	if (PlantVisual)
+	{
+		PlantVisual->SetRelativeLocation(FVector(
+			0.0f,
+			0.0f,
+			DisplayedPlantBaseHeight + StemHeight));
+	}
+	if (OccupiedDisplayWidget && bHasPlant)
+	{
+		const float SlotHeight = SalePotSlot
+			? SalePotSlot->GetRelativeLocation().Z
+			: GetDisplaySurfaceHeight();
+		const float FoliageTop =
+			SlotHeight + DisplayedPlantBaseHeight + StemHeight +
+			50.0f * FoliageShape.Z * 0.32f;
+		OccupiedDisplayWidget->SetRelativeLocation(FVector(
+			0.0f,
+			0.0f,
+			FMath::Max(
+				OccupiedDisplayWidgetHeight,
+				FoliageTop + 28.0f)));
 	}
 	if (!StatusText)
 	{
 		return;
 	}
 
+	// The illustrated widget replaces the old multiline 3D text entirely.
+	StatusText->SetVisibility(false);
+	if (OccupiedDisplayWidget)
+	{
+		OccupiedDisplayWidget->SetVisibility(
+			bHasPlant && !bPlantTakenByVisitor &&
+			!ActorHasTag(TEXT("BotanicusPlacementPreview")));
+	}
 	if (!bHasPlant)
 	{
-		StatusText->SetVisibility(false);
 		return;
 	}
-	StatusText->SetVisibility(true);
 
 	const ABotanicusGameState* GameState =
 		GetWorld()
 			? GetWorld()->GetGameState<ABotanicusGameState>()
 			: nullptr;
-	const int32 TrendMatches =
-		GameState ? GameState->CountMatchingTrends(*Definition) : 0;
 	const int32 DisplayedPrice =
 		GameState
 			? GameState->GetTrendAdjustedSalePrice(*Definition)
 			: FMath::Max(0, Definition->SalePrice);
-	StatusText->SetText(
-		FText::FromString(
-			FString::Printf(
-				TEXT(
-					"PRESENTOIR DE VENTE\n%s\nQUALITE : %s\nTENDANCE : %d/3\nPRIX : %d CREDITS\n%s"),
-				*Definition->DisplayName.ToString().ToUpper(),
-				*SalesDisplayPlantQualityLabel(
-					Definition->PlantQualityTag),
-				TrendMatches,
-				DisplayedPrice,
-				bPlantTakenByVisitor
-					? TEXT("EMPORTE VERS LA CAISSE")
-					: bVisitorEnRoute
-					? TEXT("VISITEUR EN APPROCHE")
-					: TEXT("EN ATTENTE D'UN VISITEUR"))));
-	StatusText->SetTextRenderColor(FColor(245, 225, 160));
+	if (OccupiedDisplayWidget)
+	{
+		if (UBotanicusSalesDisplayOccupiedWidget* Widget =
+			Cast<UBotanicusSalesDisplayOccupiedWidget>(
+				OccupiedDisplayWidget->GetUserWidgetObject()))
+		{
+			FText PlantDisplayName = Definition->DisplayName;
+			FString BasePlantKey = DisplayedPlantItemKey.ToString();
+			if (BasePlantKey.RemoveFromEnd(TEXT("_Beautiful")) ||
+				BasePlantKey.RemoveFromEnd(TEXT("_Exceptional")))
+			{
+				const UGameInstance* GameInstance = GetGameInstance();
+				const UBotanicusItemCatalogSubsystem* ItemCatalog =
+					GameInstance
+						? GameInstance->GetSubsystem<
+							UBotanicusItemCatalogSubsystem>()
+						: nullptr;
+				if (const FBotanicusItemDefinition* BaseDefinition =
+					ItemCatalog
+						? ItemCatalog->FindItem(FName(*BasePlantKey))
+						: nullptr)
+				{
+					PlantDisplayName = BaseDefinition->DisplayName;
+				}
+			}
+			Widget->SetSaleData(
+				PlantDisplayName,
+				FText::FromString(SalesDisplayPlantQualityLabel(
+					Definition->PlantQualityTag)),
+				DisplayedPrice);
+		}
+	}
 }
 
 void ABotanicusSalesDisplayActor::RefreshLocalAction()

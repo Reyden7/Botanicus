@@ -109,6 +109,9 @@ private:
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UStaticMeshComponent> PlantVisual;
 
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UStaticMeshComponent> StemVisual;
+
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> PlantMaterial;
 

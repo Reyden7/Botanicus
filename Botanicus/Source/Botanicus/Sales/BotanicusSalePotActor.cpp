@@ -49,6 +49,39 @@ FString SalePotPlantQualityLabel(FName QualityTag)
 	return TEXT("STANDARD");
 }
 
+void GetMatureSalePlantShape(
+	FName PlantItemKey,
+	float& OutStemHeight,
+	FVector& OutFoliageShape)
+{
+	FString BaseKey = PlantItemKey.ToString();
+	BaseKey.RemoveFromEnd(TEXT("_Beautiful"));
+	BaseKey.RemoveFromEnd(TEXT("_Exceptional"));
+	float HeightMultiplier = 1.0f;
+	OutFoliageShape = FVector(1.0f, 1.0f, 0.7f);
+	if (BaseKey == TEXT("Harvest_Orchid"))
+	{
+		HeightMultiplier = 1.15f;
+		OutFoliageShape = FVector(0.7f, 0.7f, 1.3f);
+	}
+	else if (BaseKey == TEXT("Harvest_Monstera"))
+	{
+		HeightMultiplier = 0.9f;
+		OutFoliageShape = FVector(1.55f, 1.3f, 0.65f);
+	}
+	else if (BaseKey == TEXT("Harvest_Lavender"))
+	{
+		HeightMultiplier = 1.3f;
+		OutFoliageShape = FVector(0.62f, 0.62f, 1.5f);
+	}
+	else if (BaseKey == TEXT("Harvest_Violet"))
+	{
+		HeightMultiplier = 0.62f;
+		OutFoliageShape = FVector(1.35f, 1.35f, 0.58f);
+	}
+	OutStemHeight = 80.0f * HeightMultiplier;
+}
+
 float ReadSalePotBlueprintFloatSetting(
 	const UObject* Object,
 	const FName PropertyName,
@@ -128,6 +161,13 @@ ABotanicusSalePotActor::ABotanicusSalePotActor()
 	PlantVisual->SetRelativeLocation(FVector(0.0f, 0.0f, 58.0f));
 	PlantVisual->SetRelativeScale3D(FVector(0.25f, 0.25f, 0.38f));
 	PlantVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	StemVisual = CreateDefaultSubobject<UStaticMeshComponent>(
+		TEXT("Sale Pot Plant Stem"));
+	StemVisual->SetupAttachment(SceneRoot);
+	StemVisual->SetStaticMesh(
+		CylinderFinder.Succeeded() ? CylinderFinder.Object : nullptr);
+	StemVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
 	StatusText = CreateDefaultSubobject<UTextRenderComponent>(
 		TEXT("Sale Pot Status"));
@@ -570,21 +610,17 @@ void ABotanicusSalePotActor::RefreshVisuals()
 	if (PlantVisual)
 	{
 		PlantVisual->SetVisibility(IsReadyForSale());
-		FVector PlantScale(0.25f, 0.25f, 0.38f);
+		float StemHeight = 80.0f;
+		FVector FoliageShape;
+		GetMatureSalePlantShape(
+			PlantItemKey, StemHeight, FoliageShape);
+		const float PlantBaseHeight =
+			GetConfiguredSoilMaximumHeight();
+		PlantVisual->SetRelativeLocation(FVector(
+			0.0f, 0.0f, PlantBaseHeight + StemHeight));
+		const FVector PlantScale = FoliageShape * 0.32f;
 		if (Definition)
 		{
-			if (Definition->PlantTypeTag == TEXT("Flowering"))
-			{
-				PlantScale = FVector(0.22f, 0.22f, 0.48f);
-			}
-			else if (Definition->PlantTypeTag == TEXT("Foliage"))
-			{
-				PlantScale = FVector(0.38f, 0.34f, 0.30f);
-			}
-			else if (Definition->PlantColorTag == TEXT("Purple"))
-			{
-				PlantScale = FVector(0.20f, 0.20f, 0.50f);
-			}
 			if (!PlantMaterial)
 			{
 				PlantMaterial =
@@ -599,6 +635,22 @@ void ABotanicusSalePotActor::RefreshVisuals()
 			}
 		}
 		PlantVisual->SetRelativeScale3D(PlantScale);
+	}
+	if (StemVisual)
+	{
+		float StemHeight = 80.0f;
+		FVector FoliageShape;
+		GetMatureSalePlantShape(
+			PlantItemKey, StemHeight, FoliageShape);
+		const float PlantBaseHeight =
+			GetConfiguredSoilMaximumHeight();
+		StemVisual->SetVisibility(IsReadyForSale());
+		StemVisual->SetRelativeLocation(FVector(
+			0.0f,
+			0.0f,
+			PlantBaseHeight + StemHeight * 0.5f));
+		StemVisual->SetRelativeScale3D(FVector(
+			0.035f, 0.035f, StemHeight / 100.0f));
 	}
 	if (!StatusText)
 	{
