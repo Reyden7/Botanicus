@@ -364,6 +364,95 @@ bool UBotanicusQuickBarComponent::ConsumeSelectedItem(int32 Quantity)
 	return RemoveQuantity(SelectedSlotIndex, Quantity);
 }
 
+bool UBotanicusQuickBarComponent::HasSelectedWateringCan() const
+{
+	const FBotanicusQuickBarSlot Slot = GetSelectedSlot();
+	return !Slot.IsEmpty() && Slot.ItemKey == TEXT("WateringCan");
+}
+
+float UBotanicusQuickBarComponent::GetSelectedWateringCanWaterLevel() const
+{
+	if (!HasSelectedWateringCan())
+	{
+		return 0.0f;
+	}
+
+	const FBotanicusCarriedItemState& State =
+		Slots[SelectedSlotIndex].CarriedState;
+	// Old saves did not serialize the reservoir because the watering can used
+	// to be carried as a separate actor. Treat those instances as full.
+	return State.bHasWateringCanState
+		? FMath::Clamp(State.WateringCanWaterLevel, 0.0f, 1.0f)
+		: 1.0f;
+}
+
+bool UBotanicusQuickBarComponent::ConsumeSelectedWateringCanWater(
+	float Amount)
+{
+	AActor* OwnerActor = GetOwner();
+	if (!OwnerActor || !OwnerActor->HasAuthority() ||
+		Amount <= 0.0f || !HasSelectedWateringCan())
+	{
+		return false;
+	}
+
+	FBotanicusCarriedItemState& State =
+		Slots[SelectedSlotIndex].CarriedState;
+	const float PreviousLevel = State.bHasWateringCanState
+		? FMath::Clamp(State.WateringCanWaterLevel, 0.0f, 1.0f)
+		: 1.0f;
+	if (PreviousLevel <= KINDA_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	State.bHasWateringCanState = true;
+	State.WateringCanWaterLevel =
+		FMath::Clamp(PreviousLevel - Amount, 0.0f, 1.0f);
+	OnQuickBarChanged.Broadcast();
+	BroadcastSelection();
+	OwnerActor->ForceNetUpdate();
+	if (ABotanicusGameMode* GameMode =
+		GetWorld()->GetAuthGameMode<ABotanicusGameMode>())
+	{
+		GameMode->ScheduleInventoryAutosave();
+	}
+	return true;
+}
+
+bool UBotanicusQuickBarComponent::AddSelectedWateringCanWater(float Amount)
+{
+	AActor* OwnerActor = GetOwner();
+	if (!OwnerActor || !OwnerActor->HasAuthority() ||
+		Amount <= 0.0f || !HasSelectedWateringCan())
+	{
+		return false;
+	}
+
+	FBotanicusCarriedItemState& State =
+		Slots[SelectedSlotIndex].CarriedState;
+	const float PreviousLevel = State.bHasWateringCanState
+		? FMath::Clamp(State.WateringCanWaterLevel, 0.0f, 1.0f)
+		: 1.0f;
+	if (PreviousLevel >= 1.0f - KINDA_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	State.bHasWateringCanState = true;
+	State.WateringCanWaterLevel =
+		FMath::Clamp(PreviousLevel + Amount, 0.0f, 1.0f);
+	OnQuickBarChanged.Broadcast();
+	BroadcastSelection();
+	OwnerActor->ForceNetUpdate();
+	if (ABotanicusGameMode* GameMode =
+		GetWorld()->GetAuthGameMode<ABotanicusGameMode>())
+	{
+		GameMode->ScheduleInventoryAutosave();
+	}
+	return true;
+}
+
 int32 UBotanicusQuickBarComponent::GetTotalQuantity(FName ItemKey) const
 {
 	if (ItemKey.IsNone())

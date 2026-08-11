@@ -1080,11 +1080,28 @@ void ABotanicusPlayerController::PlayerTick(float DeltaTime)
 	UpdateDisplayedSalePotPickup(DeltaTime);
 	UpdateParcelMoveCharge(DeltaTime);
 	UpdateWateringCanRefill(DeltaTime);
+	UpdateGardenTrowelTransplantHold(DeltaTime);
+	if (bPlantPotActionHeld)
+	{
+		PlantPotActionHoldElapsed += DeltaTime;
+		if (InteractionTargetWidget)
+		{
+			InteractionTargetWidget->SetHoldProgress(
+				FMath::Clamp(PlantPotActionHoldElapsed, 0.0f, 1.0f));
+		}
+	}
 	UpdateLargeEquipmentPlacement(DeltaTime);
 	UpdateQuickBarItemPlacement(DeltaTime);
 	UpdateEquippedQuickBarItem();
 	UpdateThrowPowerWidget();
 	UpdateDeliveryParcelPlacement(DeltaTime);
+	if (InteractionTargetWidget && CarryProgressWidget &&
+		CarryProgressWidget->GetVisibility() ==
+			ESlateVisibility::HitTestInvisible)
+	{
+		InteractionTargetWidget->SetHoldProgress(
+			CarryProgressWidget->GetCarryProgress());
+	}
 }
 
 void ABotanicusPlayerController::SetupInputComponent()
@@ -1409,7 +1426,6 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		!bBuildingTopDownViewActive &&
 		(TryOpenNearbyWorkbenchUpgrade() ||
 		 TryUseNearbyComputer() ||
-		 TryHandleNearbyWateringCan() ||
 		 TryPlacePlantOnNearbySalesDisplay() ||
 		 TryBeginDisplayedSalePotPickup() ||
 		 TryHandleNearbyLargeEquipment() ||
@@ -1828,6 +1844,12 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 			return true;
 		}
 		if (Params.Event == IE_Released &&
+			bTrowelTransplantActionHeld)
+		{
+			CancelGardenTrowelTransplantHold();
+			return true;
+		}
+		if (Params.Event == IE_Released &&
 			bPlantPotActionHeld)
 		{
 			EndPlantPotAction();
@@ -2192,24 +2214,73 @@ void ABotanicusPlayerController::RefreshInteractionTargetName(
 	}
 	if (const ABotanicusPlantPotActor* PlantPot =
 		Cast<ABotanicusPlantPotActor>(TargetActor);
-		PlantPot && !PlantPot->GetPlantKey().IsNone())
+		PlantPot)
 	{
 		const ABotanicusCharacter* BotanicusCharacter =
 			Cast<ABotanicusCharacter>(GetPawn());
 		const UBotanicusQuickBarComponent* QuickBar = BotanicusCharacter
 			? BotanicusCharacter->GetQuickBarComponent()
 			: nullptr;
-		if (QuickBar && QuickBar->GetSelectedSlot().ItemKey.IsNone())
+		const FName SelectedItemKey = QuickBar
+			? QuickBar->GetSelectedSlot().ItemKey
+			: NAME_None;
+		const bool bHasPlant = !PlantPot->GetPlantKey().IsNone();
+		const UBotanicusPlantSubsystem* Plants = GetGameInstance()
+			? GetGameInstance()->GetSubsystem<UBotanicusPlantSubsystem>()
+			: nullptr;
+		const FBotanicusPlantDefinition* PlantDefinition = Plants
+			? Plants->FindPlant(PlantPot->GetPlantKey())
+			: nullptr;
+		const FText PlantName = PlantDefinition
+			? PlantDefinition->DisplayName
+			: FText::FromName(PlantPot->GetPlantKey());
+		if (SelectedItemKey == TEXT("GardenTrowel") && bHasPlant)
 		{
-			const UBotanicusPlantSubsystem* Plants = GetGameInstance()
-				? GetGameInstance()->GetSubsystem<UBotanicusPlantSubsystem>()
-				: nullptr;
-			const FBotanicusPlantDefinition* PlantDefinition = Plants
-				? Plants->FindPlant(PlantPot->GetPlantKey())
-				: nullptr;
+			const bool bMature = PlantPot->IsMature();
+			InteractionTargetWidget->SetLeftMousePrompt(
+				bMature
+					? NSLOCTEXT("BotanicusInteraction", "HarvestPlant", "RECOLTER LA PLANTE")
+					: NSLOCTEXT("BotanicusInteraction", "UnpotPlant", "MAINTENIR POUR DEPOTER LA PLANTE"),
+				PlantName,
+				!bMature);
+			if (bTrowelTransplantActionHeld &&
+				LocalTrowelTransplantTarget == PlantPot)
+			{
+				InteractionTargetWidget->SetHoldProgress(
+					GardenTrowelTransplantHoldElapsed /
+					FMath::Max(0.1f, GardenTrowelTransplantHoldDuration));
+			}
+			return;
+		}
+		if (SelectedItemKey == TEXT("GardenTrowel") &&
+			!bHasPlant && PlantPot->HasSoil())
+		{
+			InteractionTargetWidget->SetLeftMousePrompt(
+				NSLOCTEXT("BotanicusInteraction", "RemoveSoil", "MAINTENIR POUR RETIRER LE TERREAU"),
+				NSLOCTEXT("BotanicusInteraction", "GrowingPot", "Pot de culture"),
+				true);
+			return;
+		}
+		if (SelectedItemKey == TEXT("PottingSoil") && !PlantPot->HasSoil())
+		{
+			InteractionTargetWidget->SetLeftMousePrompt(
+				NSLOCTEXT("BotanicusInteraction", "FillSoil", "MAINTENIR POUR VERSER LE TERREAU"),
+				NSLOCTEXT("BotanicusInteraction", "GrowingPot", "Pot de culture"),
+				true);
+			return;
+		}
+		if (bHasPlant && QuickBar && QuickBar->HasSelectedWateringCan())
+		{
+			InteractionTargetWidget->SetLeftMousePrompt(
+				NSLOCTEXT("BotanicusInteraction", "WaterPlantHold", "MAINTENIR POUR ARROSER LA PLANTE"),
+				PlantName,
+				true);
+			return;
+		}
+		if (SelectedItemKey.IsNone() && bHasPlant)
+		{
 			InteractionTargetWidget->SetPlantInspectPrompt(
-				PlantDefinition ? PlantDefinition->DisplayName
-					: FText::FromName(PlantPot->GetPlantKey()));
+				PlantName);
 			return;
 		}
 	}
@@ -5670,6 +5741,15 @@ void ABotanicusPlayerController::ApplyCarriedItemState(
 				Slot.CarriedState.SalePlantItemKey);
 		}
 	}
+	else if (Slot.CarriedState.bHasWateringCanState)
+	{
+		if (ABotanicusWateringCanActor* WateringCan =
+			Cast<ABotanicusWateringCanActor>(Item))
+		{
+			WateringCan->RestoreWaterLevel(
+				Slot.CarriedState.WateringCanWaterLevel);
+		}
+	}
 }
 
 void ABotanicusPlayerController::HandleEquippedQuickBarChanged()
@@ -7425,11 +7505,11 @@ bool ABotanicusPlayerController::TryRefillHeldWateringCan()
 	}
 	const ABotanicusCharacter* BotanicusCharacter =
 		Cast<ABotanicusCharacter>(GetPawn());
-	const ABotanicusWateringCanActor* HeldCan =
-		FindCarriedWateringCan(
-			GetWorld(),
-			BotanicusCharacter);
-	if (!IsValid(HeldCan))
+	const UBotanicusQuickBarComponent* QuickBar =
+		BotanicusCharacter
+			? BotanicusCharacter->GetQuickBarComponent()
+			: nullptr;
+	if (!QuickBar || !QuickBar->HasSelectedWateringCan())
 	{
 		return false;
 	}
@@ -7474,12 +7554,15 @@ void ABotanicusPlayerController::UpdateWateringCanRefill(
 	{
 		const ABotanicusCharacter* BotanicusCharacter =
 			Cast<ABotanicusCharacter>(GetPawn());
-		const ABotanicusWateringCanActor* HeldCan =
-			FindCarriedWateringCan(
-				GetWorld(),
-				BotanicusCharacter);
+		const UBotanicusQuickBarComponent* QuickBar =
+			BotanicusCharacter
+				? BotanicusCharacter->GetQuickBarComponent()
+				: nullptr;
 		if (!IsValid(LocalActiveWaterReserve) ||
-			!IsValid(HeldCan) ||
+			!QuickBar ||
+			!QuickBar->HasSelectedWateringCan() ||
+			QuickBar->GetSelectedWateringCanWaterLevel() >=
+				1.0f - KINDA_SMALL_NUMBER ||
 			(!IsLookingAtWorldItem(
 				 LocalActiveWaterReserve,
 				 400.0f) &&
@@ -7587,8 +7670,6 @@ bool ABotanicusPlayerController::TryMoveNearbyPlaceableItem()
 		if (IsValid(HighlightedItem) &&
 			!HighlightedItem->ActorHasTag(
 				TEXT("BotanicusPlacementPreview")) &&
-			!Cast<ABotanicusWateringCanActor>(
-				HighlightedItem) &&
 			!IsFurnitureActor(HighlightedItem) &&
 			FVector::DistSquared(
 				GetPawn()->GetActorLocation(),
@@ -7610,10 +7691,6 @@ bool ABotanicusPlayerController::TryMoveNearbyPlaceableItem()
 			break;
 		}
 		if (ItemIt->ActorHasTag(TEXT("BotanicusPlacementPreview")))
-		{
-			continue;
-		}
-		if (Cast<ABotanicusWateringCanActor>(*ItemIt))
 		{
 			continue;
 		}
@@ -7857,7 +7934,8 @@ void ABotanicusPlayerController::
 		PendingCollectedItemSlotIndex = INDEX_NONE;
 		PendingCollectedItemKey = NAME_None;
 		CollectedItemInspectionRetryCount = 0;
-		BeginQuickBarItemPlacement();
+		// Picking an item only equips its newly selected hotbar slot. Ground
+		// placement is an explicit second action started by pressing A.
 		return;
 	}
 
@@ -7874,7 +7952,7 @@ void ABotanicusPlayerController::
 		CollectedItemInspectionRetryCount = 0;
 		ClientMessage(
 			TEXT(
-				"L'objet est dans la hotbar, mais son inspection automatique n'a pas pu demarrer."));
+				"L'objet est dans la hotbar, mais son slot n'a pas pu etre selectionne automatiquement."));
 	}
 }
 
@@ -8053,6 +8131,7 @@ bool ABotanicusPlayerController::TryBeginNearbyPlantPotAction()
 	}
 
 	LocalActivePlantPot = NearestPot;
+	PlantPotActionHoldElapsed = 0.0f;
 	bPlantPotActionHeld = true;
 	ServerBeginPlantPotAction(NearestPot);
 	return true;
@@ -8267,8 +8346,74 @@ bool ABotanicusPlayerController::TryUseGardenTrowelForTransplant()
 		return false;
 	}
 
+	if (!bAlreadyCarryingPlant)
+	{
+		if (ABotanicusPlantPotActor* PlantPot =
+				Cast<ABotanicusPlantPotActor>(TargetPot))
+		{
+			// A mature plant is harvested by the pot's primary action. Only an
+			// immature plant enters the held unpot/repot workflow.
+			if (PlantPot->IsMature())
+			{
+				return false;
+			}
+			LocalTrowelTransplantTarget = PlantPot;
+			GardenTrowelTransplantHoldElapsed = 0.0f;
+			bTrowelTransplantActionHeld = true;
+			return true;
+		}
+	}
+
 	ServerUseGardenTrowelForTransplant(TargetPot);
 	return true;
+}
+
+void ABotanicusPlayerController::UpdateGardenTrowelTransplantHold(
+	float DeltaTime)
+{
+	if (!bTrowelTransplantActionHeld)
+	{
+		return;
+	}
+	ABotanicusPlantPotActor* Target = LocalTrowelTransplantTarget;
+	const ABotanicusCharacter* BotanicusCharacter =
+		Cast<ABotanicusCharacter>(GetPawn());
+	const UBotanicusQuickBarComponent* QuickBar = BotanicusCharacter
+		? BotanicusCharacter->GetQuickBarComponent()
+		: nullptr;
+	if (!IsValid(Target) || !QuickBar ||
+		QuickBar->GetSelectedSlot().ItemKey != TEXT("GardenTrowel") ||
+		Target->IsMature() || !IsLookingAtWorldItem(Target, 450.0f))
+	{
+		CancelGardenTrowelTransplantHold();
+		return;
+	}
+
+	GardenTrowelTransplantHoldElapsed += DeltaTime;
+	if (InteractionTargetWidget)
+	{
+		InteractionTargetWidget->SetHoldProgress(
+			GardenTrowelTransplantHoldElapsed /
+			FMath::Max(0.1f, GardenTrowelTransplantHoldDuration));
+	}
+	if (GardenTrowelTransplantHoldElapsed >=
+		GardenTrowelTransplantHoldDuration)
+	{
+		ABotanicusPlantPotActor* CompletedTarget = Target;
+		CancelGardenTrowelTransplantHold();
+		ServerUseGardenTrowelForTransplant(CompletedTarget);
+	}
+}
+
+void ABotanicusPlayerController::CancelGardenTrowelTransplantHold()
+{
+	bTrowelTransplantActionHeld = false;
+	GardenTrowelTransplantHoldElapsed = 0.0f;
+	LocalTrowelTransplantTarget = nullptr;
+	if (InteractionTargetWidget)
+	{
+		InteractionTargetWidget->SetHoldProgress(0.0f);
+	}
 }
 
 void ABotanicusPlayerController::EndPlantPotAction()
@@ -8283,7 +8428,12 @@ void ABotanicusPlayerController::EndPlantPotAction()
 	}
 	LocalActivePlantPot = nullptr;
 	LocalActiveSalePot = nullptr;
+	PlantPotActionHoldElapsed = 0.0f;
 	bPlantPotActionHeld = false;
+	if (InteractionTargetWidget)
+	{
+		InteractionTargetWidget->SetHoldProgress(0.0f);
+	}
 }
 
 bool ABotanicusPlayerController::TryBeginNearbySalePotAction()
@@ -11459,7 +11609,6 @@ void ABotanicusPlayerController::
 			: 450.0f;
 	if (!IsValid(WorldItem) ||
 		WorldItem->ActorHasTag(TEXT("BotanicusPlacementPreview")) ||
-		Cast<ABotanicusWateringCanActor>(WorldItem) ||
 		!IsLookingAtWorldItem(
 			WorldItem,
 			ServerInteractionDistance))
@@ -11569,6 +11718,13 @@ void ABotanicusPlayerController::
 			SalePot->GetSoilItemKey();
 		CarriedState.SalePlantItemKey =
 			SalePot->GetPlantItemKey();
+	}
+	else if (const ABotanicusWateringCanActor* WateringCan =
+		Cast<ABotanicusWateringCanActor>(WorldItem))
+	{
+		CarriedState.bHasWateringCanState = true;
+		CarriedState.WateringCanWaterLevel =
+			WateringCan->GetWaterLevel();
 	}
 
 	if (!QuickBar->AddItem(
@@ -11960,15 +12116,16 @@ void ABotanicusPlayerController::
 {
 	ABotanicusCharacter* BotanicusCharacter =
 		Cast<ABotanicusCharacter>(GetPawn());
-	ABotanicusWateringCanActor* HeldCan =
-		FindCarriedWateringCan(
-			GetWorld(),
-			BotanicusCharacter);
-	if (!BotanicusCharacter || !IsValid(HeldCan))
+	UBotanicusQuickBarComponent* QuickBar =
+		BotanicusCharacter
+			? BotanicusCharacter->GetQuickBarComponent()
+			: nullptr;
+	if (!BotanicusCharacter || !QuickBar ||
+		!QuickBar->HasSelectedWateringCan())
 	{
 		ClientMessage(
 			TEXT(
-				"Remplissage impossible : prenez d'abord l'arrosoir en main."));
+				"Remplissage impossible : selectionnez l'arrosoir dans la hotbar."));
 		return;
 	}
 	if (!CanCharacterUseWaterReserve(
@@ -11981,7 +12138,8 @@ void ABotanicusPlayerController::
 				"Remplissage impossible : regardez la reserve et rapprochez-vous."));
 		return;
 	}
-	if (HeldCan->IsFull())
+	if (QuickBar->GetSelectedWateringCanWaterLevel() >=
+		1.0f - KINDA_SMALL_NUMBER)
 	{
 		ClientMessage(TEXT("L'arrosoir est deja plein."));
 		return;
@@ -12005,11 +12163,13 @@ void ABotanicusPlayerController::
 				0.15f);
 	LastServerWaterRefillPulseTime = CurrentServerTime;
 	constexpr float WaterRefillPerSecond = 0.40f;
-	if (HeldCan->AddWater(
+	if (WaterReserve->TryRefill(
+			BotanicusCharacter,
 			WaterRefillPerSecond * RefillDeltaTime))
 	{
 		bServerWaterRefillChanged = true;
-		if (HeldCan->IsFull())
+		if (QuickBar->GetSelectedWateringCanWaterLevel() >=
+			1.0f - KINDA_SMALL_NUMBER)
 		{
 			ClientMessage(TEXT("Arrosoir rempli : eau 100%."));
 		}
@@ -12182,6 +12342,11 @@ ServerUseGardenTrowelForTransplant_Implementation(AActor* TargetPot)
 	if (ABotanicusPlantPotActor* PlantPot =
 			Cast<ABotanicusPlantPotActor>(TargetPot))
 	{
+		if (PlantPot->IsMature())
+		{
+			PlantPot->BeginPrimaryUse(BotanicusCharacter);
+			return;
+		}
 		const FName PlantKey = PlantPot->GetPlantKey();
 		const FBotanicusPlantDefinition* Definition =
 			Plants->FindPlant(PlantKey);

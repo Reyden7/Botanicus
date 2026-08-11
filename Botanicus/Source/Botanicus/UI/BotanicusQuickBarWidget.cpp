@@ -23,7 +23,6 @@
 #include "Engine/GameInstance.h"
 #include "Input/Reply.h"
 #include "ItemDataAsset.h"
-#include "Growing/BotanicusWateringCanActor.h"
 #include "Styling/CoreStyle.h"
 #include "UI/BotanicusHudStyle.h"
 
@@ -465,11 +464,12 @@ void UBotanicusQuickBarWidget::RefreshWateringCanStatus()
 
 	const ABotanicusCharacter* BotanicusCharacter =
 		Cast<ABotanicusCharacter>(GetOwningPlayerPawn());
-	const ABotanicusWateringCanActor* WateringCan =
+	const UBotanicusQuickBarComponent* CharacterQuickBar =
 		BotanicusCharacter
-			? BotanicusCharacter->GetHeldWateringCan()
+			? BotanicusCharacter->GetQuickBarComponent()
 			: nullptr;
-	if (!IsValid(WateringCan))
+	if (!CharacterQuickBar ||
+		!CharacterQuickBar->HasSelectedWateringCan())
 	{
 		WateringCanStatus->SetVisibility(
 			ESlateVisibility::Collapsed);
@@ -477,7 +477,7 @@ void UBotanicusQuickBarWidget::RefreshWateringCanStatus()
 	}
 
 	const float WaterLevel =
-		FMath::Clamp(WateringCan->GetWaterLevel(), 0.0f, 1.0f);
+		CharacterQuickBar->GetSelectedWateringCanWaterLevel();
 	WateringCanStatus->SetVisibility(
 		ESlateVisibility::HitTestInvisible);
 	WateringCanProgress->SetPercent(WaterLevel);
@@ -571,6 +571,10 @@ void UBotanicusQuickBarWidget::Refresh()
 				!Definition->DisplayName.IsEmpty())
 			{
 				DisplayName = Definition->DisplayName;
+			}
+			if (Definition)
+			{
+				IconTexture = Definition->Icon.LoadSynchronous();
 			}
 		}
 

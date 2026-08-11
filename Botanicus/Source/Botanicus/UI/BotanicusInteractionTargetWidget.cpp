@@ -11,6 +11,7 @@
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "Engine/Texture2D.h"
+#include "Rendering/DrawElements.h"
 #include "Styling/CoreStyle.h"
 #include "UI/BotanicusHudStyle.h"
 #include "UI/BotanicusHudLayoutWidget.h"
@@ -103,6 +104,8 @@ void UBotanicusInteractionTargetWidget::SetTargetName(const FText& TargetName)
 		return;
 	}
 	TargetNameText->SetText(TargetName);
+	bShowHoldProgress = false;
+	HoldProgress = 0.0f;
 	if (ActionLabel)
 	{
 		ActionLabel->SetText(NSLOCTEXT(
@@ -127,6 +130,8 @@ void UBotanicusInteractionTargetWidget::SetPlantInspectPrompt(
 		return;
 	}
 	TargetNameText->SetText(PlantName);
+	bShowHoldProgress = false;
+	HoldProgress = 0.0f;
 	if (ActionLabel)
 	{
 		ActionLabel->SetText(NSLOCTEXT(
@@ -142,6 +147,44 @@ void UBotanicusInteractionTargetWidget::SetPlantInspectPrompt(
 	SetVisibility(ESlateVisibility::HitTestInvisible);
 }
 
+void UBotanicusInteractionTargetWidget::SetLeftMousePrompt(
+	const FText& InActionText,
+	const FText& InTargetName,
+	bool bRequiresHold)
+{
+	if (!TargetNameText || InActionText.IsEmpty())
+	{
+		ClearTarget();
+		return;
+	}
+	TargetNameText->SetText(InTargetName);
+	if (ActionLabel)
+	{
+		ActionLabel->SetText(InActionText);
+	}
+	if (KeyIcon)
+	{
+		KeyIcon->SetBrushFromTexture(LoadObject<UTexture2D>(nullptr,
+			TEXT("/Game/PCKeyboardMouseIconPack/Textures/T_MouseLeftClick.T_MouseLeftClick")),
+			true);
+	}
+	bShowHoldProgress = bRequiresHold;
+	if (!bShowHoldProgress)
+	{
+		HoldProgress = 0.0f;
+	}
+	UpdateAdaptiveHeight();
+	SetVisibility(ESlateVisibility::HitTestInvisible);
+	InvalidateLayoutAndVolatility();
+}
+
+void UBotanicusInteractionTargetWidget::SetHoldProgress(float InProgress)
+{
+	HoldProgress = FMath::Clamp(InProgress, 0.0f, 1.0f);
+	bShowHoldProgress = true;
+	InvalidateLayoutAndVolatility();
+}
+
 void UBotanicusInteractionTargetWidget::ClearTarget()
 {
 	if (TargetNameText)
@@ -149,7 +192,65 @@ void UBotanicusInteractionTargetWidget::ClearTarget()
 		TargetNameText->SetText(FText::GetEmpty());
 	}
 	ApplyPanelHeight(108.0f);
+	HoldProgress = 0.0f;
+	bShowHoldProgress = false;
 	SetVisibility(ESlateVisibility::Collapsed);
+}
+
+int32 UBotanicusInteractionTargetWidget::NativePaint(
+	const FPaintArgs& Args,
+	const FGeometry& AllottedGeometry,
+	const FSlateRect& MyCullingRect,
+	FSlateWindowElementList& OutDrawElements,
+	int32 LayerId,
+	const FWidgetStyle& InWidgetStyle,
+	bool bParentEnabled) const
+{
+	const int32 Result = Super::NativePaint(
+		Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId,
+		InWidgetStyle, bParentEnabled);
+	if (!bShowHoldProgress || !KeyIcon)
+	{
+		return Result;
+	}
+
+	const FGeometry KeyGeometry = KeyIcon->GetCachedGeometry();
+	const FVector2D Center = AllottedGeometry.AbsoluteToLocal(
+		KeyGeometry.GetAbsolutePosition() + KeyGeometry.GetAbsoluteSize() * 0.5f);
+	const float Radius = FMath::Max(
+		25.0f, FMath::Max(KeyGeometry.GetLocalSize().X,
+			KeyGeometry.GetLocalSize().Y) * 0.5f + 5.0f);
+	constexpr int32 SegmentCount = 40;
+	auto BuildArc = [Center, Radius](float Fraction, TArray<FVector2D>& Points)
+	{
+		const int32 VisibleSegments = FMath::Clamp(
+			FMath::CeilToInt(SegmentCount * Fraction), 1, SegmentCount);
+		Points.Reserve(VisibleSegments + 1);
+		for (int32 Index = 0; Index <= VisibleSegments; ++Index)
+		{
+			const float Angle = -UE_HALF_PI + UE_TWO_PI *
+				(static_cast<float>(Index) / SegmentCount);
+			Points.Add(Center + FVector2D(FMath::Cos(Angle),
+				FMath::Sin(Angle)) * Radius);
+		}
+	};
+
+	TArray<FVector2D> BackgroundPoints;
+	BuildArc(1.0f, BackgroundPoints);
+	FSlateDrawElement::MakeLines(
+		OutDrawElements, Result + 1, AllottedGeometry.ToPaintGeometry(),
+		BackgroundPoints, ESlateDrawEffect::None,
+		FLinearColor(0.04f, 0.05f, 0.03f, 0.85f), true, 6.0f);
+	if (HoldProgress > KINDA_SMALL_NUMBER)
+	{
+		TArray<FVector2D> ProgressPoints;
+		BuildArc(HoldProgress, ProgressPoints);
+		FSlateDrawElement::MakeLines(
+			OutDrawElements, Result + 2, AllottedGeometry.ToPaintGeometry(),
+			ProgressPoints, ESlateDrawEffect::None,
+			FLinearColor(0.62f, 0.95f, 0.20f, 1.0f), true, 6.0f);
+	}
+	return Result + 2;
 }
 
 void UBotanicusInteractionTargetWidget::UpdateAdaptiveHeight()

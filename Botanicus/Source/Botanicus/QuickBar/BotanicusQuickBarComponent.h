@@ -34,6 +34,13 @@ struct BOTANICUS_API FBotanicusCarriedItemState
 	UPROPERTY()
 	int32 WateringCount = 0;
 
+	/** Preserves the reservoir of a watering can stored in the hotbar. */
+	UPROPERTY()
+	bool bHasWateringCanState = false;
+
+	UPROPERTY()
+	float WateringCanWaterLevel = 1.0f;
+
 	UPROPERTY()
 	bool bHasSalePotState = false;
 
@@ -75,6 +82,10 @@ struct BOTANICUS_API FBotanicusCarriedItemState
 				Other.GrowthProgress) &&
 			FMath::IsNearlyEqual(CareScore, Other.CareScore) &&
 			WateringCount == Other.WateringCount &&
+			bHasWateringCanState == Other.bHasWateringCanState &&
+			FMath::IsNearlyEqual(
+				WateringCanWaterLevel,
+				Other.WateringCanWaterLevel) &&
 			bHasSalePotState == Other.bHasSalePotState &&
 			SaleSoilItemKey == Other.SaleSoilItemKey &&
 			SalePlantItemKey == Other.SalePlantItemKey &&
@@ -212,6 +223,18 @@ public:
 	/** Convenience operation used by seed packets and consumable tools. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Botanicus|Inventory")
 	bool ConsumeSelectedItem(int32 Quantity = 1);
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Quick Bar")
+	bool HasSelectedWateringCan() const;
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Quick Bar")
+	float GetSelectedWateringCanWaterLevel() const;
+
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Botanicus|Quick Bar")
+	bool ConsumeSelectedWateringCanWater(float Amount);
+
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Botanicus|Quick Bar")
+	bool AddSelectedWateringCanWater(float Amount);
 
 	UFUNCTION(BlueprintPure, Category="Botanicus|Inventory")
 	int32 GetTotalQuantity(FName ItemKey) const;

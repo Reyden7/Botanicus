@@ -1592,57 +1592,6 @@ void ABotanicusGameMode::RestorePlayerInventory(AController* Controller)
 			ETeleportType::TeleportPhysics);
 	}
 
-	// Version 7 and earlier stored the watering can as a hotbar item.
-	// Convert it once into its version-8 physical world representation.
-	if (CurrentSaveGame->SaveVersion < 8 && GetWorld())
-	{
-		int32 LegacyWateringCanCount = 0;
-		for (FBotanicusQuickBarSlot& SavedSlot : SavedInventory->Slots)
-		{
-			if (SavedSlot.ItemKey == TEXT("WateringCan") &&
-				SavedSlot.Quantity > 0)
-			{
-				LegacyWateringCanCount += SavedSlot.Quantity;
-				SavedSlot = FBotanicusQuickBarSlot();
-			}
-		}
-
-		for (int32 CanIndex = 0;
-			 CanIndex < LegacyWateringCanCount;
-			 ++CanIndex)
-		{
-			FActorSpawnParameters SpawnParameters;
-			SpawnParameters.SpawnCollisionHandlingOverride =
-				ESpawnActorCollisionHandlingMethod::
-					AdjustIfPossibleButAlwaysSpawn;
-			const FVector SpawnLocation =
-				Character->GetActorLocation() +
-				Character->GetActorForwardVector() * 110.0f +
-				Character->GetActorRightVector() *
-					(static_cast<float>(CanIndex) * 45.0f) +
-				FVector(0.0f, 0.0f, 25.0f);
-			if (ABotanicusWateringCanActor* WateringCan =
-				GetWorld()->SpawnActor<ABotanicusWateringCanActor>(
-					SpawnLocation,
-					FRotator::ZeroRotator,
-					SpawnParameters))
-			{
-				WateringCan->InitializePlacedItem(
-					TEXT("WateringCan"),
-					1);
-			}
-		}
-		if (LegacyWateringCanCount > 0)
-		{
-			UE_LOG(
-				LogBotanicus,
-				Display,
-				TEXT(
-					"Migrated %d legacy hotbar watering can(s) into physical world tools."),
-				LegacyWateringCanCount);
-		}
-	}
-
 	QuickBar->ApplySavedState(
 		SavedInventory->Slots,
 		SavedInventory->SelectedSlotIndex);

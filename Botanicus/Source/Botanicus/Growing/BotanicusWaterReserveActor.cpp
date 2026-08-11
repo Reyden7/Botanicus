@@ -6,7 +6,7 @@
 #include "Components/TextRenderComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
-#include "Growing/BotanicusWateringCanActor.h"
+#include "QuickBar/BotanicusQuickBarComponent.h"
 
 ABotanicusWaterReserveActor::ABotanicusWaterReserveActor()
 {
@@ -59,11 +59,13 @@ bool ABotanicusWaterReserveActor::TryRefill(
 	{
 		return false;
 	}
-	ABotanicusWateringCanActor* WateringCan =
-		Character->GetHeldWateringCan();
-	if (!IsValid(WateringCan) || WateringCan->IsFull())
+	UBotanicusQuickBarComponent* QuickBar =
+		Character->GetQuickBarComponent();
+	if (!QuickBar || !QuickBar->HasSelectedWateringCan() ||
+		QuickBar->GetSelectedWateringCanWaterLevel() >=
+			1.0f - KINDA_SMALL_NUMBER)
 	{
 		return false;
 	}
-	return WateringCan->AddWater(WaterAmount);
+	return QuickBar->AddSelectedWateringCanWater(WaterAmount);
 }

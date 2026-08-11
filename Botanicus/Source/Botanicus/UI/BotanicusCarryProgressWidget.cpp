@@ -35,7 +35,10 @@ int32 UBotanicusCarryProgressWidget::NativePaint(
 	const FWidgetStyle& InWidgetStyle,
 	bool bParentEnabled) const
 {
-	const int32 Result = Super::NativePaint(
+	// The progress is rendered around the key inside WBP_HUD_Interaction.
+	// This legacy widget remains as the shared progress source for existing
+	// held actions, but no longer paints a second indicator near the reticle.
+	return Super::NativePaint(
 		Args,
 		AllottedGeometry,
 		MyCullingRect,
@@ -43,65 +46,4 @@ int32 UBotanicusCarryProgressWidget::NativePaint(
 		LayerId,
 		InWidgetStyle,
 		bParentEnabled);
-
-	const FVector2D Size = AllottedGeometry.GetLocalSize();
-	const FVector2D Center = Size * 0.5f;
-	const float Radius = FMath::Max(
-		4.0f,
-		FMath::Min(Size.X, Size.Y) * 0.5f - 6.0f);
-	constexpr int32 SegmentCount = 40;
-
-	auto BuildArc = [
-		Center,
-		Radius](
-			float Fraction,
-			TArray<FVector2D>& OutPoints)
-		{
-			const int32 VisibleSegments = FMath::Clamp(
-				FMath::CeilToInt(SegmentCount * Fraction),
-				1,
-				SegmentCount);
-			OutPoints.Reserve(VisibleSegments + 1);
-			for (int32 Index = 0; Index <= VisibleSegments; ++Index)
-			{
-				const float Angle =
-					-UE_HALF_PI +
-					UE_TWO_PI *
-						(static_cast<float>(Index) /
-						 static_cast<float>(SegmentCount));
-				OutPoints.Add(
-					Center +
-					FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) *
-						Radius);
-			}
-		};
-
-	TArray<FVector2D> BackgroundPoints;
-	BuildArc(1.0f, BackgroundPoints);
-	FSlateDrawElement::MakeLines(
-		OutDrawElements,
-		Result + 1,
-		AllottedGeometry.ToPaintGeometry(),
-		BackgroundPoints,
-		ESlateDrawEffect::None,
-		FLinearColor(0.05f, 0.05f, 0.05f, 0.75f),
-		true,
-		7.0f);
-
-	if (CarryProgress > KINDA_SMALL_NUMBER)
-	{
-		TArray<FVector2D> ProgressPoints;
-		BuildArc(CarryProgress, ProgressPoints);
-		FSlateDrawElement::MakeLines(
-			OutDrawElements,
-			Result + 2,
-			AllottedGeometry.ToPaintGeometry(),
-			ProgressPoints,
-			ESlateDrawEffect::None,
-			FLinearColor(1.0f, 0.72f, 0.05f, 1.0f),
-			true,
-			7.0f);
-	}
-
-	return Result + 2;
 }

@@ -167,9 +167,9 @@ private:
 	TObjectPtr<UWidgetComponent> PlantInspectionWidget;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Botanicus|Plant UI",
-		meta=(DisplayName="Hauteur UI croissance", Units="cm",
+		meta=(DisplayName="Hauteur minimale UI croissance", Units="cm",
 			ClampMin="0.0", AllowPrivateAccess="true"))
-	float PlantGrowthWidgetHeight = 145.0f;
+	float PlantGrowthWidgetHeight = 115.0f;
 
 	/** Empty space kept between the highest leaf and the bottom of the UI. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Botanicus|Plant UI",
@@ -188,9 +188,19 @@ private:
 	float PlantGrowthWidgetBrightness = 1.5f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Botanicus|Plant UI",
-		meta=(DisplayName="Distance panneau inspection", Units="cm",
-			ClampMin="20.0", ClampMax="300.0", AllowPrivateAccess="true"))
+		meta=(DisplayName="Distance panneau devant le pot", Units="cm",
+			ClampMin="0.0", ClampMax="150.0", AllowPrivateAccess="true"))
 	float PlantInspectionWidgetSideOffset = 55.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Botanicus|Plant UI",
+		meta=(DisplayName="Decalage horizontal panneau inspection", Units="cm",
+			ClampMin="-150.0", ClampMax="150.0", AllowPrivateAccess="true"))
+	float PlantInspectionWidgetHorizontalOffset = 18.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Botanicus|Plant UI",
+		meta=(DisplayName="Hauteur panneau inspection", Units="cm",
+			ClampMin="0.0", ClampMax="150.0", AllowPrivateAccess="true"))
+	float PlantInspectionWidgetHeight = 28.0f;
 
 	UPROPERTY(ReplicatedUsing=OnRep_GrowingState)
 	bool bHasSoil = false;

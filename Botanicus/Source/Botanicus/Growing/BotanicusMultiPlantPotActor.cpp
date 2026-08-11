@@ -12,7 +12,6 @@
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "Growing/BotanicusPlantSubsystem.h"
-#include "Growing/BotanicusWateringCanActor.h"
 #include "Net/UnrealNetwork.h"
 #include "QuickBar/BotanicusQuickBarComponent.h"
 #include "UObject/ConstructorHelpers.h"
@@ -370,10 +369,10 @@ void ABotanicusMultiPlantPotActor::BeginPrimaryUse(
 		ActiveProgress = 0.0f;
 		return;
 	}
-	if (ABotanicusWateringCanActor* WateringCan =
-		Character->GetHeldWateringCan())
+	if (QuickBar->HasSelectedWateringCan())
 	{
-		if (!WateringCan->HasWater())
+		if (QuickBar->GetSelectedWateringCanWaterLevel() <=
+			KINDA_SMALL_NUMBER)
 		{
 			SendMessage(Interactor, TEXT("L'arrosoir est vide."));
 			return;
@@ -477,9 +476,11 @@ bool ABotanicusMultiPlantPotActor::UpdateActiveUse(
 
 	if (ActiveUseMode == EUseMode::Water)
 	{
-		ABotanicusWateringCanActor* WateringCan =
-			Character->GetHeldWateringCan();
-		if (!IsValid(WateringCan) || !WateringCan->HasWater())
+		UBotanicusQuickBarComponent* QuickBar =
+			Character ? Character->GetQuickBarComponent() : nullptr;
+		if (!QuickBar || !QuickBar->HasSelectedWateringCan() ||
+			QuickBar->GetSelectedWateringCanWaterLevel() <=
+				KINDA_SMALL_NUMBER)
 		{
 			EndPrimaryUse(Character);
 			return true;
@@ -508,7 +509,7 @@ bool ABotanicusMultiPlantPotActor::UpdateActiveUse(
 		if (WaterActuallyAdded > KINDA_SMALL_NUMBER &&
 			RequestedWater > KINDA_SMALL_NUMBER)
 		{
-			WateringCan->ConsumeWater(
+			QuickBar->ConsumeSelectedWateringCanWater(
 				0.12f * DeltaSeconds *
 					(WaterActuallyAdded / RequestedWater));
 		}

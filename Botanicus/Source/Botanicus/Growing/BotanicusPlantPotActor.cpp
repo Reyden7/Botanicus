@@ -18,7 +18,6 @@
 #include "GameFramework/PlayerController.h"
 #include "Growing/BotanicusPlantSubsystem.h"
 #include "Growing/BotanicusMultiPlantPotActor.h"
-#include "Growing/BotanicusWateringCanActor.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
 #include "QuickBar/BotanicusQuickBarComponent.h"
@@ -165,7 +164,7 @@ ABotanicusPlantPotActor::ABotanicusPlantPotActor()
 	PlantInspectionWidget->SetupAttachment(SceneRoot);
 	PlantInspectionWidget->SetWidgetSpace(EWidgetSpace::World);
 	PlantInspectionWidget->SetDrawSize(FVector2D(420.0f, 260.0f));
-	PlantInspectionWidget->SetPivot(FVector2D(0.0f, 0.5f));
+	PlantInspectionWidget->SetPivot(FVector2D(0.5f, 0.5f));
 	PlantInspectionWidget->SetRelativeScale3D(FVector(0.20f));
 	PlantInspectionWidget->SetTintColorAndOpacity(FLinearColor(1.5f, 1.5f, 1.5f, 1.0f));
 	PlantInspectionWidget->SetTwoSided(true);
@@ -298,16 +297,30 @@ void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 					(CameraLocation -
 					 PlantGrowthWidget->GetComponentLocation()).Rotation());
 			}
-			if (PlantInspectionWidget && PlantGrowthWidget)
+			if (PlantInspectionWidget)
 			{
-				const FVector CameraRight = CameraManager->GetCameraRotation().
+				FVector TowardCamera = CameraLocation - GetActorLocation();
+				TowardCamera.Z = 0.0f;
+				TowardCamera = TowardCamera.GetSafeNormal();
+				if (TowardCamera.IsNearlyZero())
+				{
+					TowardCamera = GetActorForwardVector();
+				}
+				FVector CameraRight = CameraManager->GetCameraRotation().
 					RotateVector(FVector::RightVector);
+				CameraRight.Z = 0.0f;
+				CameraRight = CameraRight.GetSafeNormal();
 				PlantInspectionWidget->SetWorldLocation(
-					PlantGrowthWidget->GetComponentLocation() +
-					CameraRight * PlantInspectionWidgetSideOffset);
-				PlantInspectionWidget->SetWorldRotation(
+					GetActorLocation() +
+					FVector::UpVector * PlantInspectionWidgetHeight +
+					TowardCamera * PlantInspectionWidgetSideOffset +
+					CameraRight * PlantInspectionWidgetHorizontalOffset);
+				FRotator InspectionRotation =
 					(CameraLocation -
-					 PlantInspectionWidget->GetComponentLocation()).Rotation());
+					 PlantInspectionWidget->GetComponentLocation()).Rotation();
+				InspectionRotation.Pitch = 0.0f;
+				InspectionRotation.Roll = 0.0f;
+				PlantInspectionWidget->SetWorldRotation(InspectionRotation);
 			}
 		}
 		if (PlantGrowthWidget)
@@ -496,8 +509,10 @@ ABotanicusPlantPotActor::GetInteractionPrompt_Implementation(
 	{
 		const ABotanicusCharacter* Character =
 			Cast<ABotanicusCharacter>(Interactor);
+		const UBotanicusQuickBarComponent* QuickBar =
+			Character ? Character->GetQuickBarComponent() : nullptr;
 		Prompt.ActionText =
-			Character && IsValid(Character->GetHeldWateringCan())
+			QuickBar && QuickBar->HasSelectedWateringCan()
 				? NSLOCTEXT(
 					"BotanicusGrowing",
 					"WaterPlant",
@@ -692,27 +707,17 @@ void ABotanicusPlantPotActor::BeginPrimaryUse(AActor* Interactor)
 	}
 	else if (CanHarvestWithInteractor(Interactor))
 	{
-		const FBotanicusPlantDefinition* Definition =
-			GetPlantDefinition();
 		ActivePrimaryUser = Character;
 		PrimaryUseMode = EPrimaryUseMode::Harvest;
-		HarvestProgress = 0.0f;
-		SendInteractorMessage(
-			Interactor,
-			FString::Printf(
-				TEXT(
-					"Maintenez le clic gauche %.1f s pour recolter %s."),
-				Definition
-					? Definition->HarvestDurationSeconds
-					: 1.0f,
-				Definition
-					? *Definition->DisplayName.ToString()
-					: *PlantKey.ToString()));
+		// A mature plant is harvested with one click. Immature plants use the
+		// separate held trowel workflow managed by the player controller.
+		HarvestProgress = 1.0f;
+		UpdatePrimaryUse(0.0f);
 	}
-	else if (ABotanicusWateringCanActor* WateringCan =
-		Character->GetHeldWateringCan())
+	else if (QuickBar->HasSelectedWateringCan())
 	{
-		if (!WateringCan->HasWater())
+		if (QuickBar->GetSelectedWateringCanWaterLevel() <=
+			KINDA_SMALL_NUMBER)
 		{
 			SendInteractorMessage(
 				Interactor,
@@ -981,9 +986,11 @@ bool ABotanicusPlantPotActor::UpdatePrimaryUse(float DeltaSeconds)
 		return true;
 	}
 
-	ABotanicusWateringCanActor* WateringCan =
-		Character->GetHeldWateringCan();
-	if (!IsValid(WateringCan) || !WateringCan->HasWater())
+	UBotanicusQuickBarComponent* QuickBar =
+		Character ? Character->GetQuickBarComponent() : nullptr;
+	if (!QuickBar || !QuickBar->HasSelectedWateringCan() ||
+		QuickBar->GetSelectedWateringCanWaterLevel() <=
+			KINDA_SMALL_NUMBER)
 	{
 		if (IsValid(Character))
 		{
@@ -1019,7 +1026,7 @@ bool ABotanicusPlantPotActor::UpdatePrimaryUse(float DeltaSeconds)
 	if (WaterActuallyAdded > KINDA_SMALL_NUMBER &&
 		RequestedWater > KINDA_SMALL_NUMBER)
 	{
-		WateringCan->ConsumeWater(
+		QuickBar->ConsumeSelectedWateringCanWater(
 			0.12f * DeltaSeconds *
 				(WaterActuallyAdded / RequestedWater));
 	}
@@ -1360,61 +1367,12 @@ bool ABotanicusPlantPotActor::IsInteractorStillTargeting(
 
 void ABotanicusPlantPotActor::RefreshLocalContextAction()
 {
-	if (!ContextActionText ||
-		ActorHasTag(TEXT("BotanicusPlacementPreview")))
+	// All contextual actions are now presented by WBP_HUD_Interaction.
+	// Keeping this world-space text hidden also prevents duplicated guidance.
+	if (ContextActionText)
 	{
-		return;
+		ContextActionText->SetVisibility(false);
 	}
-
-	const UWorld* World = GetWorld();
-	const APlayerController* Controller =
-		World ? World->GetFirstPlayerController() : nullptr;
-	APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
-	const bool bTrowelSelected =
-		IsValid(Pawn) &&
-		GetSelectedItemKey(Pawn) == TEXT("GardenTrowel");
-	const bool bCanRemoveSoil =
-		PlantKey.IsNone() &&
-		GetSoilLevel() > KINDA_SMALL_NUMBER;
-	const bool bShowAction =
-		IsValid(Pawn) &&
-		IsInteractorStillTargeting(Pawn) &&
-		bTrowelSelected &&
-		(!PlantKey.IsNone() || bCanRemoveSoil);
-	ContextActionText->SetVisibility(bShowAction);
-	if (!bShowAction)
-	{
-		return;
-	}
-
-	if (bCanRemoveSoil)
-	{
-		ContextActionText->SetText(
-			FText::FromString(
-				FString::Printf(
-					TEXT("MAINTENIR CLIC GAUCHE : RETIRER LE TERREAU (%d%%)"),
-					FMath::RoundToInt(GetSoilLevel() * 100.0f))));
-		ContextActionText->SetTextRenderColor(FColor(80, 180, 255));
-		return;
-	}
-
-	const FBotanicusPlantDefinition* Definition =
-		GetPlantDefinition();
-	const FString PlantName =
-		Definition && !Definition->DisplayName.IsEmpty()
-			? Definition->DisplayName.ToString()
-			: PlantKey.ToString();
-	ContextActionText->SetText(
-		FText::FromString(
-			GrowthProgress <= 0.0201f
-				? FString::Printf(
-					TEXT("CLIC GAUCHE : RECUPERER LA GRAINE DE %s"),
-					*PlantName.ToUpper())
-				: FString::Printf(
-					TEXT("CLIC GAUCHE : DEPOTER %s POUR LA REMPOTER"),
-					*PlantName.ToUpper())));
-	ContextActionText->SetTextRenderColor(
-		FColor(80, 255, 110));
 }
 
 FName ABotanicusPlantPotActor::GetSelectedItemKey(

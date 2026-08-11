@@ -14,6 +14,7 @@ class BOTANICUS_API UBotanicusCarryProgressWidget : public UUserWidget
 
 public:
 	void SetCarryProgress(float InProgress);
+	float GetCarryProgress() const { return CarryProgress; }
 
 protected:
 	virtual void NativeOnInitialized() override;

@@ -28,6 +28,21 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	}
 	if (LoadedCatalog)
 	{
+		if (FBotanicusItemDefinition* WateringCan =
+				LoadedCatalog->Items.FindByPredicate(
+					[](const FBotanicusItemDefinition& Definition)
+					{
+						return Definition.ItemKey == TEXT("WateringCan");
+					}))
+		{
+			WateringCan->WeightClass =
+				EBotanicusItemWeightClass::Hotbar;
+			WateringCan->AllowedPlacementSurfaces =
+				static_cast<int32>(EBotanicusPlacementSurface::Floor);
+			WateringCan->Icon = TSoftObjectPtr<UTexture2D>(
+				FSoftObjectPath(TEXT(
+					"/Game/Botanicus/UI/Tools/T_WateringCan_Hotbar.T_WateringCan_Hotbar")));
+		}
 		if (FBotanicusItemDefinition* PottingSoil =
 				LoadedCatalog->Items.FindByPredicate(
 					[](const FBotanicusItemDefinition& Definition)
@@ -327,12 +342,16 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	WateringCan.WorldScale = FVector(0.38f, 0.2f, 0.28f);
 	WateringCan.WorldActorClass =
 		ABotanicusWateringCanActor::StaticClass();
+	WateringCan.Icon = TSoftObjectPtr<UTexture2D>(
+		FSoftObjectPath(TEXT(
+			"/Game/Botanicus/UI/Tools/T_WateringCan_Hotbar.T_WateringCan_Hotbar")));
 	WateringCan.MaximumStack = 1;
-	WateringCan.WeightClass = EBotanicusItemWeightClass::Handheld;
+	WateringCan.WeightClass = EBotanicusItemWeightClass::Hotbar;
 	WateringCan.Price = 120;
 	WateringCan.DeliveryQuantity = 1;
 	WateringCan.DeliveryDelaySeconds = 2.0f;
-	WateringCan.AllowedPlacementSurfaces = 0;
+	WateringCan.AllowedPlacementSurfaces =
+		static_cast<int32>(EBotanicusPlacementSurface::Floor);
 
 	FBotanicusItemDefinition& WaterReserve =
 		NativeFallbackItems.AddDefaulted_GetRef();

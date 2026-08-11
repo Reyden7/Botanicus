@@ -509,6 +509,8 @@ protected:
 	bool TryTogglePlantInspection();
 	bool TryBeginNearbySalePotAction();
 	bool TryUseGardenTrowelForTransplant();
+	void UpdateGardenTrowelTransplantHold(float DeltaTime);
+	void CancelGardenTrowelTransplantHold();
 	bool HasCarriedTransplant() const;
 	void ClearCarriedTransplant();
 	bool TryPlaceSelectedSalePotOnWorkbench();
@@ -1236,6 +1238,10 @@ protected:
 		LocalActivePlantPot;
 
 	UPROPERTY(Transient)
+	TObjectPtr<ABotanicusPlantPotActor>
+		LocalTrowelTransplantTarget;
+
+	UPROPERTY(Transient)
 	TObjectPtr<ABotanicusWaterReserveActor>
 		LocalActiveWaterReserve;
 
@@ -1307,6 +1313,11 @@ protected:
 	float EquipmentCarryChargeElapsed = 0.0f;
 	float PlaceableItemMoveChargeElapsed = 0.0f;
 	float DisplayedSalePotPickupElapsed = 0.0f;
+	float GardenTrowelTransplantHoldElapsed = 0.0f;
+	float PlantPotActionHoldElapsed = 0.0f;
+
+	UPROPERTY(EditAnywhere, Category="Botanicus|Interaction", meta=(ClampMin="0.1"))
+	float GardenTrowelTransplantHoldDuration = 1.0f;
 	float ParcelMoveChargeElapsed = 0.0f;
 	float WaterRefillRequestAccumulator = 0.0f;
 	double LastServerWaterRefillPulseTime = -1000.0;
@@ -1320,6 +1331,7 @@ protected:
 	bool bEquipmentCarryHoldActivated = false;
 	bool bEquipmentCarryKeyHeld = false;
 	bool bPlantPotActionHeld = false;
+	bool bTrowelTransplantActionHeld = false;
 	bool bWaterRefillActionHeld = false;
 	bool bServerWaterRefillChanged = false;
 	bool bParcelCutActionHeld = false;
