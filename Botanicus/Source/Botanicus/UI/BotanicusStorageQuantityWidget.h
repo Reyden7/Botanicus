@@ -7,6 +7,7 @@
 #include "BotanicusStorageQuantityWidget.generated.h"
 
 class UTextBlock;
+class UImage;
 
 /** Compact prompt used to choose how many stacked items are stored or taken. */
 UCLASS()
@@ -26,11 +27,11 @@ protected:
 
 private:
 	UPROPERTY(Transient)
-	TObjectPtr<UTextBlock> ActionText;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UTextBlock> ItemText;
-
-	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> QuantityText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UImage> InputIcon;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> InstructionText;
 };

@@ -20,6 +20,7 @@ TEXTURES = {
     "T_HUD_ObjectiveToggle": "btUpoBJECTIF.png",
     "T_HUD_Calendar": "calendrierHeure.png",
     "T_HUD_ObjectivesBackground": "ListeObjectif.png",
+    "T_HUD_Crosshair": "cross.png",
 }
 
 

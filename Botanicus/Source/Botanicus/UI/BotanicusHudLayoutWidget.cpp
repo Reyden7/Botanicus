@@ -3,7 +3,9 @@
 #include "UI/BotanicusHudLayoutWidget.h"
 
 #include "Components/NamedSlot.h"
+#include "Components/CanvasPanelSlot.h"
 #include "UI/BotanicusClockWidget.h"
+#include "UI/BotanicusCrosshairWidget.h"
 #include "UI/BotanicusHudMessageWidget.h"
 #include "UI/BotanicusInteractionTargetWidget.h"
 #include "UI/BotanicusQuickBarWidget.h"
@@ -58,6 +60,24 @@ void UBotanicusHudLayoutWidget::NativeOnInitialized()
 	InteractionWidget =
 		CreateElement<UBotanicusInteractionTargetWidget>(InteractionSlot,
 			TEXT("/Game/Botanicus/UI/HUD/Elements/WBP_HUD_Interaction.WBP_HUD_Interaction_C"));
+	if (InteractionWidget)
+	{
+		InteractionWidget->SetLayoutOwner(this);
+	}
 	MessageWidget = CreateElement<UBotanicusHudMessageWidget>(MessageSlot,
 		TEXT("/Game/Botanicus/UI/HUD/Elements/WBP_HUD_Message.WBP_HUD_Message_C"));
+	CrosshairWidget = CreateElement<UBotanicusCrosshairWidget>(CrosshairSlot,
+		TEXT("/Game/Botanicus/UI/HUD/Elements/WBP_HUD_Crosshair.WBP_HUD_Crosshair_C"));
+}
+
+void UBotanicusHudLayoutWidget::SetInteractionHeight(float NewHeight)
+{
+	if (UCanvasPanelSlot* InteractionCanvasSlot = InteractionSlot
+		? Cast<UCanvasPanelSlot>(InteractionSlot->Slot)
+		: nullptr)
+	{
+		FVector2D Size = InteractionCanvasSlot->GetSize();
+		Size.Y = FMath::Max(108.0f, NewHeight);
+		InteractionCanvasSlot->SetSize(Size);
+	}
 }

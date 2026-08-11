@@ -7,6 +7,7 @@
 #include "BotanicusHudLayoutWidget.generated.h"
 
 class UBotanicusClockWidget;
+class UBotanicusCrosshairWidget;
 class UBotanicusHudMessageWidget;
 class UBotanicusInteractionTargetWidget;
 class UBotanicusQuickBarWidget;
@@ -32,6 +33,8 @@ public:
 	UBotanicusQuickBarWidget* GetQuickBarWidget() const { return QuickBarWidget; }
 	UBotanicusInteractionTargetWidget* GetInteractionWidget() const { return InteractionWidget; }
 	UBotanicusHudMessageWidget* GetMessageWidget() const { return MessageWidget; }
+	UBotanicusCrosshairWidget* GetCrosshairWidget() const { return CrosshairWidget; }
+	void SetInteractionHeight(float NewHeight);
 
 protected:
 	virtual void NativeOnInitialized() override;
@@ -63,6 +66,9 @@ private:
 	UPROPERTY(meta=(BindWidget))
 	TObjectPtr<UNamedSlot> MessageSlot;
 
+	UPROPERTY(meta=(BindWidget))
+	TObjectPtr<UNamedSlot> CrosshairSlot;
+
 	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusClockWidget> ClockWidget;
 
@@ -83,4 +89,7 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusHudMessageWidget> MessageWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBotanicusCrosshairWidget> CrosshairWidget;
 };

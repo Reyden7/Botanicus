@@ -9,6 +9,7 @@
 #include "Catalog/BotanicusItemCatalogSubsystem.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
+#include "Components/WidgetComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
@@ -20,6 +21,7 @@
 #include "Sales/BotanicusSalePotActor.h"
 #include "Visitors/BotanicusVisitorCharacter.h"
 #include "UObject/ConstructorHelpers.h"
+#include "UI/BotanicusSalesDisplayEmptyWidget.h"
 
 namespace
 {
@@ -114,7 +116,59 @@ ABotanicusSalesDisplayActor::ABotanicusSalesDisplayActor()
 	ContextActionText->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	ContextActionText->SetVisibility(false);
 
+	EmptyDisplayWidget = CreateDefaultSubobject<UWidgetComponent>(
+		TEXT("EmptySalesDisplayWidget"));
+	EmptyDisplayWidget->SetupAttachment(SceneRoot);
+	EmptyDisplayWidget->SetWidgetSpace(EWidgetSpace::World);
+	EmptyDisplayWidget->SetDrawSize(FVector2D(720.0f, 420.0f));
+	EmptyDisplayWidget->SetPivot(FVector2D(0.5f, 0.5f));
+	EmptyDisplayWidget->SetRelativeLocation(
+		FVector(0.0f, 0.0f, EmptyDisplayWidgetHeight));
+	EmptyDisplayWidget->SetRelativeScale3D(FVector(0.18f));
+	EmptyDisplayWidget->SetTintColorAndOpacity(
+		FLinearColor(
+			EmptyDisplayWidgetBrightness,
+			EmptyDisplayWidgetBrightness,
+			EmptyDisplayWidgetBrightness,
+			1.0f));
+	EmptyDisplayWidget->SetTwoSided(true);
+	EmptyDisplayWidget->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	EmptyDisplayWidget->SetWidgetClass(
+		UBotanicusSalesDisplayEmptyWidget::StaticClass());
+	EmptyDisplayWidget->SetVisibility(false);
+
 	RefreshVisuals();
+}
+
+void ABotanicusSalesDisplayActor::OnConstruction(
+	const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	if (EmptyDisplayWidget)
+	{
+		EmptyDisplayWidget->SetRelativeLocation(
+			FVector(0.0f, 0.0f, EmptyDisplayWidgetHeight));
+		EmptyDisplayWidget->SetTintColorAndOpacity(
+			FLinearColor(
+				EmptyDisplayWidgetBrightness,
+				EmptyDisplayWidgetBrightness,
+				EmptyDisplayWidgetBrightness,
+				1.0f));
+	}
+}
+
+void ABotanicusSalesDisplayActor::BeginPlay()
+{
+	Super::BeginPlay();
+	if (EmptyDisplayWidget)
+	{
+		if (UClass* WidgetClass = LoadClass<UUserWidget>(nullptr,
+			TEXT("/Game/Botanicus/UI/Sales/WBP_SalesDisplayEmpty.WBP_SalesDisplayEmpty_C")))
+		{
+			EmptyDisplayWidget->SetWidgetClass(WidgetClass);
+		}
+		EmptyDisplayWidget->InitWidget();
+	}
 }
 
 void ABotanicusSalesDisplayActor::Tick(float DeltaSeconds)
@@ -141,8 +195,22 @@ void ABotanicusSalesDisplayActor::Tick(float DeltaSeconds)
 				(CameraLocation -
 				 ContextActionText->GetComponentLocation()).Rotation());
 		}
+		if (EmptyDisplayWidget)
+		{
+			EmptyDisplayWidget->SetWorldRotation(
+				(CameraLocation -
+				 EmptyDisplayWidget->GetComponentLocation()).Rotation());
+		}
 	}
 	RefreshLocalAction();
+	if (EmptyDisplayWidget)
+	{
+		APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
+		EmptyDisplayWidget->SetVisibility(
+			IsEmpty() && Pawn &&
+			!ActorHasTag(TEXT("BotanicusPlacementPreview")) &&
+			IsLocalPlayerTargetingDisplay(Pawn));
+	}
 	if (!DisplayedPlantItemKey.IsNone())
 	{
 		RefreshVisuals();
@@ -248,6 +316,10 @@ void ABotanicusSalesDisplayActor::ConfigureAsLocalPreview(bool bIsValid)
 	if (ContextActionText)
 	{
 		ContextActionText->SetVisibility(false);
+	}
+	if (EmptyDisplayWidget)
+	{
+		EmptyDisplayWidget->SetVisibility(false);
 	}
 }
 
@@ -755,13 +827,10 @@ void ABotanicusSalesDisplayActor::RefreshVisuals()
 
 	if (!bHasPlant)
 	{
-		StatusText->SetText(
-			FText::FromString(
-				TEXT(
-					"PRESENTOIR DE VENTE\nVIDE\nQUALITE : -\nPRIX : -")));
-		StatusText->SetTextRenderColor(FColor(190, 190, 190));
+		StatusText->SetVisibility(false);
 		return;
 	}
+	StatusText->SetVisibility(true);
 
 	const ABotanicusGameState* GameState =
 		GetWorld()

@@ -45,6 +45,7 @@ def create_hud_blueprint():
         ("WBP_HUD_QuickBar", unreal.BotanicusQuickBarWidget.static_class(), "QuickBar"),
         ("WBP_HUD_Interaction", unreal.BotanicusInteractionTargetWidget.static_class(), "Interaction"),
         ("WBP_HUD_Message", unreal.BotanicusHudMessageWidget.static_class(), "Message"),
+        ("WBP_HUD_Crosshair", unreal.BotanicusCrosshairWidget.static_class(), "Crosshair"),
     )
     for name, parent_class, element_type in elements:
         create_hud_element(name, parent_class, element_type)

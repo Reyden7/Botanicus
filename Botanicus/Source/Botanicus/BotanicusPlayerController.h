@@ -506,6 +506,7 @@ protected:
 	void UpdatePlaceableItemMoveCharge(float DeltaTime);
 	void CancelPlaceableItemMoveCharge();
 	bool TryBeginNearbyPlantPotAction();
+	bool TryTogglePlantInspection();
 	bool TryBeginNearbySalePotAction();
 	bool TryUseGardenTrowelForTransplant();
 	bool HasCarriedTransplant() const;
@@ -1331,6 +1332,7 @@ protected:
 	float LegacyWorldGuidanceRefreshAccumulator = 0.0f;
 	TSet<TWeakObjectPtr<AActor>> LocalHighlightedFurniture;
 	TWeakObjectPtr<AActor> LocalInteractionHighlightActor;
+	TWeakObjectPtr<ABotanicusPlantPotActor> LocalInspectedPlant;
 	int32 LocalQuickBarItemSlotIndex = INDEX_NONE;
 	int32 LocalQuickBarPlacementQuantity = 1;
 	int32 LocalStorageCollectionQuantity = 1;

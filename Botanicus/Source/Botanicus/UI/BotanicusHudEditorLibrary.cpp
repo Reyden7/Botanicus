@@ -22,6 +22,10 @@ namespace
 {
 UWidgetTree* ResetSourceTree(UWidgetBlueprint* Blueprint)
 {
+	// These generated designer-only widgets have no graph references. Resetting
+	// their GUID table lets the compiler assign GUIDs to a rebuilt hierarchy
+	// without reporting every newly introduced widget as an invalid addition.
+	Blueprint->WidgetVariableNameToGuidMap.Reset();
 	UWidgetTree* Tree = Blueprint->WidgetTree;
 	if (!Tree)
 	{
@@ -84,8 +88,10 @@ UImage* AddImage(
 {
 	UImage* Image = Tree->ConstructWidget<UImage>(
 		UImage::StaticClass(), FName(Name));
-	Image->SetBrushFromTexture(
-		BotanicusHudStyle::LoadTexture(TextureName), true);
+	UTexture2D* Texture = TextureName && TextureName[0] == TCHAR('/')
+		? LoadObject<UTexture2D>(nullptr, TextureName)
+		: BotanicusHudStyle::LoadTexture(TextureName);
+	Image->SetBrushFromTexture(Texture, true);
 	AddToCanvas(Parent, Image, Position, Size, ZOrder);
 	return Image;
 }
@@ -162,6 +168,9 @@ bool UBotanicusHudEditorLibrary::BuildEditableHudLayout(
 	AddHudSlot(TEXT("MessageSlot"), FAnchors(0.5f, 1.0f),
 		FVector2D(0.5f, 1.0f), FVector2D(0.0f, -226.0f),
 		FVector2D(460.0f, 108.0f), 31);
+	AddHudSlot(TEXT("CrosshairSlot"), FAnchors(0.5f, 0.5f),
+		FVector2D(0.5f, 0.5f), FVector2D::ZeroVector,
+		FVector2D(256.0f, 256.0f), 40);
 
 	Blueprint->Modify();
 	Blueprint->MarkPackageDirty();
@@ -175,7 +184,7 @@ bool UBotanicusHudEditorLibrary::BuildEditableHudLayout(
 		TEXT("ClockSlot"), TEXT("CreditsSlot"),
 		TEXT("ReputationSlot"), TEXT("ObjectivesSlot"),
 		TEXT("QuickBarSlot"), TEXT("InteractionSlot"),
-		TEXT("MessageSlot")};
+		TEXT("MessageSlot"), TEXT("CrosshairSlot")};
 	if (!CompiledTree)
 	{
 		UE_LOG(LogTemp, Error, TEXT("HUD Blueprint has no compiled widget tree."));
@@ -266,9 +275,10 @@ bool UBotanicusHudEditorLibrary::BuildEditableHudElement(
 			AddImage(Tree, Root, TEXT("ActionBackground"),
 				TEXT("T_HUD_ActionBackground"), FVector2D::ZeroVector,
 				FVector2D(310.0f, 108.0f));
-			AddText(Tree, Root, TEXT("KeyLabel"), TEXT("E"),
+			AddImage(Tree, Root, TEXT("KeyIcon"),
+				TEXT("/Game/PCKeyboardMouseIconPack/Textures/T_KeyboardE.T_KeyboardE"),
 				FVector2D(22.0f, 32.0f), FVector2D(48.0f, 43.0f),
-				19, true, ETextJustify::Center);
+				2);
 			AddText(Tree, Root, TEXT("ActionLabel"), TEXT("INTERAGIR"),
 				FVector2D(84.0f, 28.0f), FVector2D(190.0f, 28.0f),
 				14, true);
@@ -340,10 +350,196 @@ bool UBotanicusHudEditorLibrary::BuildEditableHudElement(
 					ETextJustify::Right);
 			}
 		}
+		else if (Type == TEXT("Crosshair"))
+		{
+			AddImage(Tree, Root, TEXT("CrosshairImage"),
+				TEXT("T_HUD_Crosshair"), FVector2D::ZeroVector,
+				FVector2D(256.0f, 256.0f));
+		}
+		else if (Type == TEXT("SalesDisplayEmpty"))
+		{
+			AddImage(Tree, Root, TEXT("LeftLeaves"),
+				TEXT("/Game/Botanicus/UI/Sales/Textures/T_SalesEmpty_LeftLeaves.T_SalesEmpty_LeftLeaves"),
+				FVector2D(150.0f, 88.0f), FVector2D(180.0f, 120.0f), 1);
+			AddImage(Tree, Root, TEXT("RightLeaves"),
+				TEXT("/Game/Botanicus/UI/Sales/Textures/T_SalesEmpty_RightLeaves.T_SalesEmpty_RightLeaves"),
+				FVector2D(390.0f, 88.0f), FVector2D(180.0f, 120.0f), 1);
+			AddImage(Tree, Root, TEXT("PlantIcon"),
+				TEXT("/Game/Botanicus/UI/Sales/Textures/T_SalesEmpty_Icon.T_SalesEmpty_Icon"),
+				FVector2D(245.0f, -10.0f), FVector2D(230.0f, 154.0f), 3);
+			AddImage(Tree, Root, TEXT("EmptyTitle"),
+				TEXT("/Game/Botanicus/UI/Sales/Textures/T_SalesEmpty_Title.T_SalesEmpty_Title"),
+				FVector2D(60.0f, 112.0f), FVector2D(600.0f, 200.0f), 2);
+			AddImage(Tree, Root, TEXT("PlaceAction"),
+				TEXT("/Game/Botanicus/UI/Sales/Textures/T_SalesEmpty_Action.T_SalesEmpty_Action"),
+				FVector2D(100.0f, 222.0f), FVector2D(520.0f, 174.0f), 2);
+		}
+		else if (Type == TEXT("PlantGrowthInfo"))
+		{
+			AddText(Tree, Root, TEXT("PlantNameText"), TEXT("ORCHIDEE ROSE"),
+				FVector2D(30.0f, 2.0f), FVector2D(300.0f, 34.0f),
+				21, true, ETextJustify::Center);
+			AddImage(Tree, Root, TEXT("WaterIcon"),
+				TEXT("/Game/Botanicus/UI/Plant/Textures/T_PlantUI_Water.T_PlantUI_Water"),
+				FVector2D(97.0f, 52.0f), FVector2D(58.0f, 58.0f), 2);
+			AddImage(Tree, Root, TEXT("GrowthIcon"),
+				TEXT("/Game/Botanicus/UI/Plant/Textures/T_PlantUI_Growth.T_PlantUI_Growth"),
+				FVector2D(205.0f, 52.0f), FVector2D(58.0f, 58.0f), 2);
+			AddText(Tree, Root, TEXT("WaterPercentText"), TEXT("46%"),
+				FVector2D(83.0f, 124.0f), FVector2D(86.0f, 32.0f),
+				19, true, ETextJustify::Center);
+			AddText(Tree, Root, TEXT("GrowthPercentText"), TEXT("32%"),
+				FVector2D(191.0f, 124.0f), FVector2D(86.0f, 32.0f),
+				19, true, ETextJustify::Center);
+		}
+		else if (Type == TEXT("PlantInspection"))
+		{
+			AddImage(Tree, Root, TEXT("QualityBackground"),
+				TEXT("/Game/Botanicus/UI/Plant/Inspection/Textures/T_PlantInspect_QualityBackground.T_PlantInspect_QualityBackground"),
+				FVector2D(10.0f, 4.0f), FVector2D(400.0f, 76.0f));
+			AddImage(Tree, Root, TEXT("PriceBackground"),
+				TEXT("/Game/Botanicus/UI/Plant/Inspection/Textures/T_PlantInspect_PriceBackground.T_PlantInspect_PriceBackground"),
+				FVector2D(10.0f, 66.0f), FVector2D(400.0f, 76.0f));
+			AddText(Tree, Root, TEXT("QualityText"), TEXT("BELLE"),
+				FVector2D(54.0f, 27.0f), FVector2D(312.0f, 32.0f),
+				20, true, ETextJustify::Center);
+			AddImage(Tree, Root, TEXT("CreditIcon"),
+				TEXT("/Game/Botanicus/UI/HUD/Textures/T_HUD_Credit.T_HUD_Credit"),
+				FVector2D(104.0f, 80.0f), FVector2D(50.0f, 50.0f), 2);
+			AddText(Tree, Root, TEXT("PriceText"), TEXT("120"),
+				FVector2D(154.0f, 89.0f), FVector2D(162.0f, 32.0f),
+				20, true, ETextJustify::Center);
+			AddImage(Tree, Root, TEXT("ElementIcon"),
+				TEXT("/Game/Botanicus/UI/Plant/Inspection/Textures/T_PlantElement_Normal.T_PlantElement_Normal"),
+				FVector2D(170.0f, 139.0f), FVector2D(80.0f, 80.0f), 2);
+			AddText(Tree, Root, TEXT("AgeText"), TEXT("02:15"),
+				FVector2D(30.0f, 224.0f), FVector2D(360.0f, 28.0f),
+				14, true, ETextJustify::Center);
+		}
 		else
 		{
 			return false;
 		}
+	}
+
+	Blueprint->Modify();
+	Blueprint->MarkPackageDirty();
+	FKismetEditorUtilities::CompileBlueprint(Blueprint);
+	return Blueprint->Status != BS_Error;
+#else
+	return false;
+#endif
+}
+
+bool UBotanicusHudEditorLibrary::AddCrosshairToLayout(
+	UObject* WidgetBlueprintAsset)
+{
+#if WITH_EDITOR
+	UWidgetBlueprint* Blueprint = Cast<UWidgetBlueprint>(WidgetBlueprintAsset);
+	UWidgetTree* Tree = Blueprint ? Blueprint->WidgetTree : nullptr;
+	UCanvasPanel* Root = Tree ? Cast<UCanvasPanel>(Tree->RootWidget) : nullptr;
+	if (!Blueprint || !Tree || !Root)
+	{
+		return false;
+	}
+	if (!Tree->FindWidget(TEXT("CrosshairSlot")))
+	{
+		UNamedSlot* CrosshairSlot = Tree->ConstructWidget<UNamedSlot>(
+			UNamedSlot::StaticClass(), TEXT("CrosshairSlot"));
+		UTextBlock* Guide = Tree->ConstructWidget<UTextBlock>(
+			UTextBlock::StaticClass(), TEXT("CrosshairDesignerGuide"));
+		Guide->SetText(FText::FromString(TEXT("VISEUR")));
+		Guide->SetJustification(ETextJustify::Center);
+		Guide->SetColorAndOpacity(FLinearColor(0.58f, 0.86f, 0.46f, 0.7f));
+		CrosshairSlot->SetContent(Guide);
+		UCanvasPanelSlot* CanvasSlot = Root->AddChildToCanvas(CrosshairSlot);
+		CanvasSlot->SetAnchors(FAnchors(0.5f, 0.5f));
+		CanvasSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+		CanvasSlot->SetPosition(FVector2D::ZeroVector);
+		CanvasSlot->SetSize(FVector2D(256.0f, 256.0f));
+		CanvasSlot->SetZOrder(40);
+		if (!Blueprint->WidgetVariableNameToGuidMap.Contains(TEXT("CrosshairSlot")))
+		{
+			Blueprint->OnVariableAdded(TEXT("CrosshairSlot"));
+		}
+		if (!Blueprint->WidgetVariableNameToGuidMap.Contains(TEXT("CrosshairDesignerGuide")))
+		{
+			Blueprint->OnVariableAdded(TEXT("CrosshairDesignerGuide"));
+		}
+	}
+	Blueprint->Modify();
+	Blueprint->MarkPackageDirty();
+	FKismetEditorUtilities::CompileBlueprint(Blueprint);
+	return Blueprint->Status != BS_Error;
+#else
+	return false;
+#endif
+}
+
+bool UBotanicusHudEditorLibrary::UpgradeInteractionElement(
+	UObject* WidgetBlueprintAsset)
+{
+#if WITH_EDITOR
+	UWidgetBlueprint* Blueprint = Cast<UWidgetBlueprint>(WidgetBlueprintAsset);
+	UWidgetTree* Tree = Blueprint ? Blueprint->WidgetTree : nullptr;
+	if (!Blueprint || !Tree || !Tree->RootWidget)
+	{
+		return false;
+	}
+
+	UImage* KeyIcon = Cast<UImage>(Tree->FindWidget(TEXT("KeyIcon")));
+	if (!KeyIcon)
+	{
+		UWidget* OldKeyLabel = Tree->FindWidget(TEXT("KeyLabel"));
+		UCanvasPanel* Parent = OldKeyLabel
+			? Cast<UCanvasPanel>(OldKeyLabel->GetParent())
+			: Cast<UCanvasPanel>(Tree->RootWidget);
+		FVector2D Position(22.0f, 32.0f);
+		FVector2D Size(48.0f, 43.0f);
+		int32 ZOrder = 2;
+		if (OldKeyLabel)
+		{
+			if (UCanvasPanelSlot* OldSlot =
+				Cast<UCanvasPanelSlot>(OldKeyLabel->Slot))
+			{
+				Position = OldSlot->GetPosition();
+				Size = OldSlot->GetSize();
+				ZOrder = OldSlot->GetZOrder();
+			}
+			Tree->RemoveWidget(OldKeyLabel);
+		}
+		if (!Parent)
+		{
+			return false;
+		}
+		KeyIcon = Tree->ConstructWidget<UImage>(
+			UImage::StaticClass(), TEXT("KeyIcon"));
+		AddToCanvas(Parent, KeyIcon, Position, Size, ZOrder);
+	}
+	KeyIcon->SetBrushFromTexture(LoadObject<UTexture2D>(nullptr,
+		TEXT("/Game/PCKeyboardMouseIconPack/Textures/T_KeyboardE.T_KeyboardE")),
+		true);
+	if (Blueprint->WidgetVariableNameToGuidMap.Contains(TEXT("KeyLabel")))
+	{
+		Blueprint->OnVariableRemoved(TEXT("KeyLabel"));
+	}
+	if (!Blueprint->WidgetVariableNameToGuidMap.Contains(TEXT("KeyIcon")))
+	{
+		Blueprint->OnVariableAdded(TEXT("KeyIcon"));
+	}
+
+	if (UImage* Background =
+		Cast<UImage>(Tree->FindWidget(TEXT("ActionBackground"))))
+	{
+		FSlateBrush Brush = Background->GetBrush();
+		Brush.DrawAs = ESlateBrushDrawType::Image;
+		Brush.Margin = FMargin(0.0f);
+		Background->SetBrush(Brush);
+	}
+	if (UTextBlock* Target =
+		Cast<UTextBlock>(Tree->FindWidget(TEXT("TargetNameText"))))
+	{
+		Target->SetAutoWrapText(true);
 	}
 
 	Blueprint->Modify();

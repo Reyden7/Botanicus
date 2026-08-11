@@ -8,6 +8,7 @@
 
 class UStaticMeshComponent;
 class UTextRenderComponent;
+class UWidgetComponent;
 class UMaterialInstanceDynamic;
 class UChildActorComponent;
 struct FBotanicusPlantDefinition;
@@ -22,6 +23,7 @@ class BOTANICUS_API ABotanicusPlantPotActor
 public:
 	ABotanicusPlantPotActor();
 	virtual void OnConstruction(const FTransform& Transform) override;
+	virtual void BeginPlay() override;
 
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(
@@ -58,6 +60,8 @@ public:
 	int32 GetWateringCount() const { return WateringCount; }
 	bool IsElementalDead() const { return bElementalDead; }
 	bool IsMature() const { return !PlantKey.IsNone() && GrowthProgress >= 0.999f; }
+	void SetInspectionVisible(bool bVisible);
+	bool IsInspectionVisible() const { return bInspectionVisible; }
 	/** Harvest item representing the current plant and its present quality. */
 	FName GetCurrentHarvestItemKey() const;
 
@@ -93,6 +97,7 @@ private:
 	float GetConfiguredPlantBaseHeight() const;
 	void RefreshSoilVisual();
 	void RefreshVisuals();
+	void RefreshInspectionWidget();
 	void SendInteractorMessage(
 		AActor* Interactor,
 		const FString& Message) const;
@@ -155,6 +160,38 @@ private:
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UTextRenderComponent> ContextActionText;
 
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UWidgetComponent> PlantGrowthWidget;
+
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UWidgetComponent> PlantInspectionWidget;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Botanicus|Plant UI",
+		meta=(DisplayName="Hauteur UI croissance", Units="cm",
+			ClampMin="0.0", AllowPrivateAccess="true"))
+	float PlantGrowthWidgetHeight = 145.0f;
+
+	/** Empty space kept between the highest leaf and the bottom of the UI. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Botanicus|Plant UI",
+		meta=(DisplayName="Marge au-dessus de la plante", Units="cm",
+			ClampMin="0.0", ClampMax="100.0", AllowPrivateAccess="true"))
+	float PlantGrowthWidgetClearance = 12.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Botanicus|Plant UI",
+		meta=(DisplayName="Echelle UI croissance", ClampMin="0.05",
+			ClampMax="1.0", AllowPrivateAccess="true"))
+	float PlantGrowthWidgetScale = 0.22f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Botanicus|Plant UI",
+		meta=(DisplayName="Luminosite UI croissance", ClampMin="0.1",
+			ClampMax="5.0", AllowPrivateAccess="true"))
+	float PlantGrowthWidgetBrightness = 1.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Botanicus|Plant UI",
+		meta=(DisplayName="Distance panneau inspection", Units="cm",
+			ClampMin="20.0", ClampMax="300.0", AllowPrivateAccess="true"))
+	float PlantInspectionWidgetSideOffset = 55.0f;
+
 	UPROPERTY(ReplicatedUsing=OnRep_GrowingState)
 	bool bHasSoil = false;
 
@@ -174,6 +211,9 @@ private:
 	int32 WateringCount = 0;
 
 	UPROPERTY(ReplicatedUsing=OnRep_GrowingState)
+	float PlantingStartServerTime = 0.0f;
+
+	UPROPERTY(ReplicatedUsing=OnRep_GrowingState)
 	bool bElementalDead = false;
 
 	UPROPERTY(ReplicatedUsing=OnRep_GrowingState)
@@ -186,6 +226,8 @@ private:
 	float HarvestProgress = 0.0f;
 
 	TWeakObjectPtr<class ABotanicusCharacter> ActivePrimaryUser;
+
+	bool bInspectionVisible = false;
 
 	enum class EPrimaryUseMode : uint8
 	{

@@ -9,6 +9,9 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/ChildActorComponent.h"
 #include "Components/TextRenderComponent.h"
+#include "Components/WidgetComponent.h"
+#include "Catalog/BotanicusItemCatalogSubsystem.h"
+#include "Catalog/BotanicusItemCatalog.h"
 #include "Engine/GameInstance.h"
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
@@ -22,6 +25,9 @@
 #include "UObject/ConstructorHelpers.h"
 #include "UObject/UnrealType.h"
 #include "Visuals/BotanicusPotSoilVisualActor.h"
+#include "UI/BotanicusPlantGrowthWidget.h"
+#include "UI/BotanicusPlantInspectionWidget.h"
+#include "Blueprint/UserWidget.h"
 
 namespace
 {
@@ -123,6 +129,7 @@ ABotanicusPlantPotActor::ABotanicusPlantPotActor()
 	StatusText->SetWorldSize(15.0f);
 	StatusText->SetTextRenderColor(FColor(110, 220, 255));
 	StatusText->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	StatusText->SetVisibility(false);
 
 	ContextActionText = CreateDefaultSubobject<UTextRenderComponent>(
 		TEXT("ContextAction"));
@@ -134,6 +141,38 @@ ABotanicusPlantPotActor::ABotanicusPlantPotActor()
 	ContextActionText->SetTextRenderColor(FColor(80, 255, 110));
 	ContextActionText->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	ContextActionText->SetVisibility(false);
+
+	PlantGrowthWidget = CreateDefaultSubobject<UWidgetComponent>(
+		TEXT("PlantGrowthWidget"));
+	PlantGrowthWidget->SetupAttachment(SceneRoot);
+	PlantGrowthWidget->SetWidgetSpace(EWidgetSpace::World);
+	PlantGrowthWidget->SetDrawSize(FVector2D(360.0f, 180.0f));
+	PlantGrowthWidget->SetPivot(FVector2D(0.5f, 0.5f));
+	PlantGrowthWidget->SetRelativeLocation(
+		FVector(0.0f, 0.0f, PlantGrowthWidgetHeight));
+	PlantGrowthWidget->SetRelativeScale3D(FVector(PlantGrowthWidgetScale));
+	PlantGrowthWidget->SetTintColorAndOpacity(FLinearColor(
+		PlantGrowthWidgetBrightness, PlantGrowthWidgetBrightness,
+		PlantGrowthWidgetBrightness, 1.0f));
+	PlantGrowthWidget->SetTwoSided(true);
+	PlantGrowthWidget->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	PlantGrowthWidget->SetWidgetClass(
+		UBotanicusPlantGrowthWidget::StaticClass());
+	PlantGrowthWidget->SetVisibility(false);
+
+	PlantInspectionWidget = CreateDefaultSubobject<UWidgetComponent>(
+		TEXT("PlantInspectionWidget"));
+	PlantInspectionWidget->SetupAttachment(SceneRoot);
+	PlantInspectionWidget->SetWidgetSpace(EWidgetSpace::World);
+	PlantInspectionWidget->SetDrawSize(FVector2D(420.0f, 260.0f));
+	PlantInspectionWidget->SetPivot(FVector2D(0.0f, 0.5f));
+	PlantInspectionWidget->SetRelativeScale3D(FVector(0.20f));
+	PlantInspectionWidget->SetTintColorAndOpacity(FLinearColor(1.5f, 1.5f, 1.5f, 1.0f));
+	PlantInspectionWidget->SetTwoSided(true);
+	PlantInspectionWidget->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	PlantInspectionWidget->SetWidgetClass(
+		UBotanicusPlantInspectionWidget::StaticClass());
+	PlantInspectionWidget->SetVisibility(false);
 
 	RefreshVisuals();
 }
@@ -191,6 +230,41 @@ void ABotanicusPlantPotActor::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
 	RefreshSoilVisual();
+	if (PlantGrowthWidget)
+	{
+		PlantGrowthWidget->SetRelativeLocation(
+			FVector(0.0f, 0.0f, PlantGrowthWidgetHeight));
+		PlantGrowthWidget->SetRelativeScale3D(
+			FVector(PlantGrowthWidgetScale));
+		PlantGrowthWidget->SetTintColorAndOpacity(FLinearColor(
+			PlantGrowthWidgetBrightness, PlantGrowthWidgetBrightness,
+			PlantGrowthWidgetBrightness, 1.0f));
+	}
+}
+
+void ABotanicusPlantPotActor::BeginPlay()
+{
+	Super::BeginPlay();
+	if (PlantGrowthWidget)
+	{
+		if (UClass* WidgetClass = LoadClass<UUserWidget>(nullptr,
+			TEXT("/Game/Botanicus/UI/Plant/WBP_PlantGrowthInfo.WBP_PlantGrowthInfo_C")))
+		{
+			PlantGrowthWidget->SetWidgetClass(WidgetClass);
+		}
+		PlantGrowthWidget->InitWidget();
+		RefreshVisuals();
+	}
+	if (PlantInspectionWidget)
+	{
+		if (UClass* WidgetClass = LoadClass<UUserWidget>(nullptr,
+			TEXT("/Game/Botanicus/UI/Plant/Inspection/WBP_PlantInspection.WBP_PlantInspection_C")))
+		{
+			PlantInspectionWidget->SetWidgetClass(WidgetClass);
+		}
+		PlantInspectionWidget->InitWidget();
+		RefreshInspectionWidget();
+	}
 }
 
 void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
@@ -217,6 +291,39 @@ void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 				ContextActionText->SetWorldRotation(
 					(CameraLocation -
 					 ContextActionText->GetComponentLocation()).Rotation());
+			}
+			if (PlantGrowthWidget)
+			{
+				PlantGrowthWidget->SetWorldRotation(
+					(CameraLocation -
+					 PlantGrowthWidget->GetComponentLocation()).Rotation());
+			}
+			if (PlantInspectionWidget && PlantGrowthWidget)
+			{
+				const FVector CameraRight = CameraManager->GetCameraRotation().
+					RotateVector(FVector::RightVector);
+				PlantInspectionWidget->SetWorldLocation(
+					PlantGrowthWidget->GetComponentLocation() +
+					CameraRight * PlantInspectionWidgetSideOffset);
+				PlantInspectionWidget->SetWorldRotation(
+					(CameraLocation -
+					 PlantInspectionWidget->GetComponentLocation()).Rotation());
+			}
+		}
+		if (PlantGrowthWidget)
+		{
+			PlantGrowthWidget->SetVisibility(
+				!PlantKey.IsNone() &&
+				!ActorHasTag(TEXT("BotanicusPlacementPreview")));
+		}
+		if (PlantInspectionWidget)
+		{
+			PlantInspectionWidget->SetVisibility(
+				bInspectionVisible && !PlantKey.IsNone() &&
+				!ActorHasTag(TEXT("BotanicusPlacementPreview")));
+			if (bInspectionVisible)
+			{
+				RefreshInspectionWidget();
 			}
 		}
 	}
@@ -328,6 +435,7 @@ void ABotanicusPlantPotActor::GetLifetimeReplicatedProps(
 	DOREPLIFETIME(ABotanicusPlantPotActor, GrowthProgress);
 	DOREPLIFETIME(ABotanicusPlantPotActor, CareScore);
 	DOREPLIFETIME(ABotanicusPlantPotActor, WateringCount);
+	DOREPLIFETIME(ABotanicusPlantPotActor, PlantingStartServerTime);
 	DOREPLIFETIME(ABotanicusPlantPotActor, bElementalDead);
 	DOREPLIFETIME(ABotanicusPlantPotActor, SoilFillProgress);
 	DOREPLIFETIME(ABotanicusPlantPotActor, bWateringActive);
@@ -465,6 +573,14 @@ void ABotanicusPlantPotActor::ConfigureAsLocalPreview(bool bIsValid)
 	{
 		ContextActionText->SetVisibility(false);
 	}
+	if (PlantGrowthWidget)
+	{
+		PlantGrowthWidget->SetVisibility(false);
+	}
+	if (PlantInspectionWidget)
+	{
+		PlantInspectionWidget->SetVisibility(false);
+	}
 }
 
 void ABotanicusPlantPotActor::BeginPrimaryUse(AActor* Interactor)
@@ -562,6 +678,9 @@ void ABotanicusPlantPotActor::BeginPrimaryUse(AActor* Interactor)
 			return;
 		}
 		PlantKey = Definition->PlantKey;
+		PlantingStartServerTime = GetWorld()
+			? GetWorld()->GetTimeSeconds()
+			: 0.0f;
 		bElementalDead = false;
 		GrowthProgress = 0.02f;
 		CareScore = 0.01f;
@@ -821,6 +940,8 @@ bool ABotanicusPlantPotActor::UpdatePrimaryUse(float DeltaSeconds)
 			const int32 HarvestedQuantity =
 				FMath::Max(1, Definition->HarvestQuantity);
 			PlantKey = NAME_None;
+			PlantingStartServerTime = 0.0f;
+			bInspectionVisible = false;
 			WaterLevel = 0.0f;
 			GrowthProgress = 0.0f;
 			CareScore = 0.0f;
@@ -944,6 +1065,20 @@ void ABotanicusPlantPotActor::RestoreGrowingState(
 	GrowthProgress = FMath::Clamp(InGrowthProgress, 0.0f, 1.0f);
 	CareScore = FMath::Clamp(InCareScore, 0.0f, 1.0f);
 	bElementalDead = bInElementalDead && !PlantKey.IsNone();
+	if (PlantKey.IsNone())
+	{
+		PlantingStartServerTime = 0.0f;
+		bInspectionVisible = false;
+	}
+	else if (GetWorld())
+	{
+		const FBotanicusPlantDefinition* Definition = GetPlantDefinition();
+		const float EstimatedAge = Definition
+			? GrowthProgress * Definition->GrowthDurationSeconds
+			: 0.0f;
+		PlantingStartServerTime =
+			GetWorld()->GetTimeSeconds() - EstimatedAge;
+	}
 	RefreshVisuals();
 	ForceNetUpdate();
 }
@@ -954,6 +1089,69 @@ FName ABotanicusPlantPotActor::GetCurrentHarvestItemKey() const
 	return Definition
 		? GetQualityHarvestItemKey(*Definition)
 		: NAME_None;
+}
+
+void ABotanicusPlantPotActor::SetInspectionVisible(const bool bVisible)
+{
+	bInspectionVisible = bVisible && !PlantKey.IsNone();
+	if (PlantInspectionWidget)
+	{
+		PlantInspectionWidget->SetVisibility(bInspectionVisible);
+	}
+	RefreshInspectionWidget();
+}
+
+void ABotanicusPlantPotActor::RefreshInspectionWidget()
+{
+	UBotanicusPlantInspectionWidget* Widget = PlantInspectionWidget
+		? Cast<UBotanicusPlantInspectionWidget>(PlantInspectionWidget->GetWidget())
+		: nullptr;
+	const FBotanicusPlantDefinition* Definition = GetPlantDefinition();
+	if (!Widget || !Definition || PlantKey.IsNone())
+	{
+		return;
+	}
+
+	const UBotanicusItemCatalogSubsystem* Items = GetGameInstance()
+		? GetGameInstance()->GetSubsystem<UBotanicusItemCatalogSubsystem>()
+		: nullptr;
+	const FBotanicusItemDefinition* HarvestItem = Items
+		? Items->FindItem(GetCurrentHarvestItemKey())
+		: nullptr;
+	const int32 Price = HarvestItem ? HarvestItem->SalePrice : 0;
+
+	FText ElementName;
+	const TCHAR* ElementTexturePath = nullptr;
+	switch (Definition->Element)
+	{
+	case EBotanicusPlantElement::Fire:
+		ElementName = NSLOCTEXT("BotanicusPlantUI", "Fire", "FEU");
+		ElementTexturePath = TEXT("/Game/Botanicus/UI/Plant/Inspection/Textures/T_PlantElement_Fire.T_PlantElement_Fire");
+		break;
+	case EBotanicusPlantElement::Water:
+		ElementName = NSLOCTEXT("BotanicusPlantUI", "Water", "EAU");
+		ElementTexturePath = TEXT("/Game/Botanicus/UI/Plant/Inspection/Textures/T_PlantElement_Water.T_PlantElement_Water");
+		break;
+	case EBotanicusPlantElement::Ice:
+		ElementName = NSLOCTEXT("BotanicusPlantUI", "Ice", "GLACE");
+		ElementTexturePath = TEXT("/Game/Botanicus/UI/Plant/Inspection/Textures/T_PlantElement_Ice.T_PlantElement_Ice");
+		break;
+	case EBotanicusPlantElement::Shadow:
+		ElementName = NSLOCTEXT("BotanicusPlantUI", "Shadow", "TENEBRES");
+		ElementTexturePath = TEXT("/Game/Botanicus/UI/Plant/Inspection/Textures/T_PlantElement_Shadow.T_PlantElement_Shadow");
+		break;
+	default:
+		ElementName = NSLOCTEXT("BotanicusPlantUI", "Normal", "NORMAL");
+		ElementTexturePath = TEXT("/Game/Botanicus/UI/Plant/Inspection/Textures/T_PlantElement_Normal.T_PlantElement_Normal");
+		break;
+	}
+	const float AgeSeconds = GetWorld()
+		? FMath::Max(0.0f, GetWorld()->GetTimeSeconds() - PlantingStartServerTime)
+		: 0.0f;
+	Widget->SetInspectionData(
+		FText::FromString(GetPlantQualityLabel()), Price, ElementName,
+		LoadObject<UTexture2D>(nullptr, ElementTexturePath),
+		WateringCount, AgeSeconds);
 }
 
 void ABotanicusPlantPotActor::ApplyElementalInfluence(
@@ -1282,6 +1480,8 @@ void ABotanicusPlantPotActor::RefreshVisuals()
 		HeightMultiplier;
 	const float ConfiguredPlantBaseHeight =
 		GetConfiguredPlantBaseHeight();
+	const float FoliageScale =
+		FMath::Lerp(0.06f, 0.32f, VisualGrowth);
 	if (StemMesh)
 	{
 		StemMesh->SetVisibility(bHasPlant);
@@ -1301,8 +1501,6 @@ void ABotanicusPlantPotActor::RefreshVisuals()
 				0.0f,
 				0.0f,
 				ConfiguredPlantBaseHeight + StemHeight));
-		const float FoliageScale =
-			FMath::Lerp(0.06f, 0.32f, VisualGrowth);
 		FoliageMesh->SetRelativeScale3D(
 			FoliageShape * FoliageScale);
 		if (Definition)
@@ -1322,6 +1520,23 @@ void ABotanicusPlantPotActor::RefreshVisuals()
 						: Definition->MatureColor);
 			}
 		}
+	}
+	if (PlantGrowthWidget)
+	{
+		// The engine sphere used by the foliage has a 50 cm radius. Its
+		// scaled upper bound gives a stable UI height for every plant shape.
+		const float FoliageTop = bHasPlant
+			? ConfiguredPlantBaseHeight + StemHeight +
+				50.0f * FoliageShape.Z * FoliageScale
+			: 0.0f;
+		const float WidgetHalfHeight =
+			PlantGrowthWidget->GetDrawSize().Y *
+			PlantGrowthWidgetScale * 0.5f;
+		const float AdaptiveHeight = FoliageTop +
+			PlantGrowthWidgetClearance + WidgetHalfHeight;
+		PlantGrowthWidget->SetRelativeLocation(FVector(
+			0.0f, 0.0f,
+			FMath::Max(PlantGrowthWidgetHeight, AdaptiveHeight)));
 	}
 	if (StatusText)
 	{
@@ -1385,6 +1600,17 @@ void ABotanicusPlantPotActor::RefreshVisuals()
 				: bHasSoil
 				? FColor(120, 255, 150)
 				: FColor(255, 190, 80));
+	}
+	if (PlantGrowthWidget)
+	{
+		if (UBotanicusPlantGrowthWidget* Widget =
+			Cast<UBotanicusPlantGrowthWidget>(PlantGrowthWidget->GetWidget()))
+		{
+			const FText PlantName = Definition && !Definition->DisplayName.IsEmpty()
+				? Definition->DisplayName
+				: FText::FromName(PlantKey);
+			Widget->SetPlantState(PlantName, WaterLevel, GrowthProgress);
+		}
 	}
 }
 

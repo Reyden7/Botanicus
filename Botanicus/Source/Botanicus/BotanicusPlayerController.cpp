@@ -1410,6 +1410,7 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		(TryOpenNearbyWorkbenchUpgrade() ||
 		 TryUseNearbyComputer() ||
 		 TryHandleNearbyWateringCan() ||
+		 TryPlacePlantOnNearbySalesDisplay() ||
 		 TryBeginDisplayedSalePotPickup() ||
 		 TryHandleNearbyLargeEquipment() ||
 		 TryCollectNearbyDeliveryParcel() ||
@@ -1840,6 +1841,13 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 	{
 		return true;
 	}
+	if (!bBuildingTopDownViewActive &&
+		Params.Key == EKeys::RightMouseButton &&
+		Params.Event == IE_Pressed &&
+		TryTogglePlantInspection())
+	{
+		return true;
+	}
 
 	// The EBS mallet interaction is not part of Botanicus.
 	if (Params.Key == EKeys::RightMouseButton)
@@ -2166,6 +2174,13 @@ void ABotanicusPlayerController::RefreshInteractionTargetName(
 	bool bIsParcel = false;
 	const ABotanicusSalesDisplayActor* DisplayedSalePot =
 		Cast<ABotanicusSalesDisplayActor>(TargetActor);
+	if (DisplayedSalePot && DisplayedSalePot->IsEmpty())
+	{
+		// The empty display owns a dedicated world-space prompt. Avoid showing
+		// the generic HUD interaction card over the illustrated display UI.
+		InteractionTargetWidget->ClearTarget();
+		return;
+	}
 	if (DisplayedSalePot && !DisplayedSalePot->IsEmpty())
 	{
 		InteractionTargetWidget->SetTargetName(
@@ -2174,6 +2189,29 @@ void ABotanicusPlayerController::RefreshInteractionTargetName(
 				"DisplayedSalePotTargetName",
 				"Pot de vente prepare - maintenir E pour reprendre"));
 		return;
+	}
+	if (const ABotanicusPlantPotActor* PlantPot =
+		Cast<ABotanicusPlantPotActor>(TargetActor);
+		PlantPot && !PlantPot->GetPlantKey().IsNone())
+	{
+		const ABotanicusCharacter* BotanicusCharacter =
+			Cast<ABotanicusCharacter>(GetPawn());
+		const UBotanicusQuickBarComponent* QuickBar = BotanicusCharacter
+			? BotanicusCharacter->GetQuickBarComponent()
+			: nullptr;
+		if (QuickBar && QuickBar->GetSelectedSlot().ItemKey.IsNone())
+		{
+			const UBotanicusPlantSubsystem* Plants = GetGameInstance()
+				? GetGameInstance()->GetSubsystem<UBotanicusPlantSubsystem>()
+				: nullptr;
+			const FBotanicusPlantDefinition* PlantDefinition = Plants
+				? Plants->FindPlant(PlantPot->GetPlantKey())
+				: nullptr;
+			InteractionTargetWidget->SetPlantInspectPrompt(
+				PlantDefinition ? PlantDefinition->DisplayName
+					: FText::FromName(PlantPot->GetPlantKey()));
+			return;
+		}
 	}
 	if (const ABotanicusPlaceableItemActor* PlaceableItem =
 		Cast<ABotanicusPlaceableItemActor>(TargetActor))
@@ -2665,7 +2703,7 @@ void ABotanicusPlayerController::InitializeStorageQuantityWidget()
 	StorageQuantityWidget->SetAlignmentInViewport(
 		FVector2D(0.5f, 0.5f));
 	StorageQuantityWidget->SetDesiredSizeInViewport(
-		FVector2D(390.0f, 138.0f));
+		FVector2D(310.0f, 108.0f));
 
 	int32 ViewportWidth = 0;
 	int32 ViewportHeight = 0;
@@ -5548,9 +5586,6 @@ void ABotanicusPlayerController::BeginQuickBarItemPlacement()
 	QuickBarItemPlacementYaw = GetPawn()->GetActorRotation().Yaw;
 	QuickBarItemPreviewUpdateAccumulator = 1.0f;
 	bLocalQuickBarItemPlacementValid = false;
-	ClientMessage(
-		TEXT(
-			"Objet en main : le placement suit votre regard, molette pour tourner, Ctrl + molette pour regler une pile, clic gauche pour poser."));
 }
 
 void ABotanicusPlayerController::ApplyCarriedItemState(
@@ -7934,6 +7969,31 @@ void ABotanicusPlayerController::RefreshStorageQuantityWidget(
 		Quantity,
 		MaximumQuantity,
 		bStoring);
+}
+
+bool ABotanicusPlayerController::TryTogglePlantInspection()
+{
+	ABotanicusPlantPotActor* PlantPot =
+		Cast<ABotanicusPlantPotActor>(LocalInteractionHighlightActor.Get());
+	ABotanicusCharacter* BotanicusCharacter =
+		Cast<ABotanicusCharacter>(GetPawn());
+	UBotanicusQuickBarComponent* QuickBar = BotanicusCharacter
+		? BotanicusCharacter->GetQuickBarComponent()
+		: nullptr;
+	if (!IsValid(PlantPot) || PlantPot->GetPlantKey().IsNone() ||
+		!QuickBar || !QuickBar->GetSelectedSlot().ItemKey.IsNone())
+	{
+		return false;
+	}
+
+	const bool bOpen = !PlantPot->IsInspectionVisible();
+	if (LocalInspectedPlant.IsValid() && LocalInspectedPlant.Get() != PlantPot)
+	{
+		LocalInspectedPlant->SetInspectionVisible(false);
+	}
+	PlantPot->SetInspectionVisible(bOpen);
+	LocalInspectedPlant = bOpen ? PlantPot : nullptr;
+	return true;
 }
 
 bool ABotanicusPlayerController::TryBeginNearbyPlantPotAction()

@@ -8,6 +8,7 @@
 
 class UStaticMeshComponent;
 class UTextRenderComponent;
+class UWidgetComponent;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class ABotanicusSalePotActor;
@@ -25,6 +26,8 @@ class BOTANICUS_API ABotanicusSalesDisplayActor
 public:
 	ABotanicusSalesDisplayActor();
 
+	virtual void OnConstruction(const FTransform& Transform) override;
+	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -116,6 +119,22 @@ private:
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UTextRenderComponent> ContextActionText;
+
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UWidgetComponent> EmptyDisplayWidget;
+
+	/** Vertical position of the empty-display UI relative to the furniture. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Sales Display|UI",
+		meta=(DisplayName="Hauteur UI presentoir vide", ClampMin="0.0",
+			UIMin="0.0", UIMax="300.0", AllowPrivateAccess="true"))
+	float EmptyDisplayWidgetHeight = 85.0f;
+
+	/** Emissive tint multiplier used to keep the world-space UI vivid. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Sales Display|UI",
+		meta=(DisplayName="Luminosite UI presentoir vide", ClampMin="0.1",
+			ClampMax="5.0", UIMin="0.5", UIMax="3.0",
+			AllowPrivateAccess="true"))
+	float EmptyDisplayWidgetBrightness = 1.6f;
 
 	UPROPERTY(ReplicatedUsing=OnRep_DisplayedPlant)
 	FName DisplayedPlantItemKey = NAME_None;

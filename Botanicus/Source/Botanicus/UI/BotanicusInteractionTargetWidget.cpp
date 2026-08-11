@@ -10,8 +10,10 @@
 #include "Components/OverlaySlot.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
+#include "Engine/Texture2D.h"
 #include "Styling/CoreStyle.h"
 #include "UI/BotanicusHudStyle.h"
+#include "UI/BotanicusHudLayoutWidget.h"
 
 void UBotanicusInteractionTargetWidget::NativeOnInitialized()
 {
@@ -24,7 +26,8 @@ void UBotanicusInteractionTargetWidget::NativeOnInitialized()
 
 		UOverlay* Overlay = WidgetTree->ConstructWidget<UOverlay>();
 		Size->SetContent(Overlay);
-		UImage* Background = WidgetTree->ConstructWidget<UImage>();
+		UImage* Background = WidgetTree->ConstructWidget<UImage>(
+			UImage::StaticClass(), TEXT("ActionBackground"));
 		Background->SetBrushFromTexture(BotanicusHudStyle::LoadTexture(
 			TEXT("T_HUD_ActionBackground")), true);
 		if (UOverlaySlot* BackgroundOverlaySlot =
@@ -37,18 +40,17 @@ void UBotanicusInteractionTargetWidget::NativeOnInitialized()
 		UCanvasPanel* Content = WidgetTree->ConstructWidget<UCanvasPanel>();
 		Overlay->AddChildToOverlay(Content);
 
-		UTextBlock* KeyLabel = WidgetTree->ConstructWidget<UTextBlock>();
-		KeyLabel->SetText(FText::FromString(TEXT("E")));
-		KeyLabel->SetJustification(ETextJustify::Center);
-		KeyLabel->SetColorAndOpacity(
-			FSlateColor(FLinearColor(0.12f, 0.14f, 0.11f, 1.0f)));
-		KeyLabel->SetFont(FSlateFontInfo(
-			FCoreStyle::GetDefaultFont(), 19, TEXT("Bold")));
-		UCanvasPanelSlot* KeySlot = Content->AddChildToCanvas(KeyLabel);
+		UImage* FallbackKeyIcon = WidgetTree->ConstructWidget<UImage>(
+			UImage::StaticClass(), TEXT("KeyIcon"));
+		FallbackKeyIcon->SetBrushFromTexture(LoadObject<UTexture2D>(nullptr,
+			TEXT("/Game/PCKeyboardMouseIconPack/Textures/T_KeyboardE.T_KeyboardE")),
+			true);
+		UCanvasPanelSlot* KeySlot = Content->AddChildToCanvas(FallbackKeyIcon);
 		KeySlot->SetPosition(FVector2D(22.0f, 32.0f));
 		KeySlot->SetSize(FVector2D(48.0f, 43.0f));
 
-		UTextBlock* ActionLabel = WidgetTree->ConstructWidget<UTextBlock>();
+		ActionLabel = WidgetTree->ConstructWidget<UTextBlock>(
+			UTextBlock::StaticClass(), TEXT("ActionLabel"));
 		ActionLabel->SetText(FText::FromString(TEXT("INTERAGIR")));
 		ActionLabel->SetColorAndOpacity(
 			FSlateColor(BotanicusHudStyle::PrimaryText()));
@@ -69,7 +71,28 @@ void UBotanicusInteractionTargetWidget::NativeOnInitialized()
 		NameSlot->SetSize(FVector2D(190.0f, 38.0f));
 		WidgetTree->RootWidget = Size;
 	}
+	if (WidgetTree)
+	{
+		ActionBackground = Cast<UImage>(
+			WidgetTree->FindWidget(TEXT("ActionBackground")));
+		KeyIcon = Cast<UImage>(WidgetTree->FindWidget(TEXT("KeyIcon")));
+		ActionLabel = Cast<UTextBlock>(
+			WidgetTree->FindWidget(TEXT("ActionLabel")));
+	}
+	if (ActionBackground)
+	{
+		FSlateBrush Brush = ActionBackground->GetBrush();
+		Brush.DrawAs = ESlateBrushDrawType::Image;
+		Brush.Margin = FMargin(0.0f);
+		ActionBackground->SetBrush(Brush);
+	}
 	SetVisibility(ESlateVisibility::Collapsed);
+}
+
+void UBotanicusInteractionTargetWidget::SetLayoutOwner(
+	UBotanicusHudLayoutWidget* InLayoutOwner)
+{
+	LayoutOwner = InLayoutOwner;
 }
 
 void UBotanicusInteractionTargetWidget::SetTargetName(const FText& TargetName)
@@ -80,6 +103,42 @@ void UBotanicusInteractionTargetWidget::SetTargetName(const FText& TargetName)
 		return;
 	}
 	TargetNameText->SetText(TargetName);
+	if (ActionLabel)
+	{
+		ActionLabel->SetText(NSLOCTEXT(
+			"BotanicusInteraction", "Interact", "INTERAGIR"));
+	}
+	if (KeyIcon)
+	{
+		KeyIcon->SetBrushFromTexture(LoadObject<UTexture2D>(nullptr,
+			TEXT("/Game/PCKeyboardMouseIconPack/Textures/T_KeyboardE.T_KeyboardE")),
+			true);
+	}
+	UpdateAdaptiveHeight();
+	SetVisibility(ESlateVisibility::HitTestInvisible);
+}
+
+void UBotanicusInteractionTargetWidget::SetPlantInspectPrompt(
+	const FText& PlantName)
+{
+	if (!TargetNameText || PlantName.IsEmpty())
+	{
+		ClearTarget();
+		return;
+	}
+	TargetNameText->SetText(PlantName);
+	if (ActionLabel)
+	{
+		ActionLabel->SetText(NSLOCTEXT(
+			"BotanicusInteraction", "Inspect", "INSPECTER"));
+	}
+	if (KeyIcon)
+	{
+		KeyIcon->SetBrushFromTexture(LoadObject<UTexture2D>(nullptr,
+			TEXT("/Game/PCKeyboardMouseIconPack/Textures/T_MouseRightClick.T_MouseRightClick")),
+			true);
+	}
+	UpdateAdaptiveHeight();
 	SetVisibility(ESlateVisibility::HitTestInvisible);
 }
 
@@ -89,5 +148,66 @@ void UBotanicusInteractionTargetWidget::ClearTarget()
 	{
 		TargetNameText->SetText(FText::GetEmpty());
 	}
+	ApplyPanelHeight(108.0f);
 	SetVisibility(ESlateVisibility::Collapsed);
+}
+
+void UBotanicusInteractionTargetWidget::UpdateAdaptiveHeight()
+{
+	if (!TargetNameText)
+	{
+		return;
+	}
+	TargetNameText->InvalidateLayoutAndVolatility();
+	ForceLayoutPrepass();
+	float AvailableTextWidth = 190.0f;
+	if (const UCanvasPanelSlot* TextSlot =
+		Cast<UCanvasPanelSlot>(TargetNameText->Slot))
+	{
+		AvailableTextWidth = FMath::Max(1.0f, TextSlot->GetSize().X);
+	}
+	const FVector2D DesiredTextSize = TargetNameText->GetDesiredSize();
+	const int32 EstimatedLineCount = FMath::Max(1,
+		FMath::CeilToInt(DesiredTextSize.X / AvailableTextWidth));
+	const float EstimatedTextHeight = EstimatedLineCount
+		* static_cast<float>(TargetNameText->GetFont().Size + 5);
+	const float DesiredTextHeight = FMath::Max3(
+		38.0f, static_cast<float>(DesiredTextSize.Y), EstimatedTextHeight);
+	ApplyPanelHeight(FMath::Clamp(
+		70.0f + DesiredTextHeight, 108.0f, 220.0f));
+}
+
+void UBotanicusInteractionTargetWidget::ApplyPanelHeight(float NewHeight)
+{
+	NewHeight = FMath::Max(108.0f, NewHeight);
+	if (USizeBox* RootSizeBox = WidgetTree
+		? Cast<USizeBox>(WidgetTree->RootWidget)
+		: nullptr)
+	{
+		RootSizeBox->SetHeightOverride(NewHeight);
+	}
+	if (ActionBackground)
+	{
+		if (UCanvasPanelSlot* BackgroundSlot =
+			Cast<UCanvasPanelSlot>(ActionBackground->Slot))
+		{
+			FVector2D Size = BackgroundSlot->GetSize();
+			Size.Y = NewHeight;
+			BackgroundSlot->SetSize(Size);
+		}
+	}
+	if (TargetNameText)
+	{
+		if (UCanvasPanelSlot* TextSlot =
+			Cast<UCanvasPanelSlot>(TargetNameText->Slot))
+		{
+			FVector2D Size = TextSlot->GetSize();
+			Size.Y = FMath::Max(38.0f, NewHeight - 58.0f);
+			TextSlot->SetSize(Size);
+		}
+	}
+	if (LayoutOwner)
+	{
+		LayoutOwner->SetInteractionHeight(NewHeight);
+	}
 }
