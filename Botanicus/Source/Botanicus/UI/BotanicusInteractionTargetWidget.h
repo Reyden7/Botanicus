@@ -48,6 +48,8 @@ protected:
 private:
 	void UpdateAdaptiveHeight();
 	void ApplyPanelHeight(float NewHeight);
+	void EnsureHoldRing();
+	void RefreshHoldRing();
 
 	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> TargetNameText;
@@ -63,6 +65,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusHudLayoutWidget> LayoutOwner;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UImage>> HoldRingSegments;
 
 	float HoldProgress = 0.0f;
 	bool bShowHoldProgress = false;

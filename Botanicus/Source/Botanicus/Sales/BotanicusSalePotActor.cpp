@@ -606,35 +606,77 @@ void ABotanicusSalePotActor::RefreshVisuals()
 			: nullptr;
 	const FBotanicusItemDefinition* Definition =
 		Catalog ? Catalog->FindItem(PlantItemKey) : nullptr;
+	const UBotanicusPlantSubsystem* Plants =
+		GameInstance
+			? GameInstance->GetSubsystem<UBotanicusPlantSubsystem>()
+			: nullptr;
+	const FBotanicusPlantDefinition* PlantDefinition =
+		Plants ? Plants->FindPlantByHarvestItem(PlantItemKey) : nullptr;
+	UStaticMesh* MaturePlantMesh =
+		PlantDefinition && !PlantDefinition->MatureGrowthMesh.IsNull()
+			? PlantDefinition->MatureGrowthMesh.LoadSynchronous()
+			: nullptr;
 	RefreshSoilVisual();
 	if (PlantVisual)
 	{
 		PlantVisual->SetVisibility(IsReadyForSale());
-		float StemHeight = 80.0f;
-		FVector FoliageShape;
-		GetMatureSalePlantShape(
-			PlantItemKey, StemHeight, FoliageShape);
 		const float PlantBaseHeight =
 			GetConfiguredSoilMaximumHeight();
-		PlantVisual->SetRelativeLocation(FVector(
-			0.0f, 0.0f, PlantBaseHeight + StemHeight));
-		const FVector PlantScale = FoliageShape * 0.32f;
-		if (Definition)
+		if (MaturePlantMesh)
 		{
-			if (!PlantMaterial)
+			if (PlantVisual->GetStaticMesh() != MaturePlantMesh)
 			{
-				PlantMaterial =
-					PlantVisual->CreateAndSetMaterialInstanceDynamic(0);
+				PlantVisual->SetStaticMesh(MaturePlantMesh);
+				PlantVisual->EmptyOverrideMaterials();
+				PlantMaterial = nullptr;
 			}
-			if (PlantMaterial)
+			const FBox MeshBounds = MaturePlantMesh->GetBoundingBox();
+			const float DesiredHeight = FMath::Max(
+				0.1f, PlantDefinition->MatureGrowthVisualHeight);
+			const float UniformScale = DesiredHeight /
+				FMath::Max(0.01f, MeshBounds.GetSize().Z);
+			const FVector MeshCentre = MeshBounds.GetCenter();
+			PlantVisual->SetRelativeScale3D(FVector(UniformScale));
+			PlantVisual->SetRelativeLocation(FVector(
+				-MeshCentre.X * UniformScale,
+				-MeshCentre.Y * UniformScale,
+				PlantBaseHeight - MeshBounds.Min.Z * UniformScale));
+		}
+		else
+		{
+			if (UStaticMesh* FallbackMesh = LoadObject<UStaticMesh>(
+				nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere")))
 			{
-				PlantMaterial->SetVectorParameterValue(
-					TEXT("Color"),
-					SalePotPlantVisualColor(
-						Definition->PlantColorTag));
+				if (PlantVisual->GetStaticMesh() != FallbackMesh)
+				{
+					PlantVisual->SetStaticMesh(FallbackMesh);
+					PlantVisual->EmptyOverrideMaterials();
+					PlantMaterial = nullptr;
+				}
+			}
+			float StemHeight = 80.0f;
+			FVector FoliageShape;
+			GetMatureSalePlantShape(
+				PlantItemKey, StemHeight, FoliageShape);
+			PlantVisual->SetRelativeLocation(FVector(
+				0.0f, 0.0f, PlantBaseHeight + StemHeight));
+			PlantVisual->SetRelativeScale3D(FoliageShape * 0.32f);
+			if (Definition)
+			{
+				if (!PlantMaterial)
+				{
+					PlantMaterial =
+						PlantVisual->CreateAndSetMaterialInstanceDynamic(0);
+				}
+				if (PlantMaterial)
+				{
+					PlantMaterial->SetVectorParameterValue(
+						TEXT("Color"),
+						SalePotPlantVisualColor(
+							Definition->PlantColorTag));
+				}
 			}
 		}
-		PlantVisual->SetRelativeScale3D(PlantScale);
 	}
 	if (StemVisual)
 	{
@@ -644,7 +686,8 @@ void ABotanicusSalePotActor::RefreshVisuals()
 			PlantItemKey, StemHeight, FoliageShape);
 		const float PlantBaseHeight =
 			GetConfiguredSoilMaximumHeight();
-		StemVisual->SetVisibility(IsReadyForSale());
+		StemVisual->SetVisibility(
+			IsReadyForSale() && MaturePlantMesh == nullptr);
 		StemVisual->SetRelativeLocation(FVector(
 			0.0f,
 			0.0f,

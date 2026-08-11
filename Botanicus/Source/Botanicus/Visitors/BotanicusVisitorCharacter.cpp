@@ -12,6 +12,8 @@
 #include "Catalog/BotanicusItemCatalogSubsystem.h"
 #include "Engine/GameInstance.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Growing/BotanicusPlantSubsystem.h"
+#include "Interaction/BotanicusInteractableActor.h"
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -392,6 +394,9 @@ void ABotanicusVisitorCharacter::GetLifetimeReplicatedProps(
 		CarriedPlantItemKey);
 	DOREPLIFETIME(
 		ABotanicusVisitorCharacter,
+		CarriedPotItemKey);
+	DOREPLIFETIME(
+		ABotanicusVisitorCharacter,
 		CheckoutStage);
 	DOREPLIFETIME(
 		ABotanicusVisitorCharacter,
@@ -637,6 +642,8 @@ void ABotanicusVisitorCharacter::FinishInspection()
 		bPlantSelected = true;
 		CarriedPlantItemKey =
 			TargetDisplay->GetDisplayedPlantItemKey();
+		CarriedPotItemKey =
+			TargetDisplay->GetDisplayedPotItemKey();
 		bCarryingPlant = true;
 		RefreshCarriedPlantVisuals();
 		VisitorState = EBotanicusVisitorState::FollowingRoute;
@@ -887,6 +894,7 @@ void ABotanicusVisitorCharacter::ResetBrowsingState()
 	bCarryingPlant = false;
 	bVisitOutcomeRecorded = false;
 	CarriedPlantItemKey = NAME_None;
+	CarriedPotItemKey = NAME_None;
 	SetSpeechLine(FString());
 	RefreshCarriedPlantVisuals();
 }
@@ -1059,52 +1067,166 @@ void ABotanicusVisitorCharacter::SetSpeechLine(
 
 void ABotanicusVisitorCharacter::RefreshCarriedPlantVisuals()
 {
+	const UGameInstance* GameInstance = GetGameInstance();
+	const UBotanicusItemCatalogSubsystem* Catalog =
+		GameInstance
+			? GameInstance->GetSubsystem<
+				UBotanicusItemCatalogSubsystem>()
+			: nullptr;
+	const UBotanicusPlantSubsystem* Plants =
+		GameInstance
+			? GameInstance->GetSubsystem<UBotanicusPlantSubsystem>()
+			: nullptr;
+	const FBotanicusItemDefinition* PlantItemDefinition =
+		Catalog ? Catalog->FindItem(CarriedPlantItemKey) : nullptr;
+	const FBotanicusPlantDefinition* PlantDefinition =
+		Plants ? Plants->FindPlantByHarvestItem(CarriedPlantItemKey) : nullptr;
+
+	constexpr float CarryCentreX = 42.0f;
+	constexpr float CarryCentreZ = 2.0f;
+	float PlantBaseHeight = 18.0f;
 	if (CarriedPotVisual)
 	{
 		CarriedPotVisual->SetVisibility(bCarryingPlant);
-	}
-	if (CarriedPlantVisual)
-	{
-		CarriedPlantVisual->SetVisibility(bCarryingPlant);
-		const UGameInstance* GameInstance = GetGameInstance();
-		const UBotanicusItemCatalogSubsystem* Catalog =
-			GameInstance
-				? GameInstance->GetSubsystem<
-					UBotanicusItemCatalogSubsystem>()
-				: nullptr;
-		const FBotanicusItemDefinition* Definition =
-			Catalog ? Catalog->FindItem(CarriedPlantItemKey) : nullptr;
-		FVector PlantScale(0.29f, 0.29f, 0.42f);
-		if (Definition)
+		const FName PotKey = CarriedPotItemKey.IsNone()
+			? FName(TEXT("SalePot"))
+			: CarriedPotItemKey;
+		const FBotanicusItemDefinition* PotDefinition =
+			Catalog ? Catalog->FindItem(PotKey) : nullptr;
+		UStaticMesh* PotMesh = nullptr;
+		FVector PotScale = FVector(0.24f, 0.24f, 0.20f);
+		FRotator PotRotation = FRotator::ZeroRotator;
+		const UStaticMeshComponent* AuthoredPotComponent = nullptr;
+		if (PotDefinition)
 		{
-			if (Definition->PlantTypeTag == TEXT("Flowering"))
+			if (UClass* PotActorClass =
+					PotDefinition->WorldActorClass.LoadSynchronous())
 			{
-				PlantScale = FVector(0.24f, 0.24f, 0.50f);
+				if (const ABotanicusInteractableActor* PotDefaults =
+						Cast<ABotanicusInteractableActor>(
+							PotActorClass->GetDefaultObject()))
+				{
+					AuthoredPotComponent = PotDefaults->Mesh;
+				}
 			}
-			else if (Definition->PlantTypeTag == TEXT("Foliage"))
+			if (AuthoredPotComponent &&
+				AuthoredPotComponent->GetStaticMesh())
 			{
-				PlantScale = FVector(0.40f, 0.35f, 0.32f);
+				PotMesh = AuthoredPotComponent->GetStaticMesh();
+				PotScale = AuthoredPotComponent->GetRelativeScale3D();
+				PotRotation = AuthoredPotComponent->GetRelativeRotation();
 			}
-			else if (Definition->PlantColorTag == TEXT("Purple"))
+			else
 			{
-				PlantScale = FVector(0.21f, 0.21f, 0.52f);
-			}
-			if (!CarriedPlantMaterial)
-			{
-				CarriedPlantMaterial =
-					CarriedPlantVisual->
-						CreateAndSetMaterialInstanceDynamic(0);
-			}
-			if (CarriedPlantMaterial)
-			{
-				CarriedPlantMaterial->SetVectorParameterValue(
-					TEXT("Color"),
-					VisitorPlantVisualColor(
-						Definition->PlantColorTag));
+				PotMesh = PotDefinition->WorldMesh.LoadSynchronous();
+				PotScale = PotDefinition->WorldScale;
 			}
 		}
-		CarriedPlantVisual->SetRelativeScale3D(PlantScale);
+		if (!PotMesh)
+		{
+			PotMesh = LoadObject<UStaticMesh>(
+				nullptr, TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+		}
+		if (PotMesh)
+		{
+			CarriedPotVisual->SetStaticMesh(PotMesh);
+			CarriedPotVisual->SetRelativeRotation(PotRotation);
+			CarriedPotVisual->SetRelativeScale3D(PotScale);
+			CarriedPotVisual->EmptyOverrideMaterials();
+			if (AuthoredPotComponent)
+			{
+				for (int32 MaterialIndex = 0;
+					 MaterialIndex < AuthoredPotComponent->GetNumMaterials();
+					 ++MaterialIndex)
+				{
+					CarriedPotVisual->SetMaterial(
+						MaterialIndex,
+						AuthoredPotComponent->GetMaterial(MaterialIndex));
+				}
+			}
+			const FBox PotBounds = PotMesh->GetBoundingBox().TransformBy(
+				FTransform(PotRotation, FVector::ZeroVector, PotScale));
+			CarriedPotVisual->SetRelativeLocation(FVector(
+				CarryCentreX - PotBounds.GetCenter().X,
+				-PotBounds.GetCenter().Y,
+				CarryCentreZ - PotBounds.GetCenter().Z));
+			PlantBaseHeight = CarryCentreZ +
+				PotBounds.GetSize().Z * 0.32f;
+		}
 	}
+
+	if (!CarriedPlantVisual)
+	{
+		return;
+	}
+	CarriedPlantVisual->SetVisibility(bCarryingPlant);
+	UStaticMesh* MaturePlantMesh =
+		PlantDefinition && !PlantDefinition->MatureGrowthMesh.IsNull()
+			? PlantDefinition->MatureGrowthMesh.LoadSynchronous()
+			: nullptr;
+	if (MaturePlantMesh)
+	{
+		if (CarriedPlantVisual->GetStaticMesh() != MaturePlantMesh)
+		{
+			CarriedPlantVisual->SetStaticMesh(MaturePlantMesh);
+			CarriedPlantVisual->EmptyOverrideMaterials();
+			CarriedPlantMaterial = nullptr;
+		}
+		const FBox PlantBounds = MaturePlantMesh->GetBoundingBox();
+		const float DesiredHeight = FMath::Max(
+			0.1f, PlantDefinition->MatureGrowthVisualHeight) * 0.70f;
+		const float UniformScale = DesiredHeight /
+			FMath::Max(0.01f, PlantBounds.GetSize().Z);
+		const FVector PlantCentre = PlantBounds.GetCenter();
+		CarriedPlantVisual->SetRelativeScale3D(FVector(UniformScale));
+		CarriedPlantVisual->SetRelativeLocation(FVector(
+			CarryCentreX - PlantCentre.X * UniformScale,
+			-PlantCentre.Y * UniformScale,
+			PlantBaseHeight - PlantBounds.Min.Z * UniformScale));
+		return;
+	}
+
+	if (UStaticMesh* FallbackMesh = LoadObject<UStaticMesh>(
+		nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere")))
+	{
+		if (CarriedPlantVisual->GetStaticMesh() != FallbackMesh)
+		{
+			CarriedPlantVisual->SetStaticMesh(FallbackMesh);
+			CarriedPlantVisual->EmptyOverrideMaterials();
+			CarriedPlantMaterial = nullptr;
+		}
+	}
+	FVector PlantScale(0.29f, 0.29f, 0.42f);
+	if (PlantItemDefinition)
+	{
+		if (PlantItemDefinition->PlantTypeTag == TEXT("Flowering"))
+		{
+			PlantScale = FVector(0.24f, 0.24f, 0.50f);
+		}
+		else if (PlantItemDefinition->PlantTypeTag == TEXT("Foliage"))
+		{
+			PlantScale = FVector(0.40f, 0.35f, 0.32f);
+		}
+		else if (PlantItemDefinition->PlantColorTag == TEXT("Purple"))
+		{
+			PlantScale = FVector(0.21f, 0.21f, 0.52f);
+		}
+		if (!CarriedPlantMaterial)
+		{
+			CarriedPlantMaterial = CarriedPlantVisual->
+				CreateAndSetMaterialInstanceDynamic(0);
+		}
+		if (CarriedPlantMaterial)
+		{
+			CarriedPlantMaterial->SetVectorParameterValue(
+				TEXT("Color"),
+				VisitorPlantVisualColor(
+					PlantItemDefinition->PlantColorTag));
+		}
+	}
+	CarriedPlantVisual->SetRelativeLocation(FVector(
+		CarryCentreX, 0.0f, PlantBaseHeight + 32.0f));
+	CarriedPlantVisual->SetRelativeScale3D(PlantScale);
 }
 
 bool ABotanicusVisitorCharacter::IsInsideSalesArea() const
@@ -1223,6 +1345,7 @@ void ABotanicusVisitorCharacter::BeginDeparture(
 	{
 		bCarryingPlant = false;
 		CarriedPlantItemKey = NAME_None;
+		CarriedPotItemKey = NAME_None;
 		RefreshCarriedPlantVisuals();
 	}
 	VisitorState = EBotanicusVisitorState::Leaving;
@@ -1267,6 +1390,7 @@ void ABotanicusVisitorCharacter::BeginShopClosureDeparture()
 	bReturningToRoute = false;
 	bCarryingPlant = false;
 	CarriedPlantItemKey = NAME_None;
+	CarriedPotItemKey = NAME_None;
 	CheckoutStage = 0;
 	AssignedSelfCheckout = nullptr;
 	SelfCheckoutElapsed = 0.0f;

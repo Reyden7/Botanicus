@@ -188,6 +188,8 @@ private:
 	bool bCarryingPlant = false;
 	UPROPERTY(ReplicatedUsing=OnRep_CarriedPlant)
 	FName CarriedPlantItemKey = NAME_None;
+	UPROPERTY(ReplicatedUsing=OnRep_CarriedPlant)
+	FName CarriedPotItemKey = NAME_None;
 	UPROPERTY(ReplicatedUsing=OnRep_VisitorState)
 	uint8 CheckoutStage = 0;
 	UPROPERTY(ReplicatedUsing=OnRep_VisitorState)

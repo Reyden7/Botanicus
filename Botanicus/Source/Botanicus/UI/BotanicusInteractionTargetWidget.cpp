@@ -87,6 +87,8 @@ void UBotanicusInteractionTargetWidget::NativeOnInitialized()
 		Brush.Margin = FMargin(0.0f);
 		ActionBackground->SetBrush(Brush);
 	}
+	EnsureHoldRing();
+	RefreshHoldRing();
 	SetVisibility(ESlateVisibility::Collapsed);
 }
 
@@ -166,6 +168,7 @@ void UBotanicusInteractionTargetWidget::BeginLocalHoldProgress(
 	}
 	SetVisibility(ESlateVisibility::HitTestInvisible);
 	InvalidateLayoutAndVolatility();
+	RefreshHoldRing();
 }
 
 void UBotanicusInteractionTargetWidget::EndLocalHoldProgress()
@@ -175,6 +178,7 @@ void UBotanicusInteractionTargetWidget::EndLocalHoldProgress()
 	LocalHoldElapsed = 0.0f;
 	HoldProgress = 0.0f;
 	InvalidateLayoutAndVolatility();
+	RefreshHoldRing();
 }
 
 void UBotanicusInteractionTargetWidget::NativeTick(
@@ -194,6 +198,7 @@ void UBotanicusInteractionTargetWidget::NativeTick(
 		1.0f);
 	bShowHoldProgress = true;
 	InvalidateLayoutAndVolatility();
+	RefreshHoldRing();
 }
 
 void UBotanicusInteractionTargetWidget::SetPlantInspectPrompt(
@@ -265,6 +270,7 @@ void UBotanicusInteractionTargetWidget::SetLeftMousePrompt(
 	UpdateAdaptiveHeight();
 	SetVisibility(ESlateVisibility::HitTestInvisible);
 	InvalidateLayoutAndVolatility();
+	RefreshHoldRing();
 }
 
 void UBotanicusInteractionTargetWidget::SetHoldProgress(float InProgress)
@@ -272,6 +278,7 @@ void UBotanicusInteractionTargetWidget::SetHoldProgress(float InProgress)
 	HoldProgress = FMath::Clamp(InProgress, 0.0f, 1.0f);
 	bShowHoldProgress = true;
 	InvalidateLayoutAndVolatility();
+	RefreshHoldRing();
 }
 
 void UBotanicusInteractionTargetWidget::ClearTarget()
@@ -294,6 +301,7 @@ void UBotanicusInteractionTargetWidget::ClearTarget()
 	LocalHoldElapsed = 0.0f;
 	HoldProgress = 0.0f;
 	bShowHoldProgress = false;
+	RefreshHoldRing();
 	SetVisibility(ESlateVisibility::Collapsed);
 }
 
@@ -306,55 +314,83 @@ int32 UBotanicusInteractionTargetWidget::NativePaint(
 	const FWidgetStyle& InWidgetStyle,
 	bool bParentEnabled) const
 {
-	const int32 Result = Super::NativePaint(
+	return Super::NativePaint(
 		Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId,
 		InWidgetStyle, bParentEnabled);
-	if (!bShowHoldProgress || !KeyIcon)
+}
+
+void UBotanicusInteractionTargetWidget::EnsureHoldRing()
+{
+	if (!WidgetTree || !KeyIcon || HoldRingSegments.Num() > 0)
 	{
-		return Result;
+		return;
 	}
 
-	const FGeometry KeyGeometry = KeyIcon->GetCachedGeometry();
-	const FVector2D KeyLocalSize = KeyGeometry.GetLocalSize();
-	// Convert the key's own local centre through Slate's complete accumulated
-	// transform. Building the point from AbsolutePosition + AbsoluteSize was
-	// only correct at DPI scale 1 and could place the arc outside the widget in
-	// a smaller remote-client PIE window.
-	const FVector2D Center = AllottedGeometry.AbsoluteToLocal(
-		KeyGeometry.LocalToAbsolute(KeyLocalSize * 0.5f));
-	const float Radius = FMath::Max(
-		25.0f, FMath::Max(KeyLocalSize.X, KeyLocalSize.Y) * 0.5f + 5.0f);
+	UCanvasPanel* ParentCanvas = Cast<UCanvasPanel>(KeyIcon->GetParent());
+	UCanvasPanelSlot* KeySlot = Cast<UCanvasPanelSlot>(KeyIcon->Slot);
+	if (!ParentCanvas || !KeySlot)
+	{
+		return;
+	}
+
 	constexpr int32 SegmentCount = 40;
-	auto BuildArc = [Center, Radius](float Fraction, TArray<FVector2D>& Points)
-	{
-		const int32 VisibleSegments = FMath::Clamp(
-			FMath::CeilToInt(SegmentCount * Fraction), 1, SegmentCount);
-		Points.Reserve(VisibleSegments + 1);
-		for (int32 Index = 0; Index <= VisibleSegments; ++Index)
-		{
-			const float Angle = -UE_HALF_PI + UE_TWO_PI *
-				(static_cast<float>(Index) / SegmentCount);
-			Points.Add(Center + FVector2D(FMath::Cos(Angle),
-				FMath::Sin(Angle)) * Radius);
-		}
-	};
+	const FVector2D KeyPosition = KeySlot->GetPosition();
+	const FVector2D KeySize = KeySlot->GetSize();
+	const FVector2D Center = KeyPosition + KeySize * 0.5f;
+	const float Radius = FMath::Max(
+		25.0f,
+		FMath::Max(KeySize.X, KeySize.Y) * 0.5f + 5.0f);
+	const FAnchors KeyAnchors = KeySlot->GetAnchors();
 
-	TArray<FVector2D> BackgroundPoints;
-	BuildArc(1.0f, BackgroundPoints);
-	FSlateDrawElement::MakeLines(
-		OutDrawElements, Result + 1, AllottedGeometry.ToPaintGeometry(),
-		BackgroundPoints, ESlateDrawEffect::None,
-		FLinearColor(0.04f, 0.05f, 0.03f, 0.85f), true, 6.0f);
-	if (HoldProgress > KINDA_SMALL_NUMBER)
+	HoldRingSegments.Reserve(SegmentCount);
+	for (int32 Index = 0; Index < SegmentCount; ++Index)
 	{
-		TArray<FVector2D> ProgressPoints;
-		BuildArc(HoldProgress, ProgressPoints);
-		FSlateDrawElement::MakeLines(
-			OutDrawElements, Result + 2, AllottedGeometry.ToPaintGeometry(),
-			ProgressPoints, ESlateDrawEffect::None,
-			FLinearColor(0.62f, 0.95f, 0.20f, 1.0f), true, 6.0f);
+		const float Angle = -UE_HALF_PI + UE_TWO_PI *
+			(static_cast<float>(Index) / SegmentCount);
+		UImage* Segment = WidgetTree->ConstructWidget<UImage>();
+		Segment->SetBrush(
+			*FCoreStyle::Get().GetBrush(TEXT("WhiteBrush")));
+		Segment->SetVisibility(ESlateVisibility::Collapsed);
+		Segment->SetRenderTransformAngle(FMath::RadiansToDegrees(Angle) + 90.0f);
+
+		if (UCanvasPanelSlot* SegmentSlot =
+				ParentCanvas->AddChildToCanvas(Segment))
+		{
+			SegmentSlot->SetAnchors(KeyAnchors);
+			SegmentSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+			SegmentSlot->SetPosition(
+				Center + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) *
+					Radius);
+			SegmentSlot->SetSize(FVector2D(4.5f, 8.0f));
+			SegmentSlot->SetZOrder(KeySlot->GetZOrder() + 2);
+		}
+		HoldRingSegments.Add(Segment);
 	}
-	return Result + 2;
+}
+
+void UBotanicusInteractionTargetWidget::RefreshHoldRing()
+{
+	EnsureHoldRing();
+	const int32 ActiveSegmentCount = FMath::Clamp(
+		FMath::CeilToInt(HoldProgress * HoldRingSegments.Num()),
+		0,
+		HoldRingSegments.Num());
+	for (int32 Index = 0; Index < HoldRingSegments.Num(); ++Index)
+	{
+		UImage* Segment = HoldRingSegments[Index];
+		if (!Segment)
+		{
+			continue;
+		}
+		Segment->SetVisibility(
+			bShowHoldProgress
+				? ESlateVisibility::HitTestInvisible
+				: ESlateVisibility::Collapsed);
+		Segment->SetColorAndOpacity(
+			Index < ActiveSegmentCount
+				? FLinearColor(0.62f, 0.95f, 0.20f, 1.0f)
+				: FLinearColor(0.08f, 0.10f, 0.06f, 0.92f));
+	}
 }
 
 void UBotanicusInteractionTargetWidget::UpdateAdaptiveHeight()

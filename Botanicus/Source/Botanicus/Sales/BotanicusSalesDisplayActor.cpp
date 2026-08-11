@@ -16,6 +16,7 @@
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/GameStateBase.h"
+#include "Growing/BotanicusPlantSubsystem.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
 #include "QuickBar/BotanicusQuickBarComponent.h"
@@ -906,6 +907,22 @@ void ABotanicusSalesDisplayActor::RefreshVisuals()
 		GetDisplayedPlantDefinition();
 	const bool bHasPlant =
 		!DisplayedPlantItemKey.IsNone() && Definition;
+	const UGameInstance* PlantGameInstance = GetGameInstance();
+	const UBotanicusPlantSubsystem* Plants =
+		PlantGameInstance
+			? PlantGameInstance->GetSubsystem<UBotanicusPlantSubsystem>()
+			: nullptr;
+	const FBotanicusPlantDefinition* PlantDefinition =
+		Plants
+			? Plants->FindPlantByHarvestItem(DisplayedPlantItemKey)
+			: nullptr;
+	UStaticMesh* MaturePlantMesh =
+		PlantDefinition && !PlantDefinition->MatureGrowthMesh.IsNull()
+			? PlantDefinition->MatureGrowthMesh.LoadSynchronous()
+			: nullptr;
+	float MaturePlantUniformScale = 1.0f;
+	FVector MaturePlantHorizontalOffset = FVector::ZeroVector;
+	float MaturePlantHeight = 0.0f;
 	if (PlantVisual)
 	{
 		PlantVisual->SetVisibility(
@@ -914,23 +931,58 @@ void ABotanicusSalesDisplayActor::RefreshVisuals()
 		FVector FoliageShape;
 		GetMatureDisplayedPlantShape(
 			DisplayedPlantItemKey, StemHeight, FoliageShape);
-		const FVector PlantScale = FoliageShape * 0.32f;
-		if (Definition)
+		if (MaturePlantMesh)
 		{
-			if (!PlantMaterial)
+			if (PlantVisual->GetStaticMesh() != MaturePlantMesh)
 			{
-				PlantMaterial =
-					PlantVisual->CreateAndSetMaterialInstanceDynamic(0);
+				PlantVisual->SetStaticMesh(MaturePlantMesh);
+				PlantVisual->EmptyOverrideMaterials();
+				PlantMaterial = nullptr;
 			}
-			if (PlantMaterial)
+			const FBox MeshBounds = MaturePlantMesh->GetBoundingBox();
+			MaturePlantHeight = FMath::Max(
+				0.1f, PlantDefinition->MatureGrowthVisualHeight) *
+				DisplayedPlantHeightMultiplier;
+			MaturePlantUniformScale = MaturePlantHeight /
+				FMath::Max(0.01f, MeshBounds.GetSize().Z);
+			const FVector MeshCentre = MeshBounds.GetCenter();
+			MaturePlantHorizontalOffset = FVector(
+				-MeshCentre.X * MaturePlantUniformScale,
+				-MeshCentre.Y * MaturePlantUniformScale,
+				-MeshBounds.Min.Z * MaturePlantUniformScale);
+			PlantVisual->SetRelativeScale3D(
+				FVector(MaturePlantUniformScale));
+		}
+		else
+		{
+			if (UStaticMesh* FallbackMesh = LoadObject<UStaticMesh>(
+				nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere")))
 			{
-				PlantMaterial->SetVectorParameterValue(
-					TEXT("Color"),
-					SalesDisplayPlantVisualColor(
-						Definition->PlantColorTag));
+				if (PlantVisual->GetStaticMesh() != FallbackMesh)
+				{
+					PlantVisual->SetStaticMesh(FallbackMesh);
+					PlantVisual->EmptyOverrideMaterials();
+					PlantMaterial = nullptr;
+				}
+			}
+			const FVector PlantScale = FoliageShape * 0.32f;
+			PlantVisual->SetRelativeScale3D(PlantScale);
+			if (Definition)
+			{
+				if (!PlantMaterial)
+				{
+					PlantMaterial =
+						PlantVisual->CreateAndSetMaterialInstanceDynamic(0);
+				}
+				if (PlantMaterial)
+				{
+					PlantMaterial->SetVectorParameterValue(
+						TEXT("Color"),
+						SalesDisplayPlantVisualColor(
+							Definition->PlantColorTag));
+				}
 			}
 		}
-		PlantVisual->SetRelativeScale3D(PlantScale);
 	}
 	float DisplayedPlantBaseHeight = 86.0f;
 	if (PotVisual)
@@ -1028,7 +1080,8 @@ void ABotanicusSalesDisplayActor::RefreshVisuals()
 	if (StemVisual)
 	{
 		StemVisual->SetVisibility(
-			bHasPlant && !bPlantTakenByVisitor);
+			bHasPlant && !bPlantTakenByVisitor &&
+			MaturePlantMesh == nullptr);
 		StemVisual->SetRelativeLocation(FVector(
 			0.0f,
 			0.0f,
@@ -1038,19 +1091,27 @@ void ABotanicusSalesDisplayActor::RefreshVisuals()
 	}
 	if (PlantVisual)
 	{
-		PlantVisual->SetRelativeLocation(FVector(
-			0.0f,
-			0.0f,
-			DisplayedPlantBaseHeight + StemHeight));
+		PlantVisual->SetRelativeLocation(
+			MaturePlantMesh
+				? FVector(
+					MaturePlantHorizontalOffset.X,
+					MaturePlantHorizontalOffset.Y,
+					DisplayedPlantBaseHeight +
+						MaturePlantHorizontalOffset.Z)
+				: FVector(
+					0.0f,
+					0.0f,
+					DisplayedPlantBaseHeight + StemHeight));
 	}
 	if (OccupiedDisplayWidget && bHasPlant)
 	{
 		const float SlotHeight = SalePotSlot
 			? SalePotSlot->GetRelativeLocation().Z
 			: GetDisplaySurfaceHeight();
-		const float FoliageTop =
-			SlotHeight + DisplayedPlantBaseHeight + StemHeight +
-			50.0f * FoliageShape.Z * 0.32f;
+		const float FoliageTop = MaturePlantMesh
+			? SlotHeight + DisplayedPlantBaseHeight + MaturePlantHeight
+			: SlotHeight + DisplayedPlantBaseHeight + StemHeight +
+				50.0f * FoliageShape.Z * 0.32f;
 		OccupiedDisplayWidget->SetRelativeLocation(FVector(
 			0.0f,
 			0.0f,
