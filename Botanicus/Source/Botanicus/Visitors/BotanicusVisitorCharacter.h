@@ -47,7 +47,9 @@ public:
 	void InitializeQueuedCircuit(
 		const TArray<FVector>& InRoutePoints,
 		int32 InCheckoutWaypointIndex,
-		const FVector& InQueueDestination);
+		const FVector& InQueueDestination,
+		const TArray<FVector>& InArrivalRoute,
+		const TArray<FVector>& InDirectReturnRoute);
 	void SetQueueDestination(const FVector& InQueueDestination);
 	FVector GetVariedQueueDestination(
 		const FVector& BaseDestination,
@@ -124,6 +126,7 @@ private:
 	void RefreshCarriedPlantVisuals();
 	bool IsInsideSalesArea() const;
 	void FollowRoute(float DeltaSeconds);
+	void SwitchToDirectReturnRoute();
 	void UpdateStuckDetection(float DeltaSeconds);
 	void RefreshStatusText();
 
@@ -156,6 +159,9 @@ private:
 
 	FVector EntranceLocation = FVector::ZeroVector;
 	TArray<FVector> RoutePoints;
+	TArray<FVector> PurchaseRoute;
+	TArray<FVector> DirectReturnRoute;
+	int32 PurchaseCheckoutWaypointIndex = INDEX_NONE;
 	int32 RouteWaypointIndex = 0;
 	int32 CheckoutWaypointIndex = INDEX_NONE;
 	bool bPlantSelected = false;

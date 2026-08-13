@@ -27,6 +27,8 @@ class BOTANICUS_API ABotanicusVisitorZoneActor : public AActor
 
 public:
 	ABotanicusVisitorZoneActor();
+	virtual void BeginPlay() override;
+	virtual void OnConstruction(const FTransform& Transform) override;
 
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -47,6 +49,7 @@ private:
 	void OnRep_ZoneConfiguration();
 
 	void RefreshVisuals();
+	void SnapToUnderlyingGround();
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UBoxComponent> ZoneBounds;
@@ -57,11 +60,13 @@ private:
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UTextRenderComponent> ZoneLabel;
 
-	UPROPERTY(ReplicatedUsing=OnRep_ZoneConfiguration)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, ReplicatedUsing=OnRep_ZoneConfiguration,
+		Category="Botanicus|Zone", meta=(AllowPrivateAccess="true"))
 	EBotanicusVisitorZoneType ZoneType =
 		EBotanicusVisitorZoneType::SalesArea;
 
-	UPROPERTY(ReplicatedUsing=OnRep_ZoneConfiguration)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, ReplicatedUsing=OnRep_ZoneConfiguration,
+		Category="Botanicus|Zone", meta=(AllowPrivateAccess="true", ClampMin="2.0"))
 	FVector BoxExtent = FVector(500.0f, 400.0f, 8.0f);
 
 	UPROPERTY(Transient)

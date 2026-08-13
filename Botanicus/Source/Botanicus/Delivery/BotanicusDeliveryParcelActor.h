@@ -39,6 +39,11 @@ public:
 	int32 GetQuantity() const { return Quantity; }
 	uint16 GetCutCoverageMask() const { return CutCoverageMask; }
 	bool IsOpened() const { return bOpened; }
+	float GetCutProgress() const
+	{
+		return static_cast<float>(CountCutSegments()) /
+			static_cast<float>(TapeSegmentCount);
+	}
 	FVector GetParcelHalfExtent() const { return ParcelHalfExtent; }
 
 private:

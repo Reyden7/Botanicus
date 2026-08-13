@@ -886,15 +886,17 @@ void ABotanicusGameMode::RestoreWorldState()
 	{
 		ExistingPaths.Add(*PathIt);
 	}
+	const bool bHasSavedPaths = !CurrentSaveGame->Paths.IsEmpty();
 	for (ABotanicusPathActor* ExistingPath : ExistingPaths)
 	{
-		if (IsValid(ExistingPath))
+		if (bHasSavedPaths && IsValid(ExistingPath))
 		{
 			ExistingPath->Destroy();
 		}
 	}
 
 	int32 RestoredPathCount = 0;
+	if (bHasSavedPaths)
 	for (const FBotanicusSavedPath& SavedPath : CurrentSaveGame->Paths)
 	{
 		if (SavedPath.Points.Num() < 2)
@@ -942,14 +944,17 @@ void ABotanicusGameMode::RestoreWorldState()
 		RestoredPathCount,
 		CurrentSaveGame->Paths.Num());
 
-	for (TActorIterator<ABotanicusVisitorZoneActor> ZoneIt(World);
-		 ZoneIt;
-		 ++ZoneIt)
+	const bool bHasSavedVisitorZones =
+		CurrentSaveGame->SaveVersion >= 11 &&
+		!CurrentSaveGame->VisitorZones.IsEmpty();
+	if (bHasSavedVisitorZones)
 	{
-		ZoneIt->Destroy();
-	}
-	if (CurrentSaveGame->SaveVersion >= 11)
-	{
+		for (TActorIterator<ABotanicusVisitorZoneActor> ZoneIt(World);
+			 ZoneIt;
+			 ++ZoneIt)
+		{
+			ZoneIt->Destroy();
+		}
 		for (const FBotanicusSavedVisitorZone& SavedZone :
 			 CurrentSaveGame->VisitorZones)
 		{
@@ -987,14 +992,17 @@ void ABotanicusGameMode::RestoreWorldState()
 		}
 	}
 
-	for (TActorIterator<ABotanicusRefundZoneActor> ZoneIt(World);
-		 ZoneIt;
-		 ++ZoneIt)
+	const bool bHasSavedRefundZones =
+		CurrentSaveGame->SaveVersion >= 21 &&
+		!CurrentSaveGame->RefundZones.IsEmpty();
+	if (bHasSavedRefundZones)
 	{
-		ZoneIt->Destroy();
-	}
-	if (CurrentSaveGame->SaveVersion >= 21)
-	{
+		for (TActorIterator<ABotanicusRefundZoneActor> ZoneIt(World);
+			 ZoneIt;
+			 ++ZoneIt)
+		{
+			ZoneIt->Destroy();
+		}
 		for (const FBotanicusSavedRefundZone& SavedZone :
 			 CurrentSaveGame->RefundZones)
 		{
@@ -1109,6 +1117,32 @@ void ABotanicusGameMode::RestoreWorldState()
 		}
 
 		UClass* ItemClass = SavedItem.ActorClass.TryLoadClass<AActor>();
+		// Migrate pots saved before PlantPot used its authored Blueprint class.
+		// Otherwise an existing save would keep spawning the old native cylinder.
+		if (SavedItem.ItemKey == TEXT("PlantPot"))
+		{
+			if (UClass* PlantPotBlueprintClass =
+					LoadClass<ABotanicusPlantPotActor>(
+						nullptr,
+						TEXT(
+							"/Game/Botanicus/blueprints/BP_Item_PlantPot.BP_Item_PlantPot_C")))
+			{
+				ItemClass = PlantPotBlueprintClass;
+			}
+		}
+		// SalePot used to be restored as its native fallback class, which
+		// discarded the mesh authored in BP_Item_SalePot.
+		else if (SavedItem.ItemKey == TEXT("SalePot"))
+		{
+			if (UClass* SalePotBlueprintClass =
+					LoadClass<ABotanicusSalePotActor>(
+						nullptr,
+						TEXT(
+							"/Game/Botanicus/blueprints/BP_Item_SalePot.BP_Item_SalePot_C")))
+			{
+				ItemClass = SalePotBlueprintClass;
+			}
+		}
 		if (!ItemClass ||
 			(!ItemClass->IsChildOf(
 				 ABotanicusDeliveryParcelActor::StaticClass()) &&
@@ -1327,34 +1361,6 @@ void ABotanicusGameMode::EnsureStarterFixtures(
 		}
 	}
 
-	bool bHasComputer = false;
-	for (TActorIterator<ABotanicusComputerActor> It(World); It; ++It)
-	{
-		bHasComputer |= !It->ActorHasTag(
-			TEXT("BotanicusPlacementPreview"));
-	}
-	if (!bHasComputer)
-	{
-		const FVector Location = ResolveFloorLocation(
-			Pawn->GetActorLocation() +
-				Forward * 190.0f +
-				Right * 110.0f,
-			42.0f);
-		if (ABotanicusComputerActor* Computer =
-				World->SpawnActor<ABotanicusComputerActor>(
-					ABotanicusComputerActor::StaticClass(),
-					Location,
-					Pawn->GetActorRotation(),
-					SpawnParameters))
-		{
-			Computer->InitializePlacedItem(
-				TEXT("CommandComputer"),
-				1);
-			Computer->ForceNetUpdate();
-			bCreatedFixture = true;
-		}
-	}
-
 	bool bHasWorkbench = false;
 	for (TActorIterator<ABotanicusPreparationWorkbenchActor> It(World);
 		 It;
@@ -1370,11 +1376,20 @@ void ABotanicusGameMode::EnsureStarterFixtures(
 				Forward * 320.0f -
 				Right * 170.0f,
 			0.0f);
+		UClass* WorkbenchClass = LoadClass<
+			ABotanicusPreparationWorkbenchActor>(
+				nullptr,
+				TEXT(
+					"/Game/Botanicus/blueprints/BP_WorkBench.BP_WorkBench_C"));
+		if (!WorkbenchClass)
+		{
+			WorkbenchClass =
+				ABotanicusPreparationWorkbenchActor::StaticClass();
+		}
 		if (ABotanicusPreparationWorkbenchActor* Workbench =
 				World->SpawnActor<
 					ABotanicusPreparationWorkbenchActor>(
-					ABotanicusPreparationWorkbenchActor::
-						StaticClass(),
+					WorkbenchClass,
 					Location,
 					Pawn->GetActorRotation(),
 					SpawnParameters))
@@ -1571,6 +1586,90 @@ void ABotanicusGameMode::RestorePlayerInventory(AController* Controller)
 				}
 			}
 		};
+	const auto GrantStarterComputer =
+		[this, Controller, QuickBar]()
+		{
+			constexpr int32 ComputerSlotIndex = 1;
+			UWorld* World = GetWorld();
+			if (!World || Controller != World->GetFirstPlayerController())
+			{
+				return;
+			}
+
+			const TArray<FBotanicusQuickBarSlot> CurrentSlots =
+				QuickBar->GetSlots();
+			const int32 ExistingComputerSlot =
+				CurrentSlots.IndexOfByPredicate(
+					[](const FBotanicusQuickBarSlot& Slot)
+					{
+						return !Slot.IsEmpty() &&
+							Slot.ItemKey == TEXT("CommandComputer");
+					});
+			if (ExistingComputerSlot != INDEX_NONE)
+			{
+				if (ExistingComputerSlot != ComputerSlotIndex)
+				{
+					// Preserve the former contents of slot 2 by swapping them
+					// into the computer's previous slot.
+					QuickBar->SwapSlotsAuthoritative(
+						ExistingComputerSlot,
+						ComputerSlotIndex);
+				}
+				return;
+			}
+
+			// A computer restored from a save remains the unique shared shop
+			// computer. Do not give player one a replacement after it was placed.
+			for (TActorIterator<ABotanicusComputerActor> It(World); It; ++It)
+			{
+				if (IsValid(*It) &&
+					!It->ActorHasTag(TEXT("BotanicusPlacementPreview")))
+				{
+					return;
+				}
+			}
+
+			if (CurrentSlots.IsValidIndex(ComputerSlotIndex) &&
+				!CurrentSlots[ComputerSlotIndex].IsEmpty())
+			{
+				const int32 EmptySlot = CurrentSlots.IndexOfByPredicate(
+					[](const FBotanicusQuickBarSlot& Slot)
+					{
+						return Slot.IsEmpty();
+					});
+				if (EmptySlot == INDEX_NONE)
+				{
+					UE_LOG(
+						LogBotanicus,
+						Warning,
+						TEXT(
+							"Could not reserve quickbar slot 2 for the starter computer: the quickbar has no free slot."));
+					return;
+				}
+				QuickBar->SwapSlotsAuthoritative(
+					ComputerSlotIndex,
+					EmptySlot);
+			}
+
+			if (QuickBar->SetSlotItem(
+				ComputerSlotIndex,
+				TEXT("CommandComputer")))
+			{
+				UE_LOG(
+					LogBotanicus,
+					Display,
+					TEXT(
+						"Added the starter computer to player one's quickbar slot 2."));
+			}
+			else
+			{
+				UE_LOG(
+					LogBotanicus,
+					Warning,
+					TEXT(
+						"Could not add the starter computer: player one's quickbar has no free slot."));
+			}
+		};
 
 	FBotanicusSavedPlayerInventory* SavedInventory =
 		CurrentSaveGame->PlayerInventories.FindByPredicate(
@@ -1581,6 +1680,7 @@ void ABotanicusGameMode::RestorePlayerInventory(AController* Controller)
 	if (!SavedInventory)
 	{
 		GrantStarterCutter();
+		GrantStarterComputer();
 		return;
 	}
 	if (SavedInventory->bHasPawnTransform)
@@ -1610,6 +1710,7 @@ void ABotanicusGameMode::RestorePlayerInventory(AController* Controller)
 	// delivery cartons. This also repairs version-16 saves made before the
 	// cutter could be inserted into an available quickbar slot.
 	GrantStarterCutter();
+	GrantStarterComputer();
 
 	int32 RestoredSlotCount = 0;
 	int32 RestoredItemQuantity = 0;

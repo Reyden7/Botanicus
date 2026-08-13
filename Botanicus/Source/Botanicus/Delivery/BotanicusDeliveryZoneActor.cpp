@@ -19,15 +19,14 @@ ABotanicusDeliveryZoneActor::ABotanicusDeliveryZoneActor()
 
 	Pad = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Delivery Pad"));
 	Pad->SetupAttachment(Root);
-	Pad->SetCollisionProfileName(TEXT("BlockAll"));
-	Pad->SetRelativeLocation(FVector(0.0f, 0.0f, 8.0f));
-	Pad->SetRelativeScale3D(FVector(4.8f, 4.8f, 0.15f));
+	Pad->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Pad->SetRelativeLocation(FVector(0.0f, 0.0f, 0.25f));
 
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(
-		TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (CubeFinder.Succeeded())
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> PlaneFinder(
+		TEXT("/Engine/BasicShapes/Plane.Plane"));
+	if (PlaneFinder.Succeeded())
 	{
-		Pad->SetStaticMesh(CubeFinder.Object);
+		Pad->SetStaticMesh(PlaneFinder.Object);
 	}
 
 	ZoneLabel = CreateDefaultSubobject<UTextRenderComponent>(
@@ -44,6 +43,34 @@ ABotanicusDeliveryZoneActor::ABotanicusDeliveryZoneActor()
 			"ZONE DE LIVRAISON"));
 	ZoneLabel->SetTextRenderColor(FColor(255, 210, 45));
 	ZoneLabel->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	RefreshVisuals();
+}
+
+void ABotanicusDeliveryZoneActor::BeginPlay()
+{
+	Super::BeginPlay();
+	if (HasAuthority())
+	{
+		SnapToUnderlyingGround();
+	}
+}
+
+void ABotanicusDeliveryZoneActor::OnConstruction(
+	const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	RefreshVisuals();
+}
+
+void ABotanicusDeliveryZoneActor::RefreshVisuals()
+{
+	if (Pad)
+	{
+		Pad->SetRelativeLocation(FVector(0.0f, 0.0f, 0.25f));
+		Pad->SetRelativeScale3D(
+			FVector(ZoneSize.X / 100.0f, ZoneSize.Y / 100.0f, 1.0f));
+		Pad->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
 }
 
 FVector ABotanicusDeliveryZoneActor::GetParcelSpawnLocation(
@@ -55,5 +82,35 @@ FVector ABotanicusDeliveryZoneActor::GetParcelSpawnLocation(
 		FVector(
 			(Column - 1) * 160.0f,
 			(Row % 3 - 1) * 160.0f,
-			16.0f);
+			0.0f);
+}
+
+void ABotanicusDeliveryZoneActor::SnapToUnderlyingGround()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	FCollisionQueryParams QueryParams(
+		SCENE_QUERY_STAT(BotanicusDeliveryZoneGround),
+		false,
+		this);
+	FHitResult GroundHit;
+	const FVector Location = GetActorLocation();
+	if (World->LineTraceSingleByChannel(
+			GroundHit,
+			Location + FVector(0.0f, 0.0f, 1.0f),
+			Location - FVector(0.0f, 0.0f, 1000.0f),
+			ECC_Visibility,
+			QueryParams))
+	{
+		SetActorLocation(
+			FVector(Location.X, Location.Y, GroundHit.ImpactPoint.Z),
+			false,
+			nullptr,
+			ETeleportType::TeleportPhysics);
+		ForceNetUpdate();
+	}
 }

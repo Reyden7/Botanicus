@@ -127,6 +127,11 @@ bool ReadSalePotBlueprintBoolSetting(
 
 ABotanicusSalePotActor::ABotanicusSalePotActor()
 {
+	// Sale pots are authored through BP_Item_SalePot (and its variants).
+	// Preserve the Blueprint mesh and its transform when the item definition is
+	// applied; the native cylinder below is only a fallback for the C++ class.
+	bUseBlueprintAppearance = true;
+
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.TickInterval = 0.05f;
 

@@ -14,206 +14,82 @@ void UBotanicusPlantSubsystem::Initialize(
 		LoadedCatalog = Settings->Catalog.LoadSynchronous();
 	}
 
-	FBotanicusPlantDefinition& Basil =
-		NativeFallbackPlants.AddDefaulted_GetRef();
-	Basil.PlantKey = TEXT("Basil");
-	Basil.SeedItemKey = TEXT("SeedPacket_Basil");
-	Basil.HarvestToolItemKey = TEXT("GardenTrowel");
-	Basil.HarvestItemKey = TEXT("Harvest_Basil");
-	Basil.CompatibleSaleSoilItemKey = TEXT("PottingSoil");
-	Basil.HarvestQuantity = 1;
-	Basil.HarvestDurationSeconds = 1.0f;
-	Basil.DisplayName =
-		NSLOCTEXT("BotanicusGrowing", "BasilName", "Basilic");
-	Basil.GrowthDurationSeconds = 120.0f;
-	Basil.MinimumHealthyWater = 0.25f;
-	Basil.MaximumHealthyWater = 0.9f;
-	Basil.WaterAddedPerUse = 0.35f;
-	Basil.WaterConsumptionPerSecond = 0.003f;
-
 	const auto AddPlant =
-		[this](
-			FName PlantKey,
-			FName SeedKey,
-			const FText& DisplayName,
-			FName HarvestKey,
-			float GrowthSeconds,
-			float MinimumWater,
-			float MaximumWater,
-			float WaterPerUse,
-			float WaterConsumption,
-			const FLinearColor& MatureColor,
-			EBotanicusPlantElement Element =
-				EBotanicusPlantElement::Normal)
+		[this](const TCHAR* Key,
+			const TCHAR* Name,
+			EBotanicusPlantElement Element)
 		{
 			FBotanicusPlantDefinition& Plant =
 				NativeFallbackPlants.AddDefaulted_GetRef();
-			Plant.PlantKey = PlantKey;
-			Plant.SeedItemKey = SeedKey;
-			Plant.DisplayName = DisplayName;
+			Plant.PlantKey = FName(Key);
+			Plant.SeedItemKey =
+				FName(*(FString(TEXT("SeedPacket_")) + Key));
+			Plant.DisplayName = FText::FromString(Name);
 			Plant.HarvestToolItemKey = TEXT("GardenTrowel");
-			Plant.HarvestItemKey = HarvestKey;
+			Plant.HarvestItemKey =
+				FName(*(FString(TEXT("Harvest_")) + Key));
 			Plant.CompatibleSaleSoilItemKey = TEXT("PottingSoil");
 			Plant.HarvestQuantity = 1;
 			Plant.HarvestDurationSeconds = 1.0f;
-			Plant.GrowthDurationSeconds = GrowthSeconds;
-			Plant.MinimumHealthyWater = MinimumWater;
-			Plant.MaximumHealthyWater = MaximumWater;
-			Plant.WaterAddedPerUse = WaterPerUse;
-			Plant.WaterConsumptionPerSecond = WaterConsumption;
-			Plant.MatureColor = MatureColor;
+			Plant.GrowthDurationSeconds = 240.0f;
+			Plant.MinimumHealthyWater = 0.30f;
+			Plant.MaximumHealthyWater = 0.80f;
+			Plant.WaterAddedPerUse = 0.30f;
+			Plant.WaterConsumptionPerSecond = 0.002f;
 			Plant.Element = Element;
+			Plant.MatureColor =
+				Element == EBotanicusPlantElement::Fire
+					? FLinearColor(1.0f, 0.12f, 0.01f, 1.0f)
+					: Element == EBotanicusPlantElement::Water
+						? FLinearColor(0.02f, 0.45f, 1.0f, 1.0f)
+						: Element == EBotanicusPlantElement::Ice
+							? FLinearColor(0.45f, 0.9f, 1.0f, 1.0f)
+							: Element == EBotanicusPlantElement::Shadow
+								? FLinearColor(0.16f, 0.01f, 0.28f, 1.0f)
+								: FLinearColor(0.42f, 0.72f, 0.20f, 1.0f);
+
+			// Until each variety receives authored meshes, reuse Aurélia's
+			// complete four-stage visual instead of reverting to primitives.
+			const FString MeshRoot =
+				TEXT("/Game/Botanicus/Items/itemsMesh/plantes/normal/")
+				TEXT("AuréliaDouce/");
+			Plant.SmallGrowthMesh = TSoftObjectPtr<UStaticMesh>(
+				FSoftObjectPath(MeshRoot + TEXT("niv1/niv1.niv1")));
+			Plant.MediumGrowthMesh = TSoftObjectPtr<UStaticMesh>(
+				FSoftObjectPath(MeshRoot + TEXT("niv2/niv2.niv2")));
+			Plant.LargeGrowthMesh = TSoftObjectPtr<UStaticMesh>(
+				FSoftObjectPath(MeshRoot + TEXT("niv3/niv3.niv3")));
+			Plant.MatureGrowthMesh = TSoftObjectPtr<UStaticMesh>(
+				FSoftObjectPath(MeshRoot + TEXT("niv4/niv4.niv4")));
 		};
-	AddPlant(
-		TEXT("Orchid"),
-		TEXT("SeedPacket_Orchid"),
-		NSLOCTEXT("BotanicusGrowing", "OrchidName", "Orchidee rose"),
-		TEXT("Harvest_Orchid"),
-		240.0f,
-		0.45f,
-		0.75f,
-		0.28f,
-		0.004f,
-		FLinearColor(0.95f, 0.22f, 0.58f, 1.0f));
-	AddPlant(
-		TEXT("Monstera"),
-		TEXT("SeedPacket_Monstera"),
-		NSLOCTEXT("BotanicusGrowing", "MonsteraName", "Monstera"),
-		TEXT("Harvest_Monstera"),
-		300.0f,
-		0.30f,
-		0.82f,
-		0.32f,
-		0.002f,
-		FLinearColor(0.05f, 0.42f, 0.16f, 1.0f));
-	AddPlant(
-		TEXT("Lavender"),
-		TEXT("SeedPacket_Lavender"),
-		NSLOCTEXT("BotanicusGrowing", "LavenderName", "Lavande violette"),
-		TEXT("Harvest_Lavender"),
-		180.0f,
-		0.18f,
-		0.62f,
-		0.25f,
-		0.0015f,
-		FLinearColor(0.48f, 0.20f, 0.78f, 1.0f));
-	AddPlant(
-		TEXT("Violet"),
-		TEXT("SeedPacket_Violet"),
-		NSLOCTEXT("BotanicusGrowing", "VioletName", "Violette"),
-		TEXT("Harvest_Violet"),
-		210.0f,
-		0.35f,
-		0.70f,
-		0.25f,
-		0.0025f,
-		FLinearColor(0.38f, 0.12f, 0.72f, 1.0f));
-	AddPlant(
-		TEXT("AureliaSweet"),
-		TEXT("SeedPacket_AureliaSweet"),
-		NSLOCTEXT(
-			"BotanicusGrowing",
-			"AureliaSweetName",
-			"Aurélia Douce"),
-		TEXT("Harvest_AureliaSweet"),
-		240.0f,
-		0.30f,
-		0.80f,
-		0.30f,
-		0.002f,
-		FLinearColor(0.42f, 0.72f, 0.20f, 1.0f),
-		EBotanicusPlantElement::Normal);
-	FBotanicusPlantDefinition& AureliaSweet =
-		NativeFallbackPlants.Last();
-	AureliaSweet.SmallGrowthMesh = TSoftObjectPtr<UStaticMesh>(
-		FSoftObjectPath(TEXT(
-			"/Game/Botanicus/Items/itemsMesh/plantes/normal/"
-			"AuréliaDouce/niv1/niv1.niv1")));
-	AureliaSweet.MediumGrowthMesh = TSoftObjectPtr<UStaticMesh>(
-		FSoftObjectPath(TEXT(
-			"/Game/Botanicus/Items/itemsMesh/plantes/normal/"
-			"AuréliaDouce/niv2/niv2.niv2")));
-	AureliaSweet.LargeGrowthMesh = TSoftObjectPtr<UStaticMesh>(
-		FSoftObjectPath(TEXT(
-			"/Game/Botanicus/Items/itemsMesh/plantes/normal/"
-			"AuréliaDouce/niv3/niv3.niv3")));
-	AureliaSweet.MatureGrowthMesh = TSoftObjectPtr<UStaticMesh>(
-		FSoftObjectPath(TEXT(
-			"/Game/Botanicus/Items/itemsMesh/plantes/normal/"
-			"AuréliaDouce/niv4/niv4.niv4")));
-	AddPlant(
-		TEXT("FireBloom"),
-		TEXT("SeedPacket_FireBloom"),
-		NSLOCTEXT(
-			"BotanicusGrowing",
-			"FireBloomName",
-			"Fleur de braise"),
-		TEXT("Harvest_FireBloom"),
-		260.0f,
-		0.20f,
-		0.60f,
-		0.25f,
-		0.002f,
-		FLinearColor(1.0f, 0.12f, 0.01f, 1.0f),
-		EBotanicusPlantElement::Fire);
-	AddPlant(
-		TEXT("WaterLily"),
-		TEXT("SeedPacket_WaterLily"),
-		NSLOCTEXT(
-			"BotanicusGrowing",
-			"WaterLilyName",
-			"Fleur de source"),
-		TEXT("Harvest_WaterLily"),
-		260.0f,
-		0.55f,
-		0.95f,
-		0.30f,
-		0.003f,
-		FLinearColor(0.02f, 0.45f, 1.0f, 1.0f),
-		EBotanicusPlantElement::Water);
-	AddPlant(
-		TEXT("FrostFlower"),
-		TEXT("SeedPacket_FrostFlower"),
-		NSLOCTEXT(
-			"BotanicusGrowing",
-			"FrostFlowerName",
-			"Fleur de givre"),
-		TEXT("Harvest_FrostFlower"),
-		280.0f,
-		0.30f,
-		0.72f,
-		0.25f,
-		0.002f,
-		FLinearColor(0.45f, 0.9f, 1.0f, 1.0f),
-		EBotanicusPlantElement::Ice);
-	AddPlant(
-		TEXT("ShadowOrchid"),
-		TEXT("SeedPacket_ShadowOrchid"),
-		NSLOCTEXT(
-			"BotanicusGrowing",
-			"ShadowOrchidName",
-			"Orchidee des tenebres"),
-		TEXT("Harvest_ShadowOrchid"),
-		300.0f,
-		0.25f,
-		0.68f,
-		0.22f,
-		0.0018f,
-		FLinearColor(0.16f, 0.01f, 0.28f, 1.0f),
-		EBotanicusPlantElement::Shadow);
+	AddPlant(TEXT("AureliaSweet"), TEXT("Aurélia Douce"), EBotanicusPlantElement::Normal);
+	AddPlant(TEXT("CoraliaPerchee"), TEXT("Coralia Perchée"), EBotanicusPlantElement::Normal);
+	AddPlant(TEXT("CoraliaPompon"), TEXT("Coralia Pompon"), EBotanicusPlantElement::Normal);
+	AddPlant(TEXT("Iralia"), TEXT("Iralia"), EBotanicusPlantElement::Normal);
+	AddPlant(TEXT("LumineaFlorae"), TEXT("Luminéa Floraë"), EBotanicusPlantElement::Normal);
+	AddPlant(TEXT("VerdelaCommune"), TEXT("Verdéla Commune"), EBotanicusPlantElement::Normal);
+	AddPlant(TEXT("CoralyneBrumes"), TEXT("Coralyne des brumes"), EBotanicusPlantElement::Water);
+	AddPlant(TEXT("HydreaLagunaire"), TEXT("Hydréa lagunaire"), EBotanicusPlantElement::Water);
+	AddPlant(TEXT("NerelisEventail"), TEXT("Nérélis éventail"), EBotanicusPlantElement::Water);
+	AddPlant(TEXT("OndeliaRuban"), TEXT("Ondélia ruban"), EBotanicusPlantElement::Water);
+	AddPlant(TEXT("BonzaiaGivre"), TEXT("Bonzaïa Givré"), EBotanicusPlantElement::Ice);
+	AddPlant(TEXT("CristalliaLumifleur"), TEXT("Cristallia lumifleur"), EBotanicusPlantElement::Ice);
+	AddPlant(TEXT("GivrelanceAzure"), TEXT("Givrelance azure"), EBotanicusPlantElement::Ice);
+	AddPlant(TEXT("GlaceoraPerlee"), TEXT("Glacéora perlée"), EBotanicusPlantElement::Ice);
+	AddPlant(TEXT("BraiseliaFlamme"), TEXT("Braiselia flamme"), EBotanicusPlantElement::Fire);
+	AddPlant(TEXT("MagmoraSpiral"), TEXT("Magmora spiral"), EBotanicusPlantElement::Fire);
+	AddPlant(TEXT("PyrosteleRoyal"), TEXT("Pyrostèle royal"), EBotanicusPlantElement::Fire);
+	AddPlant(TEXT("VolcaniaBasiera"), TEXT("Volcania basiera"), EBotanicusPlantElement::Fire);
+	AddPlant(TEXT("Noctepine"), TEXT("Noctépine"), EBotanicusPlantElement::Shadow);
+	AddPlant(TEXT("NoctivoraVentouse"), TEXT("Noctivora ventouse"), EBotanicusPlantElement::Shadow);
+	AddPlant(TEXT("OmbraeLuridia"), TEXT("Ombrae luridia"), EBotanicusPlantElement::Shadow);
 }
 
 const FBotanicusPlantDefinition*
 UBotanicusPlantSubsystem::FindPlant(FName PlantKey) const
 {
-	if (LoadedCatalog)
-	{
-		if (const FBotanicusPlantDefinition* Definition =
-			LoadedCatalog->FindPlant(PlantKey))
-		{
-			return Definition;
-		}
-	}
+	// The native list is the authoritative whitelist. This prevents seeds
+	// removed from the game from being resurrected by an older Data Asset.
 	return NativeFallbackPlants.FindByPredicate(
 		[PlantKey](const FBotanicusPlantDefinition& Definition)
 		{
@@ -224,14 +100,6 @@ UBotanicusPlantSubsystem::FindPlant(FName PlantKey) const
 const FBotanicusPlantDefinition*
 UBotanicusPlantSubsystem::FindPlantBySeed(FName SeedItemKey) const
 {
-	if (LoadedCatalog)
-	{
-		if (const FBotanicusPlantDefinition* Definition =
-			LoadedCatalog->FindPlantBySeed(SeedItemKey))
-		{
-			return Definition;
-		}
-	}
 	return NativeFallbackPlants.FindByPredicate(
 		[SeedItemKey](const FBotanicusPlantDefinition& Definition)
 		{
@@ -247,14 +115,6 @@ UBotanicusPlantSubsystem::FindPlantByHarvestItem(
 	NormalizedKey.RemoveFromEnd(TEXT("_Beautiful"));
 	NormalizedKey.RemoveFromEnd(TEXT("_Exceptional"));
 	const FName BaseHarvestItemKey(*NormalizedKey);
-	if (LoadedCatalog)
-	{
-		if (const FBotanicusPlantDefinition* Definition =
-			LoadedCatalog->FindPlantByHarvestItem(BaseHarvestItemKey))
-		{
-			return Definition;
-		}
-	}
 	return NativeFallbackPlants.FindByPredicate(
 		[BaseHarvestItemKey](
 			const FBotanicusPlantDefinition& Definition)
@@ -266,21 +126,5 @@ UBotanicusPlantSubsystem::FindPlantByHarvestItem(
 TArray<FBotanicusPlantDefinition>
 UBotanicusPlantSubsystem::GetAllPlants() const
 {
-	TArray<FBotanicusPlantDefinition> Result;
-	if (LoadedCatalog)
-	{
-		Result = LoadedCatalog->Plants;
-	}
-	for (const FBotanicusPlantDefinition& Fallback : NativeFallbackPlants)
-	{
-		if (!Result.ContainsByPredicate(
-				[&Fallback](const FBotanicusPlantDefinition& Existing)
-				{
-					return Existing.PlantKey == Fallback.PlantKey;
-				}))
-		{
-			Result.Add(Fallback);
-		}
-	}
-	return Result;
+	return NativeFallbackPlants;
 }

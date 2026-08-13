@@ -11,11 +11,15 @@
 #include "Components/CanvasPanelSlot.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
+#include "Components/Image.h"
 #include "Components/ScrollBox.h"
+#include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Engine/GameInstance.h"
+#include "Engine/Texture2D.h"
+#include "Styling/CoreStyle.h"
 
 namespace
 {
@@ -25,9 +29,7 @@ void SetBuildingCatalogTextSize(UTextBlock* Text, int32 Size)
 	{
 		return;
 	}
-	FSlateFontInfo Font = Text->GetFont();
-	Font.Size = Size;
-	Text->SetFont(Font);
+	Text->SetFont(FCoreStyle::GetDefaultFontStyle("Bold", Size));
 }
 }
 
@@ -62,6 +64,21 @@ void UBotanicusBuildingCatalogRowWidget::InitializeRow(
 					"BuildingPrice",
 					"{0} crédits"),
 				FText::AsNumber(Price)));
+	}
+	if (BuildingIcon)
+	{
+		UTexture2D* Texture = InDefinition.Icon.LoadSynchronous();
+		if (!Texture)
+		{
+			Texture = LoadObject<UTexture2D>(
+				nullptr,
+				TEXT("/Game/Botanicus/UI/Command/Textures/"
+					 "T_Command_Buildings.T_Command_Buildings"));
+		}
+		if (Texture)
+		{
+			BuildingIcon->SetBrushFromTexture(Texture, true);
+		}
 	}
 	RefreshAvailability(
 		BotanicusController
@@ -128,12 +145,32 @@ void UBotanicusBuildingCatalogRowWidget::NativeOnInitialized()
 void UBotanicusBuildingCatalogRowWidget::BuildLayout()
 {
 	UBorder* Root = WidgetTree->ConstructWidget<UBorder>();
-	Root->SetBrushColor(FLinearColor(0.055f, 0.075f, 0.06f, 0.98f));
-	Root->SetPadding(FMargin(14.0f, 12.0f));
+	Root->SetBrushColor(FLinearColor(0.16f, 0.27f, 0.16f, 0.97f));
+	if (UTexture2D* ItemBackground = LoadObject<UTexture2D>(
+		nullptr,
+		TEXT("/Game/Botanicus/UI/Command/Textures/"
+			 "T_Command_ItemBackground.T_Command_ItemBackground")))
+	{
+		Root->SetBrushFromTexture(ItemBackground);
+		Root->SetBrushColor(FLinearColor::White);
+	}
+	Root->SetPadding(FMargin(10.0f, 7.0f));
 	WidgetTree->RootWidget = Root;
 
 	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
 	Root->AddChild(Row);
+
+	BuildingIcon = WidgetTree->ConstructWidget<UImage>();
+	BuildingIcon->SetDesiredSizeOverride(FVector2D(50.0f, 50.0f));
+	BuildingIcon->SetVisibility(ESlateVisibility::HitTestInvisible);
+	USizeBox* BuildingIconBox = WidgetTree->ConstructWidget<USizeBox>();
+	BuildingIconBox->SetWidthOverride(50.0f);
+	BuildingIconBox->SetHeightOverride(50.0f);
+	BuildingIconBox->AddChild(BuildingIcon);
+	UHorizontalBoxSlot* BuildingIconSlot =
+		Row->AddChildToHorizontalBox(BuildingIconBox);
+	BuildingIconSlot->SetVerticalAlignment(VAlign_Center);
+	BuildingIconSlot->SetPadding(FMargin(0.0f, 0.0f, 10.0f, 0.0f));
 
 	UVerticalBox* Details = WidgetTree->ConstructWidget<UVerticalBox>();
 	UHorizontalBoxSlot* DetailsSlot =
@@ -142,29 +179,30 @@ void UBotanicusBuildingCatalogRowWidget::BuildLayout()
 	DetailsSlot->SetVerticalAlignment(VAlign_Center);
 
 	NameLabel = WidgetTree->ConstructWidget<UTextBlock>();
-	NameLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-	SetBuildingCatalogTextSize(NameLabel, 20);
+	NameLabel->SetColorAndOpacity(
+		FSlateColor(FLinearColor(1.0f, 0.88f, 0.60f, 1.0f)));
+	SetBuildingCatalogTextSize(NameLabel, 16);
 	Details->AddChildToVerticalBox(NameLabel);
 
 	DescriptionLabel = WidgetTree->ConstructWidget<UTextBlock>();
 	DescriptionLabel->SetColorAndOpacity(
 		FSlateColor(FLinearColor(0.65f, 0.76f, 0.66f, 1.0f)));
 	DescriptionLabel->SetAutoWrapText(true);
-	SetBuildingCatalogTextSize(DescriptionLabel, 13);
+	SetBuildingCatalogTextSize(DescriptionLabel, 10);
 	Details->AddChildToVerticalBox(DescriptionLabel);
 
 	PriceLabel = WidgetTree->ConstructWidget<UTextBlock>();
 	PriceLabel->SetColorAndOpacity(
 		FSlateColor(FLinearColor(0.96f, 0.78f, 0.25f, 1.0f)));
 	PriceLabel->SetMargin(FMargin(14.0f));
-	SetBuildingCatalogTextSize(PriceLabel, 17);
+	SetBuildingCatalogTextSize(PriceLabel, 15);
 	UHorizontalBoxSlot* PriceSlot =
 		Row->AddChildToHorizontalBox(PriceLabel);
 	PriceSlot->SetVerticalAlignment(VAlign_Center);
 
 	PurchaseButton = WidgetTree->ConstructWidget<UButton>();
 	PurchaseButton->SetBackgroundColor(
-		FLinearColor(0.12f, 0.42f, 0.19f, 1.0f));
+		FLinearColor(0.10f, 0.53f, 0.20f, 1.0f));
 	UTextBlock* PurchaseText = WidgetTree->ConstructWidget<UTextBlock>();
 	PurchaseText->SetText(
 		NSLOCTEXT("BotanicusBuildings", "BuyButton", "ACHETER"));

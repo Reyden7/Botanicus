@@ -9,6 +9,10 @@
 
 class ABotanicusPlayerController;
 class UButton;
+class UImage;
+class UScrollBox;
+class USlider;
+class USizeBox;
 class UTextBlock;
 class UVerticalBox;
 class UBotanicusBuildingCatalogRowWidget;
@@ -105,7 +109,8 @@ class BOTANICUS_API UBotanicusOrderItemRowWidget : public UUserWidget
 public:
 	void InitializeRow(
 		ABotanicusPlayerController* InController,
-		const FBotanicusItemDefinition& InDefinition);
+		const FBotanicusItemDefinition& InDefinition,
+		bool bInShowSeedElement);
 	void RefreshAvailability(int32 AvailableFunds);
 
 protected:
@@ -128,6 +133,24 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> PriceLabel;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UImage> ItemIcon;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USizeBox> ItemIconArea;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USizeBox> ElementBadgeArea;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UImage> ElementBadgeBackground;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UImage> ElementBadgeIcon;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> ElementBadgeLabel;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UButton> OrderButton;
@@ -156,9 +179,23 @@ protected:
 
 private:
 	void BuildLayout();
+	bool BindDesignerLayout();
 	void RebuildItemRows();
 	void SelectTab(EBotanicusCommandPanelTab NewTab);
 	void RefreshTabButtons();
+	void SyncCatalogScrollbar();
+
+	UFUNCTION()
+	void HandleCatalogScrollChanged(float CurrentOffset);
+
+	UFUNCTION()
+	void HandleCatalogSliderChanged(float Value);
+
+	UFUNCTION()
+	void HandleCatalogScrollUpClicked();
+
+	UFUNCTION()
+	void HandleCatalogScrollDownClicked();
 
 	UFUNCTION()
 	void HandleCloseClicked();
@@ -191,6 +228,9 @@ private:
 	TObjectPtr<UTextBlock> PendingOrdersLabel;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UVerticalBox> PendingOrdersBox;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> LevelLabel;
 
 	UPROPERTY(Transient)
@@ -200,7 +240,19 @@ private:
 	TObjectPtr<UTextBlock> ShopOpenButtonLabel;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UImage> ShopStateIcon;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UImage> ShopStateBackground;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UVerticalBox> ItemsBox;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UScrollBox> ItemsScroll;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USlider> CatalogScrollSlider;
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UBotanicusOrderItemRowWidget>> ItemRows;
@@ -222,4 +274,5 @@ private:
 		EBotanicusCommandPanelTab::Seeds;
 
 	float RefreshAccumulator = 0.0f;
+	bool bSyncingCatalogScrollbar = false;
 };

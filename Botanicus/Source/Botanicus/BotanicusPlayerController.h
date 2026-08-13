@@ -464,13 +464,15 @@ protected:
 	bool SnapPathPoint(
 		const FVector& RawPoint,
 		FVector& OutSnappedPoint,
-		ABotanicusPathActor*& OutConnectedPath) const;
+		ABotanicusPathActor*& OutConnectedPath,
+		EBotanicusPathType DesiredPathType) const;
 	bool FindNearestBuildingEntrance(
 		const FVector& RawPoint,
 		FVector& OutEntrancePoint) const;
 	ABotanicusPathActor* FindNearestExistingPath(
 		const FVector& RawPoint,
-		FVector& OutPathPoint) const;
+		FVector& OutPathPoint,
+		EBotanicusPathType DesiredPathType) const;
 	bool IsCursorOverTopDownToolbar() const;
 	void TrySelectBuildingGroup();
 	void ConfirmBuildingGroupMove();
@@ -1044,6 +1046,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Interaction", meta=(ClampMin="1.0", ClampMax="60.0"))
 	float WorldItemLookAngle = 22.0f;
 
+	/** Maximum player-to-target distance for every world interaction (230 cm = 2.30 m). */
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Interaction", meta=(ClampMin="25.0", ClampMax="300.0", Units="cm"))
+	float MaximumWorldInteractionDistance = 230.0f;
+
 	UPROPERTY(EditDefaultsOnly, Config, Category="Botanicus|Delivery", meta=(ClampMin="0"))
 	int32 StartingFunds = 2000;
 
@@ -1119,6 +1125,14 @@ protected:
 
 	UPROPERTY()
 	TObjectPtr<UMaterialInterface> InvalidBuildingPlacementMaterial;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMeshComponent>> BuildingPreviewMaterialMeshes;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMaterialInterface>> BuildingPreviewOriginalMaterials;
+
+	TArray<int32> BuildingPreviewMaterialCounts;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> FurnitureHighlightMaterial;
@@ -1365,6 +1379,7 @@ protected:
 	FName ServerPendingBuildingPurchaseKey = NAME_None;
 	bool bBuildingTopDownViewActive = false;
 	bool bPathPlacementActive = false;
+	bool bPathStrokeActive = false;
 	bool bPathDeletionActive = false;
 	EBotanicusPathType PendingPathType =
 		EBotanicusPathType::Standard;

@@ -34,7 +34,7 @@ public:
 	UBotanicusInteractionTargetWidget* GetInteractionWidget() const { return InteractionWidget; }
 	UBotanicusHudMessageWidget* GetMessageWidget() const { return MessageWidget; }
 	UBotanicusCrosshairWidget* GetCrosshairWidget() const { return CrosshairWidget; }
-	void SetInteractionHeight(float NewHeight);
+	void SetInteractionSize(const FVector2D& NewSize);
 
 protected:
 	virtual void NativeOnInitialized() override;

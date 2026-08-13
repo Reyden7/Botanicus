@@ -22,18 +22,12 @@ ABotanicusPathActor::ABotanicusPathActor()
 	SetRootComponent(SplineComponent);
 	SplineComponent->SetClosedLoop(false);
 
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMeshFinder(
-		TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (CubeMeshFinder.Succeeded())
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> PlaneMeshFinder(
+		TEXT("/Engine/BasicShapes/Plane.Plane"));
+	if (PlaneMeshFinder.Succeeded())
 	{
-		SegmentMesh = CubeMeshFinder.Object;
-	}
-
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderMeshFinder(
-		TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
-	if (CylinderMeshFinder.Succeeded())
-	{
-		JunctionMesh = CylinderMeshFinder.Object;
+		SegmentMesh = PlaneMeshFinder.Object;
+		JunctionMesh = PlaneMeshFinder.Object;
 	}
 
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> MaterialFinder(
@@ -84,7 +78,8 @@ void ABotanicusPathActor::AddJunctionPoint(const FVector& WorldPoint)
 		}
 	}
 
-	JunctionPoints.Add(FVector_NetQuantize10(WorldPoint));
+	JunctionPoints.Add(FVector_NetQuantize10(
+		SnapVisualPointToGround(WorldPoint)));
 	RebuildPathMeshes();
 	ForceNetUpdate();
 }
@@ -100,7 +95,8 @@ void ABotanicusPathActor::RestoreJunctionPoints(
 	JunctionPoints.Reset(WorldPoints.Num());
 	for (const FVector& Point : WorldPoints)
 	{
-		JunctionPoints.Add(FVector_NetQuantize10(Point));
+		JunctionPoints.Add(FVector_NetQuantize10(
+			SnapVisualPointToGround(Point)));
 	}
 	RebuildPathMeshes();
 	ForceNetUpdate();
@@ -113,6 +109,33 @@ TArray<FVector> ABotanicusPathActor::GetPathWorldPoints() const
 	for (const FVector_NetQuantize10& Point : PathPoints)
 	{
 		Result.Add(FVector(Point));
+	}
+	return Result;
+}
+
+TArray<FVector> ABotanicusPathActor::GetNavigationWorldPoints(
+	float MaximumPointSpacing) const
+{
+	TArray<FVector> Result;
+	if (!SplineComponent || PathPoints.Num() < 2)
+	{
+		return Result;
+	}
+
+	const float SplineLength = SplineComponent->GetSplineLength();
+	const float SafeSpacing = FMath::Max(25.0f, MaximumPointSpacing);
+	const int32 StepCount = FMath::Max(
+		1,
+		FMath::CeilToInt(SplineLength / SafeSpacing));
+	Result.Reserve(StepCount + 1);
+	for (int32 StepIndex = 0; StepIndex <= StepCount; ++StepIndex)
+	{
+		const float Distance =
+			SplineLength * static_cast<float>(StepIndex) /
+			static_cast<float>(StepCount);
+		Result.Add(SplineComponent->GetLocationAtDistanceAlongSpline(
+			Distance,
+			ESplineCoordinateSpace::World));
 	}
 	return Result;
 }
@@ -174,6 +197,16 @@ bool ABotanicusPathActor::FindClosestSegment(
 void ABotanicusPathActor::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
+	if (!EditorPathPoints.IsEmpty())
+	{
+		PathPoints.Reset(EditorPathPoints.Num());
+		for (const FVector& LocalPoint : EditorPathPoints)
+		{
+			PathPoints.Add(FVector_NetQuantize10(
+				SnapVisualPointToGround(
+					GetActorTransform().TransformPosition(LocalPoint))));
+		}
+	}
 	RebuildPathMeshes();
 }
 
@@ -203,10 +236,40 @@ void ABotanicusPathActor::SetPathPointsInternal(
 	PathPoints.Reset(WorldPoints.Num());
 	for (const FVector& Point : WorldPoints)
 	{
-		PathPoints.Add(FVector_NetQuantize10(Point));
+		PathPoints.Add(FVector_NetQuantize10(
+			SnapVisualPointToGround(Point)));
 	}
 	bPreviewPath = bIsPreview;
 	RebuildPathMeshes();
+}
+
+FVector ABotanicusPathActor::SnapVisualPointToGround(
+	const FVector& WorldPoint) const
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return WorldPoint;
+	}
+
+	FCollisionQueryParams QueryParams(
+		SCENE_QUERY_STAT(BotanicusPathGround),
+		false,
+		this);
+	FHitResult GroundHit;
+	if (World->LineTraceSingleByChannel(
+			GroundHit,
+			WorldPoint + FVector(0.0f, 0.0f, 1.0f),
+			WorldPoint - FVector(0.0f, 0.0f, 1000.0f),
+			ECC_Visibility,
+			QueryParams))
+	{
+		return FVector(
+			WorldPoint.X,
+			WorldPoint.Y,
+			GroundHit.ImpactPoint.Z + 0.25f);
+	}
+	return WorldPoint;
 }
 
 void ABotanicusPathActor::RebuildPathMeshes()
@@ -266,7 +329,7 @@ void ABotanicusPathActor::RebuildPathMeshes()
 
 	const FVector2D SegmentScale(
 		PathWidth / 100.0f,
-		PathThickness / 100.0f);
+		1.0f);
 
 	for (int32 SegmentIndex = 0;
 		 SegmentIndex < PathPoints.Num() - 1;
@@ -312,26 +375,8 @@ void ABotanicusPathActor::RebuildPathMeshes()
 			false);
 		Segment->SetStartScale(SegmentScale, false);
 		Segment->SetEndScale(SegmentScale, true);
-		if (bPreviewPath)
-		{
-			Segment->SetCollisionProfileName(
-				UCollisionProfile::NoCollision_ProfileName);
-		}
-		else if (PathType ==
-			EBotanicusPathType::VisitorRoute)
-		{
-			Segment->SetCollisionEnabled(
-				ECollisionEnabled::QueryOnly);
-			Segment->SetCollisionResponseToAllChannels(ECR_Ignore);
-			Segment->SetCollisionResponseToChannel(
-				ECC_Visibility,
-				ECR_Block);
-		}
-		else
-		{
-			Segment->SetCollisionProfileName(
-				UCollisionProfile::BlockAll_ProfileName);
-		}
+		Segment->SetCollisionProfileName(
+			UCollisionProfile::NoCollision_ProfileName);
 		Segment->SetRenderCustomDepth(bPreviewPath);
 		Segment->SetCustomDepthStencilValue(1);
 		SegmentComponents.Add(Segment);
@@ -364,21 +409,9 @@ void ABotanicusPathActor::RebuildPathMeshes()
 			FVector(
 				PathWidth / 100.0f,
 				PathWidth / 100.0f,
-				PathThickness / 100.0f));
-		if (PathType == EBotanicusPathType::VisitorRoute)
-		{
-			Junction->SetCollisionEnabled(
-				ECollisionEnabled::QueryOnly);
-			Junction->SetCollisionResponseToAllChannels(ECR_Ignore);
-			Junction->SetCollisionResponseToChannel(
-				ECC_Visibility,
-				ECR_Block);
-		}
-		else
-		{
-			Junction->SetCollisionProfileName(
-				UCollisionProfile::BlockAll_ProfileName);
-		}
+				1.0f));
+		Junction->SetCollisionProfileName(
+			UCollisionProfile::NoCollision_ProfileName);
 		JunctionComponents.Add(Junction);
 	}
 }

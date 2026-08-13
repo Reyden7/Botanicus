@@ -75,6 +75,11 @@ bool ReadBlueprintBoolSetting(
 
 ABotanicusPlantPotActor::ABotanicusPlantPotActor()
 {
+	// Plant pots are authored through BP_Item_PlantPot (and its variants).
+	// Preserve their Blueprint meshes and transforms instead of replacing the
+	// appearance with the native catalogue cylinder fallback.
+	bUseBlueprintAppearance = true;
+
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.TickInterval = 0.1f;
 	InteractionName =

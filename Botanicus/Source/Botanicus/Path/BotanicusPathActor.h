@@ -43,6 +43,9 @@ public:
 	void RestoreJunctionPoints(const TArray<FVector>& WorldPoints);
 
 	TArray<FVector> GetPathWorldPoints() const;
+	/** Densified spline used by navigation and automatic junction detection. */
+	TArray<FVector> GetNavigationWorldPoints(
+		float MaximumPointSpacing = 120.0f) const;
 	TArray<FVector> GetJunctionWorldPoints() const;
 	bool FindClosestPoint(
 		const FVector& WorldLocation,
@@ -77,6 +80,7 @@ private:
 		const TArray<FVector>& WorldPoints,
 		bool bIsPreview,
 		EBotanicusPathType InPathType);
+	FVector SnapVisualPointToGround(const FVector& WorldPoint) const;
 	void RebuildPathMeshes();
 
 	UPROPERTY(VisibleAnywhere, Category="Botanicus|Path")
@@ -88,7 +92,8 @@ private:
 	UPROPERTY(ReplicatedUsing=OnRep_JunctionPoints)
 	TArray<FVector_NetQuantize10> JunctionPoints;
 
-	UPROPERTY(ReplicatedUsing=OnRep_PathType)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, ReplicatedUsing=OnRep_PathType,
+		Category="Botanicus|Path", meta=(AllowPrivateAccess="true"))
 	EBotanicusPathType PathType =
 		EBotanicusPathType::Standard;
 
@@ -113,8 +118,14 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Path", meta=(ClampMin="20.0"))
 	float PathWidth = 220.0f;
 
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Path", meta=(ClampMin="1.0"))
-	float PathThickness = 12.0f;
+	/** Local points used by paths placed directly in a level or Blueprint. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Botanicus|Path",
+		meta=(AllowPrivateAccess="true", MakeEditWidget="true"))
+	TArray<FVector> EditorPathPoints =
+	{
+		FVector(-500.0f, 0.0f, 0.0f),
+		FVector(500.0f, 0.0f, 0.0f)
+	};
 
 	bool bPreviewPath = false;
 };

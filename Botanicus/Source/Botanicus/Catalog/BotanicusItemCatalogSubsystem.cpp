@@ -15,6 +15,46 @@
 #include "Sales/BotanicusSelfCheckoutActor.h"
 #include "Storage/BotanicusStorageShelfActor.h"
 
+namespace
+{
+struct FNativePlantItemEntry
+{
+	const TCHAR* Key;
+	const TCHAR* DisplayName;
+	const TCHAR* SeedDisplayName;
+	int32 SeedPrice;
+	int32 SalePrice;
+	const TCHAR* ColorTag;
+	const TCHAR* TypeTag;
+	int32 Appeal;
+};
+
+const FNativePlantItemEntry NativePlantItems[] =
+{
+	{TEXT("AureliaSweet"), TEXT("Aurélia Douce"), TEXT("Graines d'Aurélia Douce"), 45, 105, TEXT("Green"), TEXT("Normal"), 80},
+	{TEXT("CoraliaPerchee"), TEXT("Coralia Perchée"), TEXT("Graines de Coralia Perchée"), 45, 110, TEXT("Green"), TEXT("Normal"), 80},
+	{TEXT("CoraliaPompon"), TEXT("Coralia Pompon"), TEXT("Graines de Coralia Pompon"), 45, 112, TEXT("Green"), TEXT("Normal"), 81},
+	{TEXT("Iralia"), TEXT("Iralia"), TEXT("Graines d'Iralia"), 45, 108, TEXT("Green"), TEXT("Normal"), 79},
+	{TEXT("LumineaFlorae"), TEXT("Luminéa Floraë"), TEXT("Graines de Luminéa Floraë"), 50, 120, TEXT("Green"), TEXT("Normal"), 84},
+	{TEXT("VerdelaCommune"), TEXT("Verdéla Commune"), TEXT("Graines de Verdéla Commune"), 40, 100, TEXT("Green"), TEXT("Normal"), 76},
+	{TEXT("CoralyneBrumes"), TEXT("Coralyne des brumes"), TEXT("Graines de Coralyne des brumes"), 80, 180, TEXT("Blue"), TEXT("ElementalWater"), 88},
+	{TEXT("HydreaLagunaire"), TEXT("Hydréa lagunaire"), TEXT("Graines d'Hydréa lagunaire"), 80, 185, TEXT("Blue"), TEXT("ElementalWater"), 89},
+	{TEXT("NerelisEventail"), TEXT("Nérélis éventail"), TEXT("Graines de Nérélis éventail"), 85, 195, TEXT("Blue"), TEXT("ElementalWater"), 91},
+	{TEXT("OndeliaRuban"), TEXT("Ondélia ruban"), TEXT("Graines d'Ondélia ruban"), 80, 182, TEXT("Blue"), TEXT("ElementalWater"), 88},
+	{TEXT("BonzaiaGivre"), TEXT("Bonzaïa Givré"), TEXT("Graines de Bonzaïa Givré"), 90, 210, TEXT("White"), TEXT("ElementalIce"), 90},
+	{TEXT("CristalliaLumifleur"), TEXT("Cristallia lumifleur"), TEXT("Graines de Cristallia lumifleur"), 95, 225, TEXT("White"), TEXT("ElementalIce"), 93},
+	{TEXT("GivrelanceAzure"), TEXT("Givrelance azure"), TEXT("Graines de Givrelance azure"), 90, 215, TEXT("White"), TEXT("ElementalIce"), 91},
+	{TEXT("GlaceoraPerlee"), TEXT("Glacéora perlée"), TEXT("Graines de Glacéora perlée"), 95, 220, TEXT("White"), TEXT("ElementalIce"), 92},
+	{TEXT("BraiseliaFlamme"), TEXT("Braiselia flamme"), TEXT("Graines de Braiselia flamme"), 80, 180, TEXT("Red"), TEXT("ElementalFire"), 88},
+	{TEXT("MagmoraSpiral"), TEXT("Magmora spiral"), TEXT("Graines de Magmora spiral"), 85, 190, TEXT("Red"), TEXT("ElementalFire"), 90},
+	{TEXT("PyrosteleRoyal"), TEXT("Pyrostèle royal"), TEXT("Graines de Pyrostèle royal"), 90, 200, TEXT("Red"), TEXT("ElementalFire"), 93},
+	{TEXT("VolcaniaBasiera"), TEXT("Volcania basiera"), TEXT("Graines de Volcania basiera"), 85, 188, TEXT("Red"), TEXT("ElementalFire"), 89},
+	{TEXT("Noctepine"), TEXT("Noctépine"), TEXT("Graines de Noctépine"), 100, 240, TEXT("Black"), TEXT("ElementalShadow"), 92},
+	{TEXT("NoctivoraVentouse"), TEXT("Noctivora ventouse"), TEXT("Graines de Noctivora ventouse"), 105, 255, TEXT("Black"), TEXT("ElementalShadow"), 95},
+	{TEXT("OmbraeLuridia"), TEXT("Ombrae luridia"), TEXT("Graines d'Ombrae luridia"), 105, 250, TEXT("Black"), TEXT("ElementalShadow"), 94},
+};
+}
+
 void UBotanicusItemCatalogSubsystem::Initialize(
 	FSubsystemCollectionBase& Collection)
 {
@@ -108,7 +148,9 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	PlantPot.WorldMesh = TSoftObjectPtr<UStaticMesh>(
 		FSoftObjectPath(TEXT("/Engine/BasicShapes/Cylinder.Cylinder")));
 	PlantPot.WorldScale = FVector(0.42f, 0.42f, 0.34f);
-	PlantPot.WorldActorClass = ABotanicusPlantPotActor::StaticClass();
+	PlantPot.WorldActorClass = TSoftClassPtr<AActor>(
+		FSoftObjectPath(TEXT(
+			"/Game/Botanicus/blueprints/BP_Item_PlantPot.BP_Item_PlantPot_C")));
 	PlantPot.MaximumStack = 10;
 	PlantPot.WeightClass = EBotanicusItemWeightClass::Hotbar;
 	PlantPot.Price = 75;
@@ -221,24 +263,6 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 		static_cast<int32>(
 			EBotanicusPlacementSurface::Floor);
 
-	FBotanicusItemDefinition& BasilSeeds =
-		NativeFallbackItems.AddDefaulted_GetRef();
-	BasilSeeds.ItemKey = TEXT("SeedPacket_Basil");
-	BasilSeeds.DisplayName =
-		NSLOCTEXT("BotanicusCatalog", "BasilSeeds", "Graines de basilic");
-	BasilSeeds.Category = EBotanicusItemCategory::Supply;
-	BasilSeeds.CatalogTabs =
-		static_cast<int32>(EBotanicusCatalogTab::Seeds);
-	BasilSeeds.WorldMesh = TSoftObjectPtr<UStaticMesh>(
-		FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube.Cube")));
-	BasilSeeds.WorldScale = FVector(0.18f, 0.08f, 0.24f);
-	BasilSeeds.MaximumStack = 20;
-	BasilSeeds.WeightClass = EBotanicusItemWeightClass::Hotbar;
-	BasilSeeds.Price = 30;
-	BasilSeeds.DeliveryQuantity = 5;
-	BasilSeeds.DeliveryDelaySeconds = 2.0f;
-	BasilSeeds.AllowedPlacementSurfaces = 0;
-
 	const auto AddSeedDefinition =
 		[this](
 			FName ItemKey,
@@ -264,78 +288,14 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 			Seeds.DeliveryDelaySeconds = 2.5f;
 			Seeds.AllowedPlacementSurfaces = 0;
 		};
-	AddSeedDefinition(
-		TEXT("SeedPacket_Orchid"),
-		NSLOCTEXT(
-			"BotanicusCatalog",
-			"OrchidSeeds",
-			"Graines d'orchidee rose"),
-		45,
-		3);
-	AddSeedDefinition(
-		TEXT("SeedPacket_Monstera"),
-		NSLOCTEXT(
-			"BotanicusCatalog",
-			"MonsteraSeeds",
-			"Graines de monstera"),
-		40,
-		3);
-	AddSeedDefinition(
-		TEXT("SeedPacket_Lavender"),
-		NSLOCTEXT(
-			"BotanicusCatalog",
-			"LavenderSeeds",
-			"Graines de lavande"),
-		35,
-		5);
-	AddSeedDefinition(
-		TEXT("SeedPacket_Violet"),
-		NSLOCTEXT(
-			"BotanicusCatalog",
-			"VioletSeeds",
-			"Graines de violette"),
-		38,
-		5);
-	AddSeedDefinition(
-		TEXT("SeedPacket_AureliaSweet"),
-		NSLOCTEXT(
-			"BotanicusCatalog",
-			"AureliaSweetSeeds",
-			"Graines d'Aurélia Douce"),
-		45,
-		5);
-	AddSeedDefinition(
-		TEXT("SeedPacket_FireBloom"),
-		NSLOCTEXT(
-			"BotanicusCatalog",
-			"FireBloomSeeds",
-			"Graines de fleur de braise"),
-		80,
-		3);
-	AddSeedDefinition(
-		TEXT("SeedPacket_WaterLily"),
-		NSLOCTEXT(
-			"BotanicusCatalog",
-			"WaterLilySeeds",
-			"Graines de fleur de source"),
-		80,
-		3);
-	AddSeedDefinition(
-		TEXT("SeedPacket_FrostFlower"),
-		NSLOCTEXT(
-			"BotanicusCatalog",
-			"FrostFlowerSeeds",
-			"Graines de fleur de givre"),
-		90,
-		3);
-	AddSeedDefinition(
-		TEXT("SeedPacket_ShadowOrchid"),
-		NSLOCTEXT(
-			"BotanicusCatalog",
-			"ShadowOrchidSeeds",
-			"Graines d'orchidee des tenebres"),
-		100,
-		3);
+	for (const FNativePlantItemEntry& Entry : NativePlantItems)
+	{
+		AddSeedDefinition(
+			FName(*(FString(TEXT("SeedPacket_")) + Entry.Key)),
+			FText::FromString(Entry.SeedDisplayName),
+			Entry.SeedPrice,
+			5);
+	}
 
 	FBotanicusItemDefinition& WateringCan =
 		NativeFallbackItems.AddDefaulted_GetRef();
@@ -416,27 +376,6 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	BoxCutter.DeliveryDelaySeconds = 1.5f;
 	BoxCutter.AllowedPlacementSurfaces = 0;
 
-	FBotanicusItemDefinition& BasilHarvest =
-		NativeFallbackItems.AddDefaulted_GetRef();
-	BasilHarvest.ItemKey = TEXT("Harvest_Basil");
-	BasilHarvest.DisplayName =
-		NSLOCTEXT("BotanicusCatalog", "BasilHarvest", "Plant de basilic");
-	BasilHarvest.Category = EBotanicusItemCategory::Supply;
-	BasilHarvest.CatalogTabs =
-		static_cast<int32>(EBotanicusCatalogTab::Sales);
-	BasilHarvest.WorldMesh = TSoftObjectPtr<UStaticMesh>(
-		FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube.Cube")));
-	BasilHarvest.WorldScale = FVector(0.16f);
-	BasilHarvest.MaximumStack = 1;
-	BasilHarvest.bWholePlant = true;
-	BasilHarvest.WeightClass = EBotanicusItemWeightClass::Hotbar;
-	BasilHarvest.bPurchasable = false;
-	BasilHarvest.SalePrice = 60;
-	BasilHarvest.PlantColorTag = TEXT("Green");
-	BasilHarvest.PlantTypeTag = TEXT("Aromatic");
-	BasilHarvest.VisitorAppeal = 62;
-	BasilHarvest.AllowedPlacementSurfaces = 0;
-
 	const auto AddHarvestDefinition =
 		[this](
 			FName ItemKey,
@@ -454,8 +393,10 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 			Harvest.CatalogTabs =
 				static_cast<int32>(EBotanicusCatalogTab::Sales);
 			Harvest.WorldMesh = TSoftObjectPtr<UStaticMesh>(
-				FSoftObjectPath(TEXT("/Engine/BasicShapes/Sphere.Sphere")));
-			Harvest.WorldScale = FVector(0.16f);
+				FSoftObjectPath(TEXT(
+					"/Game/Botanicus/Items/itemsMesh/plantes/normal/"
+					"AuréliaDouce/niv4/niv4.niv4")));
+			Harvest.WorldScale = FVector::OneVector;
 			Harvest.MaximumStack = 1;
 			Harvest.bWholePlant = true;
 			Harvest.WeightClass =
@@ -467,101 +408,16 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 			Harvest.VisitorAppeal = Appeal;
 			Harvest.AllowedPlacementSurfaces = 0;
 		};
-	AddHarvestDefinition(
-		TEXT("Harvest_Orchid"),
-		NSLOCTEXT(
-			"BotanicusCatalog",
-			"OrchidHarvest",
-			"Orchidee rose"),
-		110,
-		TEXT("Pink"),
-		TEXT("Flowering"),
-		82);
-	AddHarvestDefinition(
-		TEXT("Harvest_Monstera"),
-		NSLOCTEXT(
-			"BotanicusCatalog",
-			"MonsteraHarvest",
-			"Monstera"),
-		95,
-		TEXT("Green"),
-		TEXT("Foliage"),
-		72);
-	AddHarvestDefinition(
-		TEXT("Harvest_Lavender"),
-		NSLOCTEXT(
-			"BotanicusCatalog",
-			"LavenderHarvest",
-			"Lavande violette"),
-		75,
-		TEXT("Purple"),
-		TEXT("Aromatic"),
-		74);
-	AddHarvestDefinition(
-		TEXT("Harvest_Violet"),
-		NSLOCTEXT(
-			"BotanicusCatalog",
-			"VioletHarvest",
-			"Violette"),
-		85,
-		TEXT("Purple"),
-		TEXT("Flowering"),
-		78);
-	AddHarvestDefinition(
-		TEXT("Harvest_AureliaSweet"),
-		NSLOCTEXT(
-			"BotanicusCatalog",
-			"AureliaSweetHarvest",
-			"Aurélia Douce"),
-		105,
-		TEXT("Green"),
-		TEXT("Flowering"),
-		80);
-	NativeFallbackItems.Last().WorldMesh = TSoftObjectPtr<UStaticMesh>(
-		FSoftObjectPath(TEXT(
-			"/Game/Botanicus/Items/itemsMesh/plantes/normal/"
-			"AuréliaDouce/niv4/niv4.niv4")));
-	NativeFallbackItems.Last().WorldScale = FVector(1.0f);
-	AddHarvestDefinition(
-		TEXT("Harvest_FireBloom"),
-		NSLOCTEXT(
-			"BotanicusCatalog",
-			"FireBloomHarvest",
-			"Fleur de braise"),
-		180,
-		TEXT("Red"),
-		TEXT("ElementalFire"),
-		88);
-	AddHarvestDefinition(
-		TEXT("Harvest_WaterLily"),
-		NSLOCTEXT(
-			"BotanicusCatalog",
-			"WaterLilyHarvest",
-			"Fleur de source"),
-		180,
-		TEXT("Blue"),
-		TEXT("ElementalWater"),
-		88);
-	AddHarvestDefinition(
-		TEXT("Harvest_FrostFlower"),
-		NSLOCTEXT(
-			"BotanicusCatalog",
-			"FrostFlowerHarvest",
-			"Fleur de givre"),
-		210,
-		TEXT("White"),
-		TEXT("ElementalIce"),
-		90);
-	AddHarvestDefinition(
-		TEXT("Harvest_ShadowOrchid"),
-		NSLOCTEXT(
-			"BotanicusCatalog",
-			"ShadowOrchidHarvest",
-			"Orchidee des tenebres"),
-		240,
-		TEXT("Black"),
-		TEXT("ElementalShadow"),
-		92);
+	for (const FNativePlantItemEntry& Entry : NativePlantItems)
+	{
+		AddHarvestDefinition(
+			FName(*(FString(TEXT("Harvest_")) + Entry.Key)),
+			FText::FromString(Entry.DisplayName),
+			Entry.SalePrice,
+			FName(Entry.ColorTag),
+			FName(Entry.TypeTag),
+			Entry.Appeal);
+	}
 
 	const auto AddQualityVariants =
 		[this](FName BaseItemKey)
@@ -615,16 +471,11 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 				1.75f,
 				22);
 		};
-	AddQualityVariants(TEXT("Harvest_Basil"));
-	AddQualityVariants(TEXT("Harvest_Orchid"));
-	AddQualityVariants(TEXT("Harvest_Monstera"));
-	AddQualityVariants(TEXT("Harvest_Lavender"));
-	AddQualityVariants(TEXT("Harvest_Violet"));
-	AddQualityVariants(TEXT("Harvest_AureliaSweet"));
-	AddQualityVariants(TEXT("Harvest_FireBloom"));
-	AddQualityVariants(TEXT("Harvest_WaterLily"));
-	AddQualityVariants(TEXT("Harvest_FrostFlower"));
-	AddQualityVariants(TEXT("Harvest_ShadowOrchid"));
+	for (const FNativePlantItemEntry& Entry : NativePlantItems)
+	{
+		AddQualityVariants(
+			FName(*(FString(TEXT("Harvest_")) + Entry.Key)));
+	}
 
 	FBotanicusItemDefinition& SalesDisplay =
 		NativeFallbackItems.AddDefaulted_GetRef();
@@ -637,8 +488,13 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	SalesDisplay.WorldMesh = TSoftObjectPtr<UStaticMesh>(
 		FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube.Cube")));
 	SalesDisplay.WorldScale = FVector(1.15f, 0.45f, 0.65f);
-	SalesDisplay.WorldActorClass =
-		ABotanicusSalesDisplayActor::StaticClass();
+	// Always spawn the editable Blueprint version.  Using the native class here
+	// silently discarded the slot position/height configured in
+	// BP_Item_SalesDisplay and made the displayed pot appear offset from the
+	// furniture in game.
+	SalesDisplay.WorldActorClass = TSoftClassPtr<AActor>(
+		FSoftObjectPath(TEXT(
+			"/Game/Botanicus/blueprints/BP_Item_SalesDisplay.BP_Item_SalesDisplay_C")));
 	SalesDisplay.MaximumStack = 2;
 	SalesDisplay.WeightClass = EBotanicusItemWeightClass::Hotbar;
 	SalesDisplay.Price = 200;
@@ -658,8 +514,9 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 			"/Game/Botanicus/Items/itemsMesh/potDeVente/rond/"
 			"pot_de_vente.pot_de_vente")));
 	SalePot.WorldScale = FVector::OneVector;
-	SalePot.WorldActorClass =
-		ABotanicusSalePotActor::StaticClass();
+	SalePot.WorldActorClass = TSoftClassPtr<AActor>(
+		FSoftObjectPath(TEXT(
+			"/Game/Botanicus/blueprints/BP_Item_SalePot.BP_Item_SalePot_C")));
 	SalePot.MaximumStack = 10;
 	SalePot.WeightClass = EBotanicusItemWeightClass::Hotbar;
 	SalePot.Price = 10;
@@ -709,8 +566,9 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 		FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube.Cube")));
 	PreparationWorkbench.WorldScale =
 		FVector(1.2f, 0.6f, 0.12f);
-	PreparationWorkbench.WorldActorClass =
-		ABotanicusPreparationWorkbenchActor::StaticClass();
+	PreparationWorkbench.WorldActorClass = TSoftClassPtr<AActor>(
+		FSoftObjectPath(TEXT(
+			"/Game/Botanicus/blueprints/BP_WorkBench.BP_WorkBench_C")));
 	PreparationWorkbench.MaximumStack = 1;
 	PreparationWorkbench.WeightClass =
 		EBotanicusItemWeightClass::OnePlayerCarry;
@@ -718,6 +576,8 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	PreparationWorkbench.Price = 350;
 	PreparationWorkbench.DeliveryQuantity = 1;
 	PreparationWorkbench.DeliveryDelaySeconds = 4.0f;
+	// The preparation workbench is supplied automatically at the start of a
+	// game and must not be listed in the purchasing catalogue.
 	PreparationWorkbench.bPurchasable = false;
 
 	const auto AddWorkSurface =
@@ -873,10 +733,13 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	Computer.WorldMesh = TSoftObjectPtr<UStaticMesh>(
 		FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube.Cube")));
 	Computer.WorldScale = FVector(0.5f, 0.12f, 0.34f);
-	Computer.WorldActorClass =
-		ABotanicusComputerActor::StaticClass();
+	Computer.WorldActorClass = TSoftClassPtr<AActor>(
+		FSoftObjectPath(TEXT(
+			"/Game/Botanicus/blueprints/BP_Item_CommandComputer.BP_Item_CommandComputer_C")));
 	Computer.MaximumStack = 1;
-	Computer.WeightClass = EBotanicusItemWeightClass::Handheld;
+	// The unique starter computer is delivered in player one's quickbar and
+	// placed with the regular A-key placement flow.
+	Computer.WeightClass = EBotanicusItemWeightClass::Hotbar;
 	Computer.Price = 250;
 	Computer.DeliveryQuantity = 1;
 	Computer.DeliveryDelaySeconds = 3.0f;
@@ -940,6 +803,23 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 const FBotanicusItemDefinition*
 UBotanicusItemCatalogSubsystem::FindItem(FName ItemKey) const
 {
+	if (const FBotanicusItemDefinition* NativeDefinition =
+		NativeFallbackItems.FindByPredicate(
+			[ItemKey](const FBotanicusItemDefinition& Definition)
+			{
+				return Definition.ItemKey == ItemKey;
+			}))
+	{
+		return NativeDefinition;
+	}
+
+	// Seeds are deliberately authoritative in code. Do not allow a seed
+	// removed from the catalogue to survive through a stale Data Asset.
+	if (ItemKey.ToString().StartsWith(TEXT("SeedPacket_")))
+	{
+		return nullptr;
+	}
+
 	if (LoadedCatalog)
 	{
 		if (const FBotanicusItemDefinition* Definition =
@@ -949,11 +829,7 @@ UBotanicusItemCatalogSubsystem::FindItem(FName ItemKey) const
 		}
 	}
 
-	return NativeFallbackItems.FindByPredicate(
-		[ItemKey](const FBotanicusItemDefinition& Definition)
-		{
-			return Definition.ItemKey == ItemKey;
-		});
+	return nullptr;
 }
 
 bool UBotanicusItemCatalogSubsystem::GetItemDefinition(
@@ -975,7 +851,15 @@ UBotanicusItemCatalogSubsystem::GetAllItems() const
 	TArray<FBotanicusItemDefinition> Result;
 	if (LoadedCatalog)
 	{
-		Result = LoadedCatalog->Items;
+		for (const FBotanicusItemDefinition& Definition :
+			LoadedCatalog->Items)
+		{
+			if (!Definition.ItemKey.ToString().StartsWith(
+					TEXT("SeedPacket_")))
+			{
+				Result.Add(Definition);
+			}
+		}
 	}
 
 	for (const FBotanicusItemDefinition& Fallback : NativeFallbackItems)

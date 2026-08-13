@@ -26,11 +26,11 @@ ABotanicusVisitorZoneActor::ABotanicusVisitorZoneActor()
 	ZoneVisual->SetupAttachment(ZoneBounds);
 	ZoneVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(
-		TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (CubeFinder.Succeeded())
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> PlaneFinder(
+		TEXT("/Engine/BasicShapes/Plane.Plane"));
+	if (PlaneFinder.Succeeded())
 	{
-		ZoneVisual->SetStaticMesh(CubeFinder.Object);
+		ZoneVisual->SetStaticMesh(PlaneFinder.Object);
 	}
 
 	ZoneLabel = CreateDefaultSubobject<UTextRenderComponent>(
@@ -41,6 +41,25 @@ ABotanicusVisitorZoneActor::ABotanicusVisitorZoneActor()
 	ZoneLabel->SetVerticalAlignment(EVRTA_TextCenter);
 	ZoneLabel->SetWorldSize(24.0f);
 	ZoneLabel->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	RefreshVisuals();
+}
+
+void ABotanicusVisitorZoneActor::BeginPlay()
+{
+	Super::BeginPlay();
+	DynamicMaterial = nullptr;
+	RefreshVisuals();
+	if (HasAuthority())
+	{
+		SnapToUnderlyingGround();
+	}
+}
+
+void ABotanicusVisitorZoneActor::OnConstruction(
+	const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	DynamicMaterial = nullptr;
 	RefreshVisuals();
 }
 
@@ -93,11 +112,13 @@ void ABotanicusVisitorZoneActor::RefreshVisuals()
 	}
 	if (ZoneVisual)
 	{
+		ZoneVisual->SetRelativeLocation(FVector(0.0f, 0.0f, 0.25f));
 		ZoneVisual->SetRelativeScale3D(
 			FVector(
 				BoxExtent.X / 50.0f,
 				BoxExtent.Y / 50.0f,
-				BoxExtent.Z / 50.0f));
+				1.0f));
+		ZoneVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	}
 
 	FLinearColor ZoneColor = FLinearColor::White;
@@ -118,7 +139,9 @@ void ABotanicusVisitorZoneActor::RefreshVisuals()
 		break;
 	}
 
-	if (ZoneVisual && !DynamicMaterial)
+	if (ZoneVisual && !DynamicMaterial &&
+		!HasAnyFlags(RF_ClassDefaultObject) &&
+		GetWorld() && GetWorld()->IsGameWorld())
 	{
 		UMaterialInterface* BaseMaterial =
 			ZoneVisual->GetMaterial(0);
@@ -136,5 +159,35 @@ void ABotanicusVisitorZoneActor::RefreshVisuals()
 	{
 		ZoneLabel->SetText(Label);
 		ZoneLabel->SetTextRenderColor(ZoneColor.ToFColor(true));
+	}
+}
+
+void ABotanicusVisitorZoneActor::SnapToUnderlyingGround()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	FCollisionQueryParams QueryParams(
+		SCENE_QUERY_STAT(BotanicusVisitorZoneGround),
+		false,
+		this);
+	FHitResult GroundHit;
+	const FVector Location = GetActorLocation();
+	if (World->LineTraceSingleByChannel(
+			GroundHit,
+			Location + FVector(0.0f, 0.0f, 1.0f),
+			Location - FVector(0.0f, 0.0f, 1000.0f),
+			ECC_Visibility,
+			QueryParams))
+	{
+		SetActorLocation(
+			FVector(Location.X, Location.Y, GroundHit.ImpactPoint.Z),
+			false,
+			nullptr,
+			ETeleportType::TeleportPhysics);
+		ForceNetUpdate();
 	}
 }

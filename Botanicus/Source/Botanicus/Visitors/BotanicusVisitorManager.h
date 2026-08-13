@@ -20,10 +20,14 @@ public:
 private:
 	bool BuildVisitorCircuit(
 		TArray<FVector>& OutCircuit,
-		int32& OutCheckoutWaypointIndex) const;
+		int32& OutCheckoutWaypointIndex,
+		TArray<FVector>& OutArrivalRoute,
+		TArray<FVector>& OutDirectReturnRoute) const;
 	void SpawnQueuedVisitor(
 		const TArray<FVector>& VisitorCircuit,
-		int32 CheckoutWaypointIndex);
+		int32 CheckoutWaypointIndex,
+		const TArray<FVector>& ArrivalRoute,
+		const TArray<FVector>& DirectReturnRoute);
 	void RefreshQueuePositions(
 		const TArray<FVector>& VisitorCircuit);
 	void RefreshCheckoutQueue(

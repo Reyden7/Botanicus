@@ -9,6 +9,7 @@
 
 class ABotanicusPlayerController;
 class UButton;
+class UImage;
 class UTextBlock;
 class UVerticalBox;
 
@@ -46,6 +47,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> PriceLabel;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UImage> BuildingIcon;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UButton> PurchaseButton;

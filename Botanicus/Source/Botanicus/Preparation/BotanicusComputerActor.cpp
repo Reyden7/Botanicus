@@ -7,6 +7,11 @@
 
 ABotanicusComputerActor::ABotanicusComputerActor()
 {
+	// Computers are always authored through BP_Item_CommandComputer. Keep its
+	// meshes, materials and component transforms instead of applying the native
+	// catalogue's primitive fallback at runtime.
+	bUseBlueprintAppearance = true;
+
 	InteractionAction =
 		NSLOCTEXT(
 			"BotanicusComputer",

@@ -444,7 +444,7 @@ ABotanicusPlayerController::ABotanicusPlayerController()
 
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface>
 		ValidPlacementMaterialFinder(
-			TEXT("/Game/EasyBuildingSystem/Materials/Instances/Dummy/MI_Can_Build.MI_Can_Build"));
+			TEXT("/Game/Botanicus/Materials/Silhouette/M_Silhouette_Hologram_Blue.M_Silhouette_Hologram_Blue"));
 	if (ValidPlacementMaterialFinder.Succeeded())
 	{
 		ValidBuildingPlacementMaterial =
@@ -1083,11 +1083,24 @@ void ABotanicusPlayerController::PlayerTick(float DeltaTime)
 	UpdateGardenTrowelTransplantHold(DeltaTime);
 	if (bPlantPotActionHeld)
 	{
-		PlantPotActionHoldElapsed += DeltaTime;
-		if (InteractionTargetWidget)
+		AActor* ActivePot = IsValid(LocalActivePlantPot)
+			? static_cast<AActor*>(LocalActivePlantPot.Get())
+			: static_cast<AActor*>(LocalActiveSalePot.Get());
+		if (!IsValid(ActivePot) ||
+			!IsLookingAtWorldItem(
+				ActivePot,
+				MaximumWorldInteractionDistance))
 		{
-			InteractionTargetWidget->SetHoldProgress(
-				FMath::Clamp(PlantPotActionHoldElapsed, 0.0f, 1.0f));
+			EndPlantPotAction();
+		}
+		else
+		{
+			PlantPotActionHoldElapsed += DeltaTime;
+			if (InteractionTargetWidget)
+			{
+				InteractionTargetWidget->SetHoldProgress(
+					FMath::Clamp(PlantPotActionHoldElapsed, 0.0f, 1.0f));
+			}
 		}
 	}
 	UpdateLargeEquipmentPlacement(DeltaTime);
@@ -1696,8 +1709,19 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 			{
 				if (!IsCursorOverTopDownToolbar())
 				{
+					bPathStrokeActive = true;
 					AddPathPointAtCursor();
 				}
+				return true;
+			}
+			if (Params.Key == EKeys::LeftMouseButton &&
+				Params.Event == IE_Released)
+			{
+				if (bPathStrokeActive && !IsCursorOverTopDownToolbar())
+				{
+					AddPathPointAtCursor();
+				}
+				bPathStrokeActive = false;
 				return true;
 			}
 
@@ -2108,14 +2132,39 @@ void ABotanicusPlayerController::RefreshInteractionTargetHighlight()
 				Hit,
 				ViewLocation,
 				ViewLocation +
-					ViewRotation.Vector() * 650.0f,
+					ViewRotation.Vector() *
+						(MaximumWorldInteractionDistance + 200.0f),
 				ECC_Visibility,
-				QueryParams))
+				QueryParams) &&
+			FVector::DistSquared2D(
+				GetPawn()->GetActorLocation(),
+				Hit.ImpactPoint) <=
+				FMath::Square(MaximumWorldInteractionDistance))
 		{
 			AActor* HitActor = Hit.GetActor();
 			const bool bIsFurniture =
 				IsFurnitureActor(HitActor);
-			if (ABotanicusSalesDisplayActor* SalesDisplay =
+			if (ABotanicusPreparationWorkbenchActor* Workbench =
+					Cast<ABotanicusPreparationWorkbenchActor>(HitActor);
+				IsValid(Workbench) &&
+				Workbench->IsUpgradeTerminalTargeted(GetPawn()))
+			{
+				// The workbench itself is furniture, but its tablet remains a
+				// normal close-range interaction target.
+				NewTarget = Workbench;
+			}
+			else if (ABotanicusComputerActor* Computer =
+					Cast<ABotanicusComputerActor>(HitActor);
+				IsValid(Computer) &&
+				IsLookingAtWorldItem(
+					Computer,
+					MaximumWorldInteractionDistance))
+			{
+				// The command computer is furniture for move mode, but remains
+				// directly usable when the player looks at it in normal mode.
+				NewTarget = Computer;
+			}
+			else if (ABotanicusSalesDisplayActor* SalesDisplay =
 					Cast<ABotanicusSalesDisplayActor>(HitActor);
 				IsValid(SalesDisplay) &&
 				SalesDisplay->IsDisplayedSalePotTargeted(GetPawn()))
@@ -2133,6 +2182,56 @@ void ABotanicusPlayerController::RefreshInteractionTargetHighlight()
 			}
 		}
 
+		// The tablet may be authored as a recessed or offset component of the
+		// Blueprint workbench. Do not depend on the generic actor hit (which
+		// deliberately filters furniture): use the same terminal targeting test
+		// as the E input so the HUD and the action can never disagree.
+		if (!NewTarget)
+		{
+			for (TActorIterator<ABotanicusPreparationWorkbenchActor>
+					 WorkbenchIt(GetWorld());
+				 WorkbenchIt;
+				 ++WorkbenchIt)
+			{
+				if (WorkbenchIt->IsUpgradeTerminalTargeted(GetPawn()))
+				{
+					NewTarget = *WorkbenchIt;
+					break;
+				}
+			}
+		}
+
+		// Blueprint-authored computers can contain recessed or child meshes.
+		// Use the same targeting predicate as the E action as a fallback so the
+		// HUD prompt cannot disappear solely because another component received
+		// the initial visibility hit.
+		if (!NewTarget)
+		{
+			float BestDistanceSquared =
+				FMath::Square(MaximumWorldInteractionDistance);
+			for (TActorIterator<ABotanicusComputerActor> ComputerIt(GetWorld());
+				 ComputerIt;
+				 ++ComputerIt)
+			{
+				if (ComputerIt->ActorHasTag(TEXT("BotanicusPlacementPreview")) ||
+					!IsLookingAtWorldItem(
+						*ComputerIt,
+						MaximumWorldInteractionDistance))
+				{
+					continue;
+				}
+
+				const float DistanceSquared = FVector::DistSquared(
+					ViewLocation,
+					ComputerIt->GetActorLocation());
+				if (DistanceSquared < BestDistanceSquared)
+				{
+					BestDistanceSquared = DistanceSquared;
+					NewTarget = *ComputerIt;
+				}
+			}
+		}
+
 		// A preparation-workbench mesh may legitimately stand between the
 		// camera and a sale pot snapped into one of its slots.  The generic
 		// visibility trace above then selects the bench and the pot loses both
@@ -2141,13 +2240,16 @@ void ABotanicusPlayerController::RefreshInteractionTargetHighlight()
 		// workbench as an occluder.
 		if (!NewTarget)
 		{
-			float BestDistanceSquared = FMath::Square(650.0f);
+			float BestDistanceSquared =
+				FMath::Square(MaximumWorldInteractionDistance);
 			for (TActorIterator<ABotanicusSalePotActor> PotIt(GetWorld());
 				 PotIt;
 				 ++PotIt)
 			{
 				if (PotIt->ActorHasTag(TEXT("BotanicusPlacementPreview")) ||
-					!IsLookingAtWorldItem(*PotIt, 650.0f))
+					!IsLookingAtWorldItem(
+						*PotIt,
+						MaximumWorldInteractionDistance))
 				{
 					continue;
 				}
@@ -2189,6 +2291,30 @@ void ABotanicusPlayerController::RefreshInteractionTargetName(
 	if (!IsValid(TargetActor))
 	{
 		InteractionTargetWidget->ClearTarget();
+		return;
+	}
+	if (const ABotanicusPreparationWorkbenchActor* Workbench =
+		Cast<ABotanicusPreparationWorkbenchActor>(TargetActor);
+		Workbench && Workbench->IsUpgradeTerminalTargeted(GetPawn()))
+	{
+		InteractionTargetWidget->SetTargetName(
+			NSLOCTEXT(
+				"BotanicusInteraction",
+				"WorkbenchUpgradeTerminalTarget",
+				"Ameliorations de l'atelier"));
+		return;
+	}
+	if (Cast<ABotanicusComputerActor>(TargetActor))
+	{
+		InteractionTargetWidget->SetKeyboardPrompt(
+			NSLOCTEXT(
+				"BotanicusInteraction",
+				"UseComputerAction",
+				"UTILISER"),
+			NSLOCTEXT(
+				"BotanicusInteraction",
+				"ComputerTargetName",
+				"Ordinateur"));
 		return;
 	}
 
@@ -2283,6 +2409,50 @@ void ABotanicusPlayerController::RefreshInteractionTargetName(
 				PlantName);
 			return;
 		}
+	}
+	if (const ABotanicusDeliveryParcelActor* Parcel =
+		Cast<ABotanicusDeliveryParcelActor>(TargetActor);
+		Parcel && !Parcel->IsOpened())
+	{
+		const ABotanicusCharacter* BotanicusCharacter =
+			Cast<ABotanicusCharacter>(GetPawn());
+		const UBotanicusQuickBarComponent* QuickBar = BotanicusCharacter
+			? BotanicusCharacter->GetQuickBarComponent()
+			: nullptr;
+		const bool bCutterSelected =
+			QuickBar &&
+			QuickBar->GetSelectedSlot().ItemKey == TEXT("BoxCutter");
+		if (!bCutterSelected)
+		{
+			InteractionTargetWidget->ClearTarget();
+			return;
+		}
+
+		const FBotanicusItemDefinition* Definition =
+			FindItemDefinition(this, Parcel->GetItemKey());
+		const FText ParcelItemName =
+			Definition && !Definition->DisplayName.IsEmpty()
+				? Definition->DisplayName
+				: FText::FromName(Parcel->GetItemKey());
+		InteractionTargetWidget->SetLeftMousePrompt(
+			NSLOCTEXT(
+				"BotanicusInteraction",
+				"CutParcelTapeHold",
+				"MAINTENIR POUR COUPER LE SCOTCH"),
+			FText::Format(
+				NSLOCTEXT(
+					"BotanicusInteraction",
+					"ClosedParcelTargetName",
+					"Colis : {0}"),
+				ParcelItemName),
+			true);
+		if (bParcelCutActionHeld &&
+			LocalActiveParcelCut == Parcel)
+		{
+			InteractionTargetWidget->SetHoldProgress(
+				Parcel->GetCutProgress());
+		}
+		return;
 	}
 	if (const ABotanicusPlaceableItemActor* PlaceableItem =
 		Cast<ABotanicusPlaceableItemActor>(TargetActor))
@@ -2956,10 +3126,28 @@ void ABotanicusPlayerController::InitializeOrderCatalogWidget()
 		return;
 	}
 
+	UClass* OrderCatalogClass =
+		LoadClass<UBotanicusOrderCatalogWidget>(
+			nullptr,
+			TEXT("/Game/Botanicus/UI/Command/WBP_CommandComputer.WBP_CommandComputer_C"));
+	if (!OrderCatalogClass)
+	{
+		UE_LOG(
+			LogBotanicus,
+			Error,
+			TEXT("WBP_CommandComputer could not be loaded; the command computer will not open."));
+		return;
+	}
+	UE_LOG(
+		LogBotanicus,
+		Display,
+		TEXT("Creating command computer from %s"),
+		*OrderCatalogClass->GetPathName());
+
 	OrderCatalogWidget =
 		CreateWidget<UBotanicusOrderCatalogWidget>(
 			this,
-			UBotanicusOrderCatalogWidget::StaticClass());
+			OrderCatalogClass);
 	if (!OrderCatalogWidget)
 	{
 		UE_LOG(
@@ -3765,6 +3953,7 @@ void ABotanicusPlayerController::BeginPathPlacementInternal(
 		PendingPathPoints.Reset();
 	}
 	bPathPlacementActive = true;
+	bPathStrokeActive = false;
 	PendingPathType = PathType;
 
 	if (!IsValid(PathPreviewActor))
@@ -3814,6 +4003,7 @@ void ABotanicusPlayerController::ConfirmPathPlacement()
 void ABotanicusPlayerController::CancelPathPlacement()
 {
 	bPathPlacementActive = false;
+	bPathStrokeActive = false;
 	PendingPathType = EBotanicusPathType::Standard;
 	PendingPathPoints.Reset();
 	if (IsValid(PathPreviewActor))
@@ -3915,8 +4105,7 @@ void ABotanicusPlayerController::PlaceVisitorZoneAtCursor()
 	}
 
 	const FVector_NetQuantize10 RequestedLocation(
-		CursorHit.ImpactPoint +
-		FVector(0.0f, 0.0f, 8.0f));
+		CursorHit.ImpactPoint);
 	if (PendingVisitorZoneType == 3)
 	{
 		ServerCreateRefundZone(RequestedLocation);
@@ -4823,7 +5012,8 @@ bool ABotanicusPlayerController::TryOpenNearbyWorkbenchUpgrade()
 	if (!GetWorld()->LineTraceSingleByChannel(
 			Hit,
 			ViewLocation,
-			ViewLocation + ViewRotation.Vector() * 400.0f,
+			ViewLocation + ViewRotation.Vector() *
+				(MaximumWorldInteractionDistance + 200.0f),
 			ECC_Visibility,
 			QueryParams))
 	{
@@ -5669,6 +5859,11 @@ void ABotanicusPlayerController::BeginQuickBarItemPlacement()
 		ApplyCarriedItemState(SelectedSlot, InspectedItem);
 		InspectedItem->ConfigureAsLocalPreview(true);
 		InspectedItem->ConfigureAsLocalInspection();
+		// This representation exists only while ground-placement mode is active
+		// (after pressing A). Keep the regular hotbar-held item at its authored
+		// size, and compact only this placement-mode representation.
+		InspectedItem->SetActorScale3D(
+			InspectedItem->GetActorScale3D() * 0.45f);
 		LocalInspectedQuickBarItem = InspectedItem;
 	}
 
@@ -5909,6 +6104,22 @@ void ABotanicusPlayerController::UpdateEquippedQuickBarItem()
 		}
 		LocalEquippedQuickBarItem->ConfigureAsLocalPreview(true);
 		LocalEquippedQuickBarItem->ConfigureAsLocalInspection();
+
+		// Harvested plants use their full-size world mesh.  That is correct once
+		// the plant is placed, but far too large for the first-person hotbar
+		// representation.  Only this local inspection actor is scaled down; the
+		// placement preview and the replicated world actor keep their authored
+		// dimensions.
+		const UBotanicusPlantSubsystem* Plants =
+			GetGameInstance()
+				? GetGameInstance()->GetSubsystem<
+					UBotanicusPlantSubsystem>()
+				: nullptr;
+		if (Plants && Plants->FindPlantByHarvestItem(DisplayItemKey))
+		{
+			LocalEquippedQuickBarItem->SetActorScale3D(
+				LocalEquippedQuickBarItem->GetActorScale3D() * 0.25f);
+		}
 	}
 
 	FVector ViewLocation;
@@ -5927,15 +6138,23 @@ void ABotanicusPlayerController::UpdateEquippedQuickBarItem()
 			70.0f + ItemRadius * 0.35f,
 			75.0f,
 			130.0f);
+	const bool bIsPottingSoil =
+		DisplayItemKey == TEXT("PottingSoil");
+	const float HeldRightOffset =
+		bIsPottingSoil ? 68.0f : 24.0f;
+	const float HeldUpOffset =
+		bIsPottingSoil ? 32.0f : -24.0f;
+	const float HeldRoll =
+		bIsPottingSoil ? 90.0f : 0.0f;
 	LocalEquippedQuickBarItem->SetActorLocationAndRotation(
 		ViewLocation +
 			ViewForward * ForwardDistance +
-			ViewRight * 24.0f -
-			ViewUp * 24.0f,
+			ViewRight * HeldRightOffset +
+			ViewUp * HeldUpOffset,
 		FRotator(
 			0.0f,
 			ViewRotation.Yaw + 180.0f,
-			0.0f),
+			HeldRoll),
 		false,
 		nullptr,
 		ETeleportType::TeleportPhysics);
@@ -6172,7 +6391,7 @@ void ABotanicusPlayerController::UpdateQuickBarItemPlacement(
 		LocalInspectedQuickBarItem->SetActorLocationAndRotation(
 			ViewLocation +
 				ViewForward * 85.0f +
-				ViewRight * 22.0f -
+				ViewRight * 52.0f -
 				ViewUp * 22.0f,
 			FRotator(
 				0.0f,
@@ -7565,11 +7784,9 @@ bool ABotanicusPlayerController::TryRefillHeldWateringCan()
 			BotanicusCharacter->GetActorLocation(),
 			ReserveIt->GetActorLocation());
 		if (DistanceSquared <= BestDistanceSquared &&
-			(IsLookingAtWorldItem(*ReserveIt, 400.0f) ||
-			 CanCharacterUseWaterReserve(
-				 BotanicusCharacter,
-				 *ReserveIt,
-				 400.0f)))
+			IsLookingAtWorldItem(
+				*ReserveIt,
+				MaximumWorldInteractionDistance))
 		{
 			BestDistanceSquared = DistanceSquared;
 			NearestReserve = *ReserveIt;
@@ -7603,13 +7820,9 @@ void ABotanicusPlayerController::UpdateWateringCanRefill(
 			!QuickBar->HasSelectedWateringCan() ||
 			QuickBar->GetSelectedWateringCanWaterLevel() >=
 				1.0f - KINDA_SMALL_NUMBER ||
-			(!IsLookingAtWorldItem(
-				 LocalActiveWaterReserve,
-				 400.0f) &&
-			 !CanCharacterUseWaterReserve(
-				 BotanicusCharacter,
-				 LocalActiveWaterReserve,
-				 400.0f)))
+			!IsLookingAtWorldItem(
+				LocalActiveWaterReserve,
+				MaximumWorldInteractionDistance))
 		{
 			EndWateringCanRefill(true);
 		}
@@ -7654,7 +7867,7 @@ bool ABotanicusPlayerController::TryUseNearbyComputer()
 		return false;
 	}
 
-	constexpr float ComputerInteractionDistance = 400.0f;
+	const float ComputerInteractionDistance = MaximumWorldInteractionDistance;
 	ABotanicusComputerActor* NearestComputer = nullptr;
 	float BestDistanceSquared =
 		FMath::Square(ComputerInteractionDistance);
@@ -8916,17 +9129,10 @@ bool ABotanicusPlayerController::IsLookingAtWorldItem(
 	FRotator ViewRotation;
 	GetPlayerViewPoint(ViewLocation, ViewRotation);
 
-	FVector TargetOrigin;
-	FVector TargetExtent;
-	Item->GetActorBounds(true, TargetOrigin, TargetExtent);
-	const FVector ToTarget = TargetOrigin - ViewLocation;
-	const float Distance = ToTarget.Size();
-	if (Distance <= KINDA_SMALL_NUMBER ||
-		Distance > MaximumDistance ||
-		FVector::DotProduct(
-			ViewRotation.Vector(),
-			ToTarget / Distance) <
-			FMath::Cos(FMath::DegreesToRadians(WorldItemLookAngle)))
+	const float EffectiveDistance = FMath::Min(
+		FMath::Max(0.0f, MaximumDistance),
+		MaximumWorldInteractionDistance);
+	if (EffectiveDistance <= KINDA_SMALL_NUMBER)
 	{
 		return false;
 	}
@@ -8958,78 +9164,65 @@ bool ABotanicusPlayerController::IsLookingAtWorldItem(
 		}
 	}
 
-	auto IsVisibleTargetPoint =
-		[this, Item, ViewLocation, ViewRotation, MaximumDistance,
-		 SupportingWorkbench, &QueryParams](const FVector& TargetPoint)
+	// The camera is above the pawn origin, so its ray must be longer than one
+	// metre to reach a floor item that is still horizontally within one metre
+	// of the player. The actual range gate is applied to the impact point.
+	const FVector TraceEnd = ViewLocation + ViewRotation.Vector() *
+		(EffectiveDistance + 200.0f);
+	auto IsItemOrAttachedPart = [Item](const AActor* HitActor)
+	{
+		for (const AActor* Current = HitActor;
+			 IsValid(Current);
+			 Current = Current->GetAttachParentActor())
 		{
-			const FVector PointOffset = TargetPoint - ViewLocation;
-			const float PointDistance = PointOffset.Size();
-			if (PointDistance <= KINDA_SMALL_NUMBER ||
-				PointDistance > MaximumDistance ||
-				FVector::DotProduct(
-					ViewRotation.Vector(),
-					PointOffset / PointDistance) <
-					FMath::Cos(
-						FMath::DegreesToRadians(
-							WorldItemLookAngle)))
-			{
-				return false;
-			}
-
-			FHitResult VisibilityHit;
-			const bool bHit = GetWorld()->LineTraceSingleByChannel(
-					VisibilityHit,
-					ViewLocation,
-					TargetPoint,
-					ECC_Visibility,
-					QueryParams);
-			if (bHit && VisibilityHit.GetActor() == Item)
+			if (Current == Item)
 			{
 				return true;
 			}
+		}
+		return false;
+	};
 
-			if (!SupportingWorkbench ||
-				!bHit ||
-				VisibilityHit.GetActor() != SupportingWorkbench)
-			{
-				return false;
-			}
-
-			FCollisionQueryParams PotQueryParams = QueryParams;
-			PotQueryParams.AddIgnoredActor(SupportingWorkbench);
-			FHitResult PotHit;
-			return GetWorld()->LineTraceSingleByChannel(
-					PotHit,
-					ViewLocation,
-					TargetPoint,
-					ECC_Visibility,
-					PotQueryParams) &&
-				PotHit.GetActor() == Item;
-		};
-
-	if (IsVisibleTargetPoint(TargetOrigin))
+	FHitResult VisibilityHit;
+	const bool bHit = GetWorld()->LineTraceSingleByChannel(
+		VisibilityHit,
+		ViewLocation,
+		TraceEnd,
+		ECC_Visibility,
+		QueryParams);
+	const FVector PawnLocation = GetPawn()
+		? GetPawn()->GetActorLocation()
+		: ViewLocation;
+	if (bHit &&
+		IsItemOrAttachedPart(VisibilityHit.GetActor()) &&
+		FVector::DistSquared2D(PawnLocation, VisibilityHit.ImpactPoint) <=
+			FMath::Square(EffectiveDistance))
 	{
 		return true;
 	}
 
-	// Open or wall-mounted furniture can have an empty actor-bounds
-	// centre. In that case a centre trace hits the wall behind the
-	// furniture, even though the player is looking directly at one of
-	// its boards. Test the visible collision components as well.
-	TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents(Item);
-	for (const UPrimitiveComponent* Primitive : PrimitiveComponents)
+	// A sale pot snapped into a workbench can be partly hidden by the
+	// workbench lip. Only that known support may be ignored; every other
+	// occluder still blocks interaction.
+	if (!SupportingWorkbench ||
+		!bHit ||
+		VisibilityHit.GetActor() != SupportingWorkbench)
 	{
-		if (Primitive &&
-			Primitive->IsRegistered() &&
-			Primitive->GetCollisionEnabled() !=
-				ECollisionEnabled::NoCollision &&
-			IsVisibleTargetPoint(Primitive->Bounds.Origin))
-		{
-			return true;
-		}
+		return false;
 	}
 
-	return false;
+	FCollisionQueryParams PotQueryParams = QueryParams;
+	PotQueryParams.AddIgnoredActor(SupportingWorkbench);
+	FHitResult PotHit;
+	return GetWorld()->LineTraceSingleByChannel(
+			PotHit,
+			ViewLocation,
+			TraceEnd,
+			ECC_Visibility,
+			PotQueryParams) &&
+		IsItemOrAttachedPart(PotHit.GetActor()) &&
+		FVector::DistSquared2D(PawnLocation, PotHit.ImpactPoint) <=
+			FMath::Square(EffectiveDistance);
 }
 
 float ABotanicusPlayerController::GetMoveHoldDurationForActor(
@@ -9051,23 +9244,40 @@ void ABotanicusPlayerController::TryDeletePathSegmentAtCursor()
 		return;
 	}
 
-	ABotanicusPathActor* Path =
-		Cast<ABotanicusPathActor>(CursorHit.GetActor());
-	if (!IsValid(Path) || Path->IsPreviewPath())
-	{
-		ClientMessage(TEXT("Cliquez directement sur une portion de route."));
-		return;
-	}
-
+	ABotanicusPathActor* Path = nullptr;
 	int32 SegmentIndex = INDEX_NONE;
 	FVector ClosestPoint = FVector::ZeroVector;
-	float Distance = 0.0f;
-	if (!Path->FindClosestSegment(
-			CursorHit.ImpactPoint,
-			SegmentIndex,
-			ClosestPoint,
-			Distance))
+	float BestDistance = ExistingPathSnapDistance;
+	for (TActorIterator<ABotanicusPathActor> PathIt(GetWorld());
+		 PathIt;
+		 ++PathIt)
 	{
+		ABotanicusPathActor* Candidate = *PathIt;
+		if (!IsValid(Candidate) || Candidate->IsPreviewPath())
+		{
+			continue;
+		}
+
+		int32 CandidateSegment = INDEX_NONE;
+		FVector CandidatePoint = FVector::ZeroVector;
+		float CandidateDistance = 0.0f;
+		if (Candidate->FindClosestSegment(
+				CursorHit.ImpactPoint,
+				CandidateSegment,
+				CandidatePoint,
+				CandidateDistance) &&
+			CandidateDistance <= BestDistance)
+		{
+			Path = Candidate;
+			SegmentIndex = CandidateSegment;
+			ClosestPoint = CandidatePoint;
+			BestDistance = CandidateDistance;
+		}
+	}
+
+	if (!IsValid(Path))
+	{
+		ClientMessage(TEXT("Cliquez pres d'une portion de route."));
 		return;
 	}
 
@@ -9133,6 +9343,12 @@ void ABotanicusPlayerController::UpdatePathPreview()
 	{
 		return;
 	}
+	if (bPathStrokeActive &&
+		FVector::Dist2D(PendingPathPoints.Last(), CursorPoint) >= 140.0f &&
+		PendingPathPoints.Num() < 63)
+	{
+		PendingPathPoints.Add(CursorPoint);
+	}
 
 	TArray<FVector> PreviewPoints = PendingPathPoints;
 	if (FVector::Dist2D(PreviewPoints.Last(), CursorPoint) >= 25.0f)
@@ -9171,9 +9387,14 @@ bool ABotanicusPlayerController::GetPathCursorPoint(
 
 	if (PendingPathType == EBotanicusPathType::VisitorRoute)
 	{
-		OutPoint =
-			CursorHit.ImpactPoint +
-			FVector(0.0f, 0.0f, 4.0f);
+		const FVector RawPoint =
+			CursorHit.ImpactPoint + FVector(0.0f, 0.0f, 4.0f);
+		ABotanicusPathActor* ConnectedPath = nullptr;
+		if (!SnapPathPoint(
+				RawPoint, OutPoint, ConnectedPath, PendingPathType))
+		{
+			OutPoint = RawPoint;
+		}
 		return true;
 	}
 
@@ -9189,7 +9410,8 @@ bool ABotanicusPlayerController::GetPathCursorPoint(
 		CursorHit.ImpactPoint.Y,
 		LandscapeHeight + 8.0f);
 	ABotanicusPathActor* ConnectedPath = nullptr;
-	if (!SnapPathPoint(RawPoint, OutPoint, ConnectedPath))
+	if (!SnapPathPoint(
+			RawPoint, OutPoint, ConnectedPath, PendingPathType))
 	{
 		OutPoint = RawPoint;
 	}
@@ -9199,7 +9421,8 @@ bool ABotanicusPlayerController::GetPathCursorPoint(
 bool ABotanicusPlayerController::SnapPathPoint(
 	const FVector& RawPoint,
 	FVector& OutSnappedPoint,
-	ABotanicusPathActor*& OutConnectedPath) const
+	ABotanicusPathActor*& OutConnectedPath,
+	EBotanicusPathType DesiredPathType) const
 {
 	OutConnectedPath = nullptr;
 	if (FindNearestBuildingEntrance(RawPoint, OutSnappedPoint))
@@ -9208,7 +9431,8 @@ bool ABotanicusPlayerController::SnapPathPoint(
 	}
 
 	OutConnectedPath =
-		FindNearestExistingPath(RawPoint, OutSnappedPoint);
+		FindNearestExistingPath(
+			RawPoint, OutSnappedPoint, DesiredPathType);
 	return OutConnectedPath != nullptr;
 }
 
@@ -9269,7 +9493,8 @@ bool ABotanicusPlayerController::FindNearestBuildingEntrance(
 ABotanicusPathActor*
 	ABotanicusPlayerController::FindNearestExistingPath(
 		const FVector& RawPoint,
-		FVector& OutPathPoint) const
+		FVector& OutPathPoint,
+		EBotanicusPathType DesiredPathType) const
 {
 	UWorld* World = GetWorld();
 	if (!World)
@@ -9284,7 +9509,8 @@ ABotanicusPathActor*
 		 ++PathIt)
 	{
 		ABotanicusPathActor* Path = *PathIt;
-		if (!IsValid(Path) || Path->IsPreviewPath())
+		if (!IsValid(Path) || Path->IsPreviewPath() ||
+			Path->GetPathType() != DesiredPathType)
 		{
 			continue;
 		}
@@ -9627,6 +9853,40 @@ void ABotanicusPlayerController::UpdateCommunicationDoorPreview()
 
 void ABotanicusPlayerController::SetBuildingGroupHighlighted(bool bHighlighted)
 {
+	if (!bHighlighted && !BuildingPreviewMaterialMeshes.IsEmpty())
+	{
+		int32 MaterialOffset = 0;
+		for (int32 MeshIndex = 0;
+			 MeshIndex < BuildingPreviewMaterialMeshes.Num();
+			 ++MeshIndex)
+		{
+			UMeshComponent* Mesh = BuildingPreviewMaterialMeshes[MeshIndex];
+			const int32 MaterialCount =
+				BuildingPreviewMaterialCounts.IsValidIndex(MeshIndex)
+					? BuildingPreviewMaterialCounts[MeshIndex]
+					: 0;
+			if (Mesh)
+			{
+				for (int32 Index = 0; Index < MaterialCount; ++Index)
+				{
+					if (BuildingPreviewOriginalMaterials.IsValidIndex(
+						MaterialOffset + Index))
+					{
+						Mesh->SetMaterial(
+							Index,
+							BuildingPreviewOriginalMaterials[
+								MaterialOffset + Index]);
+					}
+				}
+				Mesh->SetOverlayMaterial(nullptr);
+			}
+			MaterialOffset += MaterialCount;
+		}
+		BuildingPreviewMaterialMeshes.Reset();
+		BuildingPreviewOriginalMaterials.Reset();
+		BuildingPreviewMaterialCounts.Reset();
+	}
+
 	for (AActor* Actor : LocalBuildingGroup)
 	{
 		if (!IsValid(Actor))
@@ -9657,10 +9917,36 @@ void ABotanicusPlayerController::SetBuildingGroupHighlighted(bool bHighlighted)
 void ABotanicusPlayerController::UpdateBuildingGroupPlacementVisual(
 	bool bPlacementValid)
 {
-	UMaterialInterface* OverlayMaterial =
+	UMaterialInterface* SilhouetteMaterial =
 		bPlacementValid
 			? ValidBuildingPlacementMaterial
 			: InvalidBuildingPlacementMaterial;
+
+	if (BuildingPreviewMaterialMeshes.IsEmpty())
+	{
+		for (AActor* Actor : LocalBuildingGroup)
+		{
+			if (!IsValid(Actor))
+			{
+				continue;
+			}
+			TInlineComponentArray<UMeshComponent*> MeshComponents(Actor);
+			for (UMeshComponent* Mesh : MeshComponents)
+			{
+				if (!Mesh)
+				{
+					continue;
+				}
+				const int32 MaterialCount = Mesh->GetNumMaterials();
+				BuildingPreviewMaterialMeshes.Add(Mesh);
+				BuildingPreviewMaterialCounts.Add(MaterialCount);
+				for (int32 Index = 0; Index < MaterialCount; ++Index)
+				{
+					BuildingPreviewOriginalMaterials.Add(Mesh->GetMaterial(Index));
+				}
+			}
+		}
+	}
 
 	for (AActor* Actor : LocalBuildingGroup)
 	{
@@ -9680,7 +9966,13 @@ void ABotanicusPlayerController::UpdateBuildingGroupPlacementVisual(
 				if (UMeshComponent* Mesh =
 					Cast<UMeshComponent>(Primitive))
 				{
-					Mesh->SetOverlayMaterial(OverlayMaterial);
+					for (int32 Index = 0;
+						 Index < Mesh->GetNumMaterials();
+						 ++Index)
+					{
+						Mesh->SetMaterial(Index, SilhouetteMaterial);
+					}
+					Mesh->SetOverlayMaterial(nullptr);
 				}
 			}
 		}
@@ -10286,7 +10578,7 @@ void ABotanicusPlayerController::ServerOrderTestDelivery_Implementation()
 		return;
 	}
 
-	const FName TestItemKey(TEXT("SeedPacket_Basil"));
+	const FName TestItemKey(TEXT("SeedPacket_AureliaSweet"));
 	const FBotanicusItemDefinition* Definition =
 		FindItemDefinition(this, TestItemKey);
 	Parcel->InitializeParcel(
@@ -10736,7 +11028,7 @@ void ABotanicusPlayerController::ServerUseComputer_Implementation(
 	APawn* ControlledPawn = GetPawn();
 	if (!IsValid(Computer) ||
 		!ControlledPawn ||
-		!IsLookingAtWorldItem(Computer, 400.0f))
+		!IsLookingAtWorldItem(Computer, MaximumWorldInteractionDistance))
 	{
 		ClientMessage(
 			TEXT(
@@ -12245,10 +12537,9 @@ void ABotanicusPlayerController::
 				"Remplissage impossible : selectionnez l'arrosoir dans la hotbar."));
 		return;
 	}
-	if (!CanCharacterUseWaterReserve(
-			BotanicusCharacter,
+	if (!IsLookingAtWorldItem(
 			WaterReserve,
-			450.0f))
+			MaximumWorldInteractionDistance))
 	{
 		ClientMessage(
 			TEXT(
@@ -13281,11 +13572,10 @@ void ABotanicusPlayerController::ServerCreatePath_Implementation(
 			GroundedPoint = FVector(
 				RequestedPoint.X,
 				RequestedPoint.Y,
-				LandscapeHeight + 8.0f);
+				LandscapeHeight + 0.25f);
 		}
 
-		if (PathType == EBotanicusPathType::Standard &&
-			(PointIndex == 0 ||
+		if ((PointIndex == 0 ||
 			PointIndex == RequestedPoints.Num() - 1)
 			)
 		{
@@ -13294,7 +13584,8 @@ void ABotanicusPlayerController::ServerCreatePath_Implementation(
 			if (SnapPathPoint(
 				GroundedPoint,
 				SnappedPoint,
-				ConnectedPath))
+				ConnectedPath,
+				PathType))
 			{
 				GroundedPoint = SnappedPoint;
 				ConnectedPaths[
@@ -13369,13 +13660,11 @@ void ABotanicusPlayerController::ServerCreatePath_Implementation(
 	Path->InitializeConfirmedPath(
 		ValidatedPoints,
 		PathType);
-	if (PathType == EBotanicusPathType::Standard &&
-		ConnectedPaths[0])
+	if (ConnectedPaths[0])
 	{
 		ConnectedPaths[0]->AddJunctionPoint(ValidatedPoints[0]);
 	}
-	if (PathType == EBotanicusPathType::Standard &&
-		ConnectedPaths[1])
+	if (ConnectedPaths[1])
 	{
 		ConnectedPaths[1]->AddJunctionPoint(ValidatedPoints.Last());
 	}

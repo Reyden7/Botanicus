@@ -5,6 +5,7 @@
 #include "BotanicusCharacter.h"
 #include "Catalog/BotanicusItemCatalogSubsystem.h"
 #include "Camera/PlayerCameraManager.h"
+#include "Components/MeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "Engine/StaticMesh.h"
@@ -52,7 +53,7 @@ ABotanicusLargeEquipmentActor::ABotanicusLargeEquipmentActor()
 
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface>
 		ValidPlacementMaterialFinder(
-			TEXT("/Game/EasyBuildingSystem/Materials/Instances/Dummy/MI_Can_Build.MI_Can_Build"));
+			TEXT("/Game/Botanicus/Materials/Silhouette/M_Silhouette_Hologram_Blue.M_Silhouette_Hologram_Blue"));
 	if (ValidPlacementMaterialFinder.Succeeded())
 	{
 		ValidPlacementMaterial = ValidPlacementMaterialFinder.Object;
@@ -353,17 +354,98 @@ void ABotanicusLargeEquipmentActor::ApplyCarryState()
 		DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 	}
 
-	Mesh->SetOverlayMaterial(
-		bPlacementMode
-			? (bPlacementValid
-				   ? ValidPlacementMaterial
-				   : InvalidPlacementMaterial)
-			: nullptr);
+	UMaterialInterface* PreviewMaterial = nullptr;
+	if (bPlacementMode)
+	{
+		PreviewMaterial = bPlacementValid
+			? ValidPlacementMaterial
+			: InvalidPlacementMaterial;
+		ApplyPlacementMaterial(PreviewMaterial);
+	}
+	else
+	{
+		RestorePlacementMaterials();
+	}
+	TInlineComponentArray<UMeshComponent*> MeshComponents(this);
+	for (UMeshComponent* MeshComponent : MeshComponents)
+	{
+		if (MeshComponent)
+		{
+			MeshComponent->SetOverlayMaterial(nullptr);
+			MeshComponent->SetRenderCustomDepth(bPlacementMode);
+			MeshComponent->SetCustomDepthStencilValue(
+				bPlacementValid ? 1 : 2);
+		}
+	}
 
 	if (InteractionIndicator)
 	{
 		InteractionIndicator->SetVisibility(false);
 	}
+}
+
+void ABotanicusLargeEquipmentActor::ApplyPlacementMaterial(
+	UMaterialInterface* Material)
+{
+	if (!Material)
+	{
+		return;
+	}
+	if (PreviewMaterialMeshes.IsEmpty())
+	{
+		TInlineComponentArray<UMeshComponent*> MeshComponents(this);
+		for (UMeshComponent* MeshComponent : MeshComponents)
+		{
+			if (!MeshComponent)
+			{
+				continue;
+			}
+			const int32 MaterialCount = MeshComponent->GetNumMaterials();
+			PreviewMaterialMeshes.Add(MeshComponent);
+			PreviewMaterialCounts.Add(MaterialCount);
+			for (int32 Index = 0; Index < MaterialCount; ++Index)
+			{
+				PreviewOriginalMaterials.Add(MeshComponent->GetMaterial(Index));
+			}
+		}
+	}
+	for (int32 MeshIndex = 0; MeshIndex < PreviewMaterialMeshes.Num(); ++MeshIndex)
+	{
+		if (UMeshComponent* MeshComponent = PreviewMaterialMeshes[MeshIndex])
+		{
+			for (int32 Index = 0; Index < PreviewMaterialCounts[MeshIndex]; ++Index)
+			{
+				MeshComponent->SetMaterial(Index, Material);
+			}
+			MeshComponent->SetOverlayMaterial(nullptr);
+		}
+	}
+}
+
+void ABotanicusLargeEquipmentActor::RestorePlacementMaterials()
+{
+	int32 MaterialOffset = 0;
+	for (int32 MeshIndex = 0; MeshIndex < PreviewMaterialMeshes.Num(); ++MeshIndex)
+	{
+		const int32 MaterialCount = PreviewMaterialCounts.IsValidIndex(MeshIndex)
+			? PreviewMaterialCounts[MeshIndex]
+			: 0;
+		if (UMeshComponent* MeshComponent = PreviewMaterialMeshes[MeshIndex])
+		{
+			for (int32 Index = 0; Index < MaterialCount; ++Index)
+			{
+				if (PreviewOriginalMaterials.IsValidIndex(MaterialOffset + Index))
+				{
+					MeshComponent->SetMaterial(Index, PreviewOriginalMaterials[MaterialOffset + Index]);
+				}
+			}
+			MeshComponent->SetOverlayMaterial(nullptr);
+		}
+		MaterialOffset += MaterialCount;
+	}
+	PreviewMaterialMeshes.Reset();
+	PreviewOriginalMaterials.Reset();
+	PreviewMaterialCounts.Reset();
 }
 
 void ABotanicusLargeEquipmentActor::OnRep_Carrier()

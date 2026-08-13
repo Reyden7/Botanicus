@@ -7,6 +7,7 @@
 #include "BotanicusPlaceableItemActor.generated.h"
 
 class UMaterialInterface;
+class UMeshComponent;
 
 /** Replicated small equipment or decoration placed from a private hotbar. */
 UCLASS()
@@ -35,6 +36,8 @@ public:
 
 private:
 	void ApplyItemDefinition();
+	void ApplyPlacementMaterial(UMaterialInterface* Material);
+	void RestorePlacementMaterials();
 
 	UFUNCTION()
 	void OnRep_ItemKey();
@@ -50,6 +53,14 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UMaterialInterface> InvalidPlacementMaterial;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMeshComponent>> PreviewMaterialMeshes;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMaterialInterface>> PreviewOriginalMaterials;
+
+	TArray<int32> PreviewMaterialCounts;
 
 	float ThrowElapsedTime = 0.0f;
 };

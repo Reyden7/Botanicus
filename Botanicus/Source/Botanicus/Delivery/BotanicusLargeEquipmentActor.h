@@ -8,6 +8,7 @@
 
 class ABotanicusCharacter;
 class UMaterialInterface;
+class UMeshComponent;
 class UTextRenderComponent;
 
 /** Prototype equipment that must be carried in the world instead of a hotbar. */
@@ -69,6 +70,8 @@ private:
 	void PickUp(ABotanicusCharacter* Character);
 	void Drop();
 	void ApplyCarryState();
+	void ApplyPlacementMaterial(UMaterialInterface* Material);
+	void RestorePlacementMaterials();
 
 	UFUNCTION()
 	void OnRep_Carrier();
@@ -111,6 +114,14 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UMaterialInterface> InvalidPlacementMaterial;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMeshComponent>> PreviewMaterialMeshes;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMaterialInterface>> PreviewOriginalMaterials;
+
+	TArray<int32> PreviewMaterialCounts;
 
 	bool bUsingItemDataMesh = false;
 	FTransform PlacementOriginTransform = FTransform::Identity;

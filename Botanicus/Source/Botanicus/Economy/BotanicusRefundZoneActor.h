@@ -22,6 +22,8 @@ class BOTANICUS_API ABotanicusRefundZoneActor : public AActor
 
 public:
 	ABotanicusRefundZoneActor();
+	virtual void BeginPlay() override;
+	virtual void OnConstruction(const FTransform& Transform) override;
 
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(
@@ -35,6 +37,7 @@ private:
 	void OnRep_ZoneConfiguration();
 
 	void RefreshVisuals();
+	void SnapToUnderlyingGround();
 	void ProcessRefundableObjects();
 	bool IsObjectFullyInside(
 		const AActor* Actor,
@@ -54,7 +57,8 @@ private:
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UTextRenderComponent> ZoneLabel;
 
-	UPROPERTY(ReplicatedUsing=OnRep_ZoneConfiguration)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, ReplicatedUsing=OnRep_ZoneConfiguration,
+		Category="Botanicus|Zone", meta=(AllowPrivateAccess="true", ClampMin="2.0"))
 	FVector BoxExtent = FVector(220.0f, 150.0f, 6.0f);
 
 	UPROPERTY(Transient)

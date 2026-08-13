@@ -20,6 +20,9 @@ class BOTANICUS_API UBotanicusInteractionTargetWidget
 
 public:
 	void SetTargetName(const FText& TargetName);
+	void SetKeyboardPrompt(
+		const FText& ActionText,
+		const FText& TargetName);
 	void SetPlantInspectPrompt(const FText& PlantName);
 	void SetLeftMousePrompt(
 		const FText& ActionText,
@@ -47,7 +50,7 @@ protected:
 
 private:
 	void UpdateAdaptiveHeight();
-	void ApplyPanelHeight(float NewHeight);
+	void ApplyPanelSize(float NewWidth, float NewHeight);
 	void EnsureHoldRing();
 	void RefreshHoldRing();
 

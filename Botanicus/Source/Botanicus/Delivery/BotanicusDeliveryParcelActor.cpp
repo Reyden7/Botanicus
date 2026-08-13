@@ -117,44 +117,11 @@ void ABotanicusDeliveryParcelActor::Tick(float DeltaSeconds)
 		return;
 	}
 
-	APawn* LocalPawn = UGameplayStatics::GetPlayerPawn(this, 0);
-	APlayerCameraManager* CameraManager =
-		UGameplayStatics::GetPlayerCameraManager(this, 0);
-	if (!InteractionIndicator || !LocalPawn || !CameraManager)
+	// Parcel guidance is displayed exclusively through WBP_HUD_Interaction.
+	// Keep the legacy yellow world-space TextRender permanently hidden.
+	if (InteractionIndicator)
 	{
-		return;
-	}
-
-	const FVector CameraToParcel =
-		GetActorLocation() - CameraManager->GetCameraLocation();
-	const float CameraDistance = CameraToParcel.Size();
-	const bool bPlayerCanSeePrompt =
-		FVector::DistSquared(
-			LocalPawn->GetActorLocation(),
-			GetActorLocation()) <= FMath::Square(450.0f) &&
-		CameraDistance > KINDA_SMALL_NUMBER &&
-		FVector::DotProduct(
-			CameraManager->GetCameraRotation().Vector(),
-			CameraToParcel / CameraDistance) >=
-			FMath::Cos(FMath::DegreesToRadians(24.0f));
-	InteractionIndicator->SetVisibility(bPlayerCanSeePrompt);
-	if (bPlayerCanSeePrompt)
-	{
-		const int32 Progress =
-			FMath::RoundToInt(
-				CountCutSegments() * 100.0f / TapeSegmentCount);
-		InteractionIndicator->SetText(
-			FText::FromString(
-				bOpened
-					? TEXT("[ E ] DEBALLER")
-					: FString::Printf(
-						TEXT(
-							"[ E MAINTENU ] DEPLACER\n"
-							"CUTTER + CLIC GAUCHE : %d%%"),
-						Progress)));
-		InteractionIndicator->SetWorldRotation(
-			(CameraManager->GetCameraLocation() -
-			 InteractionIndicator->GetComponentLocation()).Rotation());
+		InteractionIndicator->SetVisibility(false);
 	}
 }
 

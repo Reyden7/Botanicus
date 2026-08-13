@@ -592,6 +592,41 @@ void UBotanicusQuickBarComponent::RequestSwapSlots(
 	}
 }
 
+bool UBotanicusQuickBarComponent::SwapSlotsAuthoritative(
+	int32 SourceSlotIndex,
+	int32 TargetSlotIndex)
+{
+	AActor* OwnerActor = GetOwner();
+	if (!OwnerActor || !OwnerActor->HasAuthority() ||
+		!IsValidSlotIndex(SourceSlotIndex) ||
+		!IsValidSlotIndex(TargetSlotIndex) ||
+		SourceSlotIndex == TargetSlotIndex ||
+		Slots[SourceSlotIndex].IsEmpty())
+	{
+		return false;
+	}
+
+	Swap(Slots[SourceSlotIndex], Slots[TargetSlotIndex]);
+	if (SelectedSlotIndex == SourceSlotIndex)
+	{
+		SelectedSlotIndex = TargetSlotIndex;
+	}
+	else if (SelectedSlotIndex == TargetSlotIndex)
+	{
+		SelectedSlotIndex = SourceSlotIndex;
+	}
+
+	OnQuickBarChanged.Broadcast();
+	BroadcastSelection();
+	OwnerActor->ForceNetUpdate();
+	if (ABotanicusGameMode* GameMode =
+			GetWorld()->GetAuthGameMode<ABotanicusGameMode>())
+	{
+		GameMode->ScheduleInventoryAutosave();
+	}
+	return true;
+}
+
 void UBotanicusQuickBarComponent::ActivateSelectedSlot()
 {
 	if (!CanLocallyControlQuickBar() || GetSelectedSlot().IsEmpty())
@@ -783,32 +818,5 @@ void UBotanicusQuickBarComponent::ServerSwapSlots_Implementation(
 	int32 SourceSlotIndex,
 	int32 TargetSlotIndex)
 {
-	AActor* OwnerActor = GetOwner();
-	if (!OwnerActor || !OwnerActor->HasAuthority() ||
-		!IsValidSlotIndex(SourceSlotIndex) ||
-		!IsValidSlotIndex(TargetSlotIndex) ||
-		SourceSlotIndex == TargetSlotIndex ||
-		Slots[SourceSlotIndex].IsEmpty())
-	{
-		return;
-	}
-
-	Swap(Slots[SourceSlotIndex], Slots[TargetSlotIndex]);
-	if (SelectedSlotIndex == SourceSlotIndex)
-	{
-		SelectedSlotIndex = TargetSlotIndex;
-	}
-	else if (SelectedSlotIndex == TargetSlotIndex)
-	{
-		SelectedSlotIndex = SourceSlotIndex;
-	}
-
-	OnQuickBarChanged.Broadcast();
-	BroadcastSelection();
-	OwnerActor->ForceNetUpdate();
-	if (ABotanicusGameMode* GameMode =
-			GetWorld()->GetAuthGameMode<ABotanicusGameMode>())
-	{
-		GameMode->ScheduleInventoryAutosave();
-	}
+	SwapSlotsAuthoritative(SourceSlotIndex, TargetSlotIndex);
 }

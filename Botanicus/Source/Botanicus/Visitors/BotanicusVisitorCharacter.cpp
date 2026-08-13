@@ -200,18 +200,33 @@ void ABotanicusVisitorCharacter::InitializeCircuit(
 void ABotanicusVisitorCharacter::InitializeQueuedCircuit(
 	const TArray<FVector>& InRoutePoints,
 	int32 InCheckoutWaypointIndex,
-	const FVector& InQueueDestination)
+	const FVector& InQueueDestination,
+	const TArray<FVector>& InArrivalRoute,
+	const TArray<FVector>& InDirectReturnRoute)
 {
 	if (!HasAuthority() ||
 		InRoutePoints.Num() < 3 ||
-		!InRoutePoints.IsValidIndex(InCheckoutWaypointIndex))
+		!InRoutePoints.IsValidIndex(InCheckoutWaypointIndex) ||
+		InArrivalRoute.Num() < 2 ||
+		InDirectReturnRoute.Num() < 2)
 	{
 		Destroy();
 		return;
 	}
 
 	TargetDisplay = nullptr;
-	RoutePoints = InRoutePoints;
+	RoutePoints = InArrivalRoute;
+	DirectReturnRoute = InDirectReturnRoute;
+	PurchaseRoute.Reset();
+	const int32 PurchaseStartIndex = InArrivalRoute.Num() - 1;
+	for (int32 Index = PurchaseStartIndex;
+		 Index < InRoutePoints.Num();
+		 ++Index)
+	{
+		PurchaseRoute.Add(InRoutePoints[Index]);
+	}
+	PurchaseCheckoutWaypointIndex =
+		InCheckoutWaypointIndex - PurchaseStartIndex;
 	EntranceLocation = RoutePoints[0];
 	RouteWaypointIndex = 0;
 	CheckoutWaypointIndex = InCheckoutWaypointIndex;
@@ -646,6 +661,10 @@ void ABotanicusVisitorCharacter::FinishInspection()
 			TargetDisplay->GetDisplayedPotItemKey();
 		bCarryingPlant = true;
 		RefreshCarriedPlantVisuals();
+		RoutePoints = PurchaseRoute;
+		RouteWaypointIndex = 0;
+		CheckoutWaypointIndex = PurchaseCheckoutWaypointIndex;
+		bReturningToRoute = false;
 		VisitorState = EBotanicusVisitorState::FollowingRoute;
 		RefreshStatusText();
 		ForceNetUpdate();
@@ -666,7 +685,7 @@ void ABotanicusVisitorCharacter::FinishInspection()
 		}
 		else
 		{
-			BeginDeparture();
+			SwitchToDirectReturnRoute();
 			SetSpeechLine(ChooseFinalRefusalSpeech());
 			ForceNetUpdate();
 			return;
@@ -1267,7 +1286,7 @@ void ABotanicusVisitorCharacter::FollowRoute(float DeltaSeconds)
 
 	if (!RoutePoints.IsValidIndex(RouteWaypointIndex))
 	{
-		BeginDeparture();
+		SwitchToDirectReturnRoute();
 		return;
 	}
 
@@ -1295,6 +1314,25 @@ void ABotanicusVisitorCharacter::FollowRoute(float DeltaSeconds)
 			ForceNetUpdate();
 		}
 	}
+}
+
+void ABotanicusVisitorCharacter::SwitchToDirectReturnRoute()
+{
+	RecordVisitOutcome(false);
+	if (TargetDisplay)
+	{
+		TargetDisplay->NotifyVisitorEnded(this);
+		TargetDisplay = nullptr;
+	}
+	RoutePoints = DirectReturnRoute;
+	RouteWaypointIndex = 0;
+	CheckoutWaypointIndex = INDEX_NONE;
+	bReturningToRoute = false;
+	VisitorState = EBotanicusVisitorState::Leaving;
+	LastMovementLocation = GetActorLocation();
+	StuckDuration = 0.0f;
+	RefreshStatusText();
+	ForceNetUpdate();
 }
 
 void ABotanicusVisitorCharacter::UpdateStuckDetection(

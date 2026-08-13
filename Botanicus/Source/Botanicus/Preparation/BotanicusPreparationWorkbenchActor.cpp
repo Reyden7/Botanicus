@@ -17,6 +17,11 @@
 ABotanicusPreparationWorkbenchActor::
 ABotanicusPreparationWorkbenchActor()
 {
+	// Workbenches are authored through BP_WorkBench. Preserve the Blueprint's
+	// meshes, materials and component transforms instead of replacing them
+	// with the native catalogue cube used only as a fallback definition.
+	bUseBlueprintAppearance = true;
+
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.TickInterval = 0.05f;
 
@@ -553,10 +558,10 @@ CanAccessUpgradeTerminal(const AActor* Interactor) const
 		IsValid(UpgradeTerminal) &&
 		!IsValid(GetCarrier()) &&
 		!IsInPlacementMode() &&
-		FVector::DistSquared(
+		FVector::DistSquared2D(
 			Interactor->GetActorLocation(),
 			UpgradeTerminal->GetComponentLocation()) <=
-			FMath::Square(350.0f);
+			FMath::Square(230.0f);
 }
 
 bool ABotanicusPreparationWorkbenchActor::
@@ -575,6 +580,36 @@ IsUpgradeTerminalTargeted(const AActor* Interactor) const
 	FVector ViewLocation;
 	FRotator ViewRotation;
 	Controller->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	const FVector ViewDirection = ViewRotation.Vector();
+	const FBoxSphereBounds TerminalBounds =
+		UpgradeTerminal->Bounds;
+	const FVector ToTerminal =
+		TerminalBounds.Origin - ViewLocation;
+	const float DistanceAlongView =
+		FVector::DotProduct(ToTerminal, ViewDirection);
+	if (DistanceAlongView < 0.0f || DistanceAlongView > 430.0f)
+	{
+		return false;
+	}
+
+	// The visible tablet is mounted almost flush against the workbench.  Its
+	// parent mesh can therefore win the visibility trace even while the
+	// crosshair is directly over the screen.  Validate the aim against the
+	// terminal bounds first, then accept a visibility hit on either the
+	// terminal itself or its owning workbench.
+	const FVector ClosestPointOnViewRay =
+		ViewLocation + ViewDirection * DistanceAlongView;
+	const float AimTolerance = FMath::Max(
+		TerminalBounds.SphereRadius + 8.0f,
+		18.0f);
+	if (FVector::DistSquared(
+			ClosestPointOnViewRay,
+			TerminalBounds.Origin) >
+		FMath::Square(AimTolerance))
+	{
+		return false;
+	}
+
 	FCollisionQueryParams QueryParams(
 		SCENE_QUERY_STAT(BotanicusWorkbenchUpgradeTerminal),
 		false,
@@ -583,11 +618,10 @@ IsUpgradeTerminalTargeted(const AActor* Interactor) const
 	return World->LineTraceSingleByChannel(
 			Hit,
 			ViewLocation,
-			ViewLocation + ViewRotation.Vector() * 400.0f,
+			ViewLocation + ViewDirection * 430.0f,
 			ECC_Visibility,
 			QueryParams) &&
-		Hit.GetActor() == this &&
-		Hit.GetComponent() == UpgradeTerminal;
+		Hit.GetActor() == this;
 }
 
 bool ABotanicusPreparationWorkbenchActor::IsSlotOccupied(
@@ -657,9 +691,17 @@ void ABotanicusPreparationWorkbenchActor::RefreshLevelVisuals()
 
 		// Les meshes doivent avoir leur taille définitive.
 		// Ils ne sont plus étirés selon le niveau.
-		Mesh->SetRelativeLocation(FVector::ZeroVector);
-		Mesh->SetRelativeRotation(FRotator::ZeroRotator);
-		Mesh->SetRelativeScale3D(FVector::OneVector);
+		// BP_WorkBench authors the inherited Mesh and PreparationSlot
+		// components in the same local frame. Resetting only the mesh here
+		// separates it from the slots at runtime (most visibly on the starter
+		// workbench). Identity transforms are only appropriate for the native
+		// fallback class.
+		if (!UsesBlueprintAppearance())
+		{
+			Mesh->SetRelativeLocation(FVector::ZeroVector);
+			Mesh->SetRelativeRotation(FRotator::ZeroRotator);
+			Mesh->SetRelativeScale3D(FVector::OneVector);
+		}
 	}
 	else
 	{

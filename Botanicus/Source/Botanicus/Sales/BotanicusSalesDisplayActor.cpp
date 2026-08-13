@@ -668,9 +668,9 @@ bool ABotanicusSalesDisplayActor::
 	UWorld* World = GetWorld();
 	if (!Pawn || !Controller || !World || !PotVisual ||
 		!CanRetrieveDisplayedSalePot() ||
-		FVector::DistSquared(
+		FVector::DistSquared2D(
 			Pawn->GetActorLocation(),
-			PotVisual->GetComponentLocation()) > FMath::Square(450.0f))
+			PotVisual->GetComponentLocation()) > FMath::Square(230.0f))
 	{
 		return false;
 	}
@@ -698,7 +698,7 @@ bool ABotanicusSalesDisplayActor::
 	return World->LineTraceSingleByChannel(
 			Hit,
 			ViewLocation,
-			PotVisual->Bounds.Origin,
+			ViewLocation + ViewRotation.Vector() * 430.0f,
 			ECC_Visibility,
 			QueryParams) &&
 		Hit.GetActor() == this &&

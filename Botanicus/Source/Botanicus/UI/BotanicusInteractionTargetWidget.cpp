@@ -136,6 +136,38 @@ void UBotanicusInteractionTargetWidget::SetTargetName(const FText& TargetName)
 	SetVisibility(ESlateVisibility::HitTestInvisible);
 }
 
+void UBotanicusInteractionTargetWidget::SetKeyboardPrompt(
+	const FText& InActionText,
+	const FText& InTargetName)
+{
+	if (!TargetNameText || InActionText.IsEmpty() || InTargetName.IsEmpty())
+	{
+		ClearTarget();
+		return;
+	}
+
+	TargetNameText->SetText(InTargetName);
+	if (!bLocalHoldProgressActive)
+	{
+		bShowHoldProgress = false;
+		HoldProgress = 0.0f;
+	}
+	if (ActionLabel)
+	{
+		ActionLabel->SetText(InActionText);
+	}
+	if (KeyIcon)
+	{
+		KeyIcon->SetBrushFromTexture(LoadObject<UTexture2D>(nullptr,
+			TEXT("/Game/PCKeyboardMouseIconPack/Textures/T_KeyboardE.T_KeyboardE")),
+			true);
+	}
+	UpdateAdaptiveHeight();
+	SetVisibility(ESlateVisibility::HitTestInvisible);
+	InvalidateLayoutAndVolatility();
+	RefreshHoldRing();
+}
+
 void UBotanicusInteractionTargetWidget::BeginLocalHoldProgress(
 	float DurationSeconds)
 {
@@ -296,7 +328,7 @@ void UBotanicusInteractionTargetWidget::ClearTarget()
 	{
 		TargetNameText->SetText(FText::GetEmpty());
 	}
-	ApplyPanelHeight(108.0f);
+	ApplyPanelSize(310.0f, 108.0f);
 	bLocalHoldProgressActive = false;
 	LocalHoldElapsed = 0.0f;
 	HoldProgress = 0.0f;
@@ -399,14 +431,47 @@ void UBotanicusInteractionTargetWidget::UpdateAdaptiveHeight()
 	{
 		return;
 	}
+	constexpr float MinimumPanelWidth = 310.0f;
+	constexpr float MaximumPanelWidth = 620.0f;
+	constexpr float TextLeft = 84.0f;
+	constexpr float TextRightPadding = 28.0f;
+
+	if (ActionLabel)
+	{
+		// An action is a short command and must remain on one line. The panel
+		// grows horizontally around it instead of letting it escape the artwork.
+		ActionLabel->SetAutoWrapText(false);
+		ActionLabel->InvalidateLayoutAndVolatility();
+	}
 	TargetNameText->InvalidateLayoutAndVolatility();
 	ForceLayoutPrepass();
-	float AvailableTextWidth = 190.0f;
-	if (const UCanvasPanelSlot* TextSlot =
+
+	const float DesiredActionWidth = ActionLabel
+		? ActionLabel->GetDesiredSize().X
+		: 190.0f;
+	const float NewPanelWidth = FMath::Clamp(
+		TextLeft + DesiredActionWidth + TextRightPadding,
+		MinimumPanelWidth,
+		MaximumPanelWidth);
+	const float AvailableTextWidth = FMath::Max(
+		1.0f, NewPanelWidth - TextLeft - TextRightPadding);
+
+	if (UCanvasPanelSlot* ActionSlot = ActionLabel
+		? Cast<UCanvasPanelSlot>(ActionLabel->Slot)
+		: nullptr)
+	{
+		FVector2D Size = ActionSlot->GetSize();
+		Size.X = AvailableTextWidth;
+		ActionSlot->SetSize(Size);
+	}
+	if (UCanvasPanelSlot* TextSlot =
 		Cast<UCanvasPanelSlot>(TargetNameText->Slot))
 	{
-		AvailableTextWidth = FMath::Max(1.0f, TextSlot->GetSize().X);
+		FVector2D Size = TextSlot->GetSize();
+		Size.X = AvailableTextWidth;
+		TextSlot->SetSize(Size);
 	}
+
 	const FVector2D DesiredTextSize = TargetNameText->GetDesiredSize();
 	const int32 EstimatedLineCount = FMath::Max(1,
 		FMath::CeilToInt(DesiredTextSize.X / AvailableTextWidth));
@@ -414,17 +479,21 @@ void UBotanicusInteractionTargetWidget::UpdateAdaptiveHeight()
 		* static_cast<float>(TargetNameText->GetFont().Size + 5);
 	const float DesiredTextHeight = FMath::Max3(
 		38.0f, static_cast<float>(DesiredTextSize.Y), EstimatedTextHeight);
-	ApplyPanelHeight(FMath::Clamp(
+	ApplyPanelSize(NewPanelWidth, FMath::Clamp(
 		70.0f + DesiredTextHeight, 108.0f, 220.0f));
 }
 
-void UBotanicusInteractionTargetWidget::ApplyPanelHeight(float NewHeight)
+void UBotanicusInteractionTargetWidget::ApplyPanelSize(
+	float NewWidth,
+	float NewHeight)
 {
+	NewWidth = FMath::Max(310.0f, NewWidth);
 	NewHeight = FMath::Max(108.0f, NewHeight);
 	if (USizeBox* RootSizeBox = WidgetTree
 		? Cast<USizeBox>(WidgetTree->RootWidget)
 		: nullptr)
 	{
+		RootSizeBox->SetWidthOverride(NewWidth);
 		RootSizeBox->SetHeightOverride(NewHeight);
 	}
 	if (ActionBackground)
@@ -433,6 +502,7 @@ void UBotanicusInteractionTargetWidget::ApplyPanelHeight(float NewHeight)
 			Cast<UCanvasPanelSlot>(ActionBackground->Slot))
 		{
 			FVector2D Size = BackgroundSlot->GetSize();
+			Size.X = NewWidth;
 			Size.Y = NewHeight;
 			BackgroundSlot->SetSize(Size);
 		}
@@ -443,12 +513,13 @@ void UBotanicusInteractionTargetWidget::ApplyPanelHeight(float NewHeight)
 			Cast<UCanvasPanelSlot>(TargetNameText->Slot))
 		{
 			FVector2D Size = TextSlot->GetSize();
+			Size.X = FMath::Max(1.0f, NewWidth - 112.0f);
 			Size.Y = FMath::Max(38.0f, NewHeight - 58.0f);
 			TextSlot->SetSize(Size);
 		}
 	}
 	if (LayoutOwner)
 	{
-		LayoutOwner->SetInteractionHeight(NewHeight);
+		LayoutOwner->SetInteractionSize(FVector2D(NewWidth, NewHeight));
 	}
 }

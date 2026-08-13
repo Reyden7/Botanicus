@@ -18,10 +18,19 @@ class BOTANICUS_API ABotanicusDeliveryZoneActor : public AActor
 
 public:
 	ABotanicusDeliveryZoneActor();
+	virtual void BeginPlay() override;
+	virtual void OnConstruction(const FTransform& Transform) override;
 
 	FVector GetParcelSpawnLocation(int32 ParcelIndex = 0) const;
 
 private:
+	void SnapToUnderlyingGround();
+	void RefreshVisuals();
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Botanicus|Zone",
+		meta=(AllowPrivateAccess="true", ClampMin="100.0"))
+	FVector2D ZoneSize = FVector2D(480.0f, 480.0f);
+
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<USceneComponent> Root;
 

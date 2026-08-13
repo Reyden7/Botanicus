@@ -70,14 +70,15 @@ void UBotanicusHudLayoutWidget::NativeOnInitialized()
 		TEXT("/Game/Botanicus/UI/HUD/Elements/WBP_HUD_Crosshair.WBP_HUD_Crosshair_C"));
 }
 
-void UBotanicusHudLayoutWidget::SetInteractionHeight(float NewHeight)
+void UBotanicusHudLayoutWidget::SetInteractionSize(
+	const FVector2D& NewSize)
 {
 	if (UCanvasPanelSlot* InteractionCanvasSlot = InteractionSlot
 		? Cast<UCanvasPanelSlot>(InteractionSlot->Slot)
 		: nullptr)
 	{
-		FVector2D Size = InteractionCanvasSlot->GetSize();
-		Size.Y = FMath::Max(108.0f, NewHeight);
-		InteractionCanvasSlot->SetSize(Size);
+		InteractionCanvasSlot->SetSize(FVector2D(
+			FMath::Max(310.0f, NewSize.X),
+			FMath::Max(108.0f, NewSize.Y)));
 	}
 }

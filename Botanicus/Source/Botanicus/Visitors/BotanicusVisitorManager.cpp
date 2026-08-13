@@ -7,6 +7,7 @@
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "Path/BotanicusPathActor.h"
+#include "Path/BotanicusRoadNetwork.h"
 #include "Sales/BotanicusCashRegisterActor.h"
 #include "Sales/BotanicusSalesDisplayActor.h"
 #include "Sales/BotanicusSelfCheckoutActor.h"
@@ -40,10 +41,14 @@ void ABotanicusVisitorManager::Tick(float DeltaSeconds)
 	AdmissionRemaining -= DeltaSeconds;
 
 	TArray<FVector> VisitorCircuit;
+	TArray<FVector> ArrivalRoute;
+	TArray<FVector> DirectReturnRoute;
 	int32 CheckoutWaypointIndex = INDEX_NONE;
 	if (!BuildVisitorCircuit(
 			VisitorCircuit,
-			CheckoutWaypointIndex))
+			CheckoutWaypointIndex,
+			ArrivalRoute,
+			DirectReturnRoute))
 	{
 		return;
 	}
@@ -96,7 +101,9 @@ void ABotanicusVisitorManager::Tick(float DeltaSeconds)
 	{
 		SpawnQueuedVisitor(
 			VisitorCircuit,
-			CheckoutWaypointIndex);
+			CheckoutWaypointIndex,
+			ArrivalRoute,
+			DirectReturnRoute);
 		SpawnRemaining =
 			FMath::FRandRange(
 				VisitorSpawnInterval * 0.7f,
@@ -107,9 +114,13 @@ void ABotanicusVisitorManager::Tick(float DeltaSeconds)
 
 bool ABotanicusVisitorManager::BuildVisitorCircuit(
 	TArray<FVector>& OutCircuit,
-	int32& OutCheckoutWaypointIndex) const
+	int32& OutCheckoutWaypointIndex,
+	TArray<FVector>& OutArrivalRoute,
+	TArray<FVector>& OutDirectReturnRoute) const
 {
 	OutCheckoutWaypointIndex = INDEX_NONE;
+	OutArrivalRoute.Reset();
+	OutDirectReturnRoute.Reset();
 	UWorld* World = GetWorld();
 	if (!World)
 	{
@@ -139,6 +150,21 @@ bool ABotanicusVisitorManager::BuildVisitorCircuit(
 	if (!ParkingZone || !SalesZone || !CheckoutZone)
 	{
 		return false;
+	}
+
+	// The graph understands spline intersections, T junctions and routes
+	// composed of any number of independently created road actors.
+	if (FBotanicusRoadNetwork::BuildVisitorCircuit(
+			World,
+			ParkingZone,
+			SalesZone,
+			CheckoutZone,
+			OutCircuit,
+			OutCheckoutWaypointIndex,
+			OutArrivalRoute,
+			OutDirectReturnRoute))
+	{
+		return true;
 	}
 
 	const auto FindZonePointOnSegment =
@@ -174,6 +200,7 @@ bool ABotanicusVisitorManager::BuildVisitorCircuit(
 		};
 
 	float LongestRouteLength = 0.0f;
+	TArray<TArray<FVector>> VisitorRouteSegments;
 	for (TActorIterator<ABotanicusPathActor> PathIt(World);
 		 PathIt;
 		 ++PathIt)
@@ -183,30 +210,183 @@ bool ABotanicusVisitorManager::BuildVisitorCircuit(
 		{
 			continue;
 		}
+		TArray<FVector> SegmentPoints = PathIt->GetPathWorldPoints();
+		if (SegmentPoints.Num() >= 2)
+		{
+			VisitorRouteSegments.Add(MoveTemp(SegmentPoints));
+		}
+	}
+
+	constexpr float RouteConnectionTolerance = 275.0f;
+	const float RouteConnectionToleranceSquared =
+		FMath::Square(RouteConnectionTolerance);
+
+	const auto AdvanceZoneProgress =
+		[&](const TArray<FVector>& Points,
+			bool bAlreadyReachedSales,
+			bool& bOutReachedSales,
+			bool& bOutReachedCheckout)
+		{
+			bOutReachedSales = bAlreadyReachedSales;
+			bOutReachedCheckout = false;
+			for (int32 PointIndex = 1;
+				 PointIndex < Points.Num();
+				 ++PointIndex)
+			{
+				FVector CrossingPoint;
+				if (FindZonePointOnSegment(
+						SalesZone,
+						Points[PointIndex - 1],
+						Points[PointIndex],
+						CrossingPoint))
+				{
+					bOutReachedSales = true;
+				}
+				if (bOutReachedSales &&
+					FindZonePointOnSegment(
+						CheckoutZone,
+						Points[PointIndex - 1],
+						Points[PointIndex],
+						CrossingPoint))
+				{
+					bOutReachedCheckout = true;
+					return;
+				}
+			}
+		};
+
+	TFunction<bool(
+		const TArray<FVector>&,
+		bool,
+		TSet<int32>&,
+		TArray<FVector>&)> FindRouteThroughNetwork;
+	FindRouteThroughNetwork =
+		[&](const TArray<FVector>& CurrentPoints,
+			bool bReachedSales,
+			TSet<int32>& VisitedTraversalStates,
+			TArray<FVector>& OutFoundPoints)
+		{
+			for (int32 SegmentIndex = 0;
+				 SegmentIndex < VisitorRouteSegments.Num();
+				 ++SegmentIndex)
+			{
+				const TArray<FVector>& Segment =
+					VisitorRouteSegments[SegmentIndex];
+				for (int32 Orientation = 0;
+					 Orientation < 2;
+					 ++Orientation)
+				{
+					const bool bReverseSegment = Orientation == 1;
+					const FVector& ConnectionPoint =
+						bReverseSegment ? Segment.Last() : Segment[0];
+					if (FVector::DistSquared2D(
+							CurrentPoints.Last(), ConnectionPoint) >
+						RouteConnectionToleranceSquared)
+					{
+						continue;
+					}
+
+					// Keep direction and visit phase in the state. The same
+					// physical segment may therefore be used backwards after
+					// the shop, which is required by Y-shaped route networks.
+					const int32 TraversalState =
+						SegmentIndex * 4 + Orientation * 2 +
+						(bReachedSales ? 1 : 0);
+					if (VisitedTraversalStates.Contains(TraversalState))
+					{
+						continue;
+					}
+
+					TArray<FVector> OrientedSegment = Segment;
+					if (bReverseSegment)
+					{
+						Algo::Reverse(OrientedSegment);
+					}
+					TArray<FVector> NextPoints = CurrentPoints;
+					for (int32 PointIndex = 1;
+						 PointIndex < OrientedSegment.Num();
+						 ++PointIndex)
+					{
+						NextPoints.Add(OrientedSegment[PointIndex]);
+					}
+
+					bool bNextReachedSales = false;
+					bool bNextReachedCheckout = false;
+					AdvanceZoneProgress(
+						OrientedSegment,
+						bReachedSales,
+						bNextReachedSales,
+						bNextReachedCheckout);
+					if (bNextReachedCheckout)
+					{
+						OutFoundPoints = MoveTemp(NextPoints);
+						return true;
+					}
+
+					VisitedTraversalStates.Add(TraversalState);
+					if (FindRouteThroughNetwork(
+							NextPoints,
+							bNextReachedSales,
+							VisitedTraversalStates,
+							OutFoundPoints))
+					{
+						return true;
+					}
+					VisitedTraversalStates.Remove(TraversalState);
+				}
+			}
+			return false;
+		};
+
+	for (int32 StartSegmentIndex = 0;
+		 StartSegmentIndex < VisitorRouteSegments.Num();
+		 ++StartSegmentIndex)
+	{
 		TArray<FVector> CandidatePoints =
-			PathIt->GetPathWorldPoints();
-		if (CandidatePoints.Num() < 3)
+			VisitorRouteSegments[StartSegmentIndex];
+		const bool bStartsInParking =
+			ParkingZone->ContainsPoint2D(CandidatePoints[0]);
+		const bool bEndsInParking =
+			ParkingZone->ContainsPoint2D(CandidatePoints.Last());
+		if (!bStartsInParking && !bEndsInParking)
 		{
 			continue;
 		}
-		const bool bFirstPointInParking =
-			ParkingZone->ContainsPoint2D(CandidatePoints[0]);
-		const bool bLastPointInParking =
-			ParkingZone->ContainsPoint2D(CandidatePoints.Last());
-		if (!bFirstPointInParking && bLastPointInParking)
+		if (!bStartsInParking)
 		{
 			Algo::Reverse(CandidatePoints);
 		}
-		if (!ParkingZone->ContainsPoint2D(CandidatePoints[0]) ||
-			!ParkingZone->ContainsPoint2D(CandidatePoints.Last()))
+
+		bool bReachedSalesOnStart = false;
+		bool bReachedCheckoutOnStart = false;
+		AdvanceZoneProgress(
+			CandidatePoints,
+			false,
+			bReachedSalesOnStart,
+			bReachedCheckoutOnStart);
+		if (!bReachedCheckoutOnStart)
 		{
-			continue;
+			const bool bStartWasReversed = !bStartsInParking;
+			TSet<int32> VisitedTraversalStates;
+			VisitedTraversalStates.Add(
+				StartSegmentIndex * 4 +
+				(bStartWasReversed ? 2 : 0));
+			TArray<FVector> ConnectedRoute;
+			if (!FindRouteThroughNetwork(
+					CandidatePoints,
+					bReachedSalesOnStart,
+					VisitedTraversalStates,
+					ConnectedRoute))
+			{
+				continue;
+			}
+			CandidatePoints = MoveTemp(ConnectedRoute);
 		}
 
 		bool bHasReachedSalesArea = false;
 		int32 CandidateCheckoutIndex = INDEX_NONE;
 		for (int32 PointIndex = 1;
-			 PointIndex < CandidatePoints.Num() - 1;
+			 PointIndex < CandidatePoints.Num();
 			 ++PointIndex)
 		{
 			FVector SalesCrossingPoint;
@@ -244,6 +424,23 @@ bool ABotanicusVisitorManager::BuildVisitorCircuit(
 		if (CandidateCheckoutIndex == INDEX_NONE)
 		{
 			continue;
+		}
+
+		// A set of connected Blueprint segments only needs to reach the
+		// checkout. Visitors follow the same route backwards to return to
+		// the parking, so level designers do not need to duplicate it.
+		if (!ParkingZone->ContainsPoint2D(CandidatePoints.Last()))
+		{
+			// UE 5.8 rejects Add(Array[Index]) because Add may reallocate the
+			// same array and invalidate the referenced element. Copy the point
+			// to independent storage before growing CandidatePoints.
+			for (int32 PointIndex = CandidatePoints.Num() - 2;
+				 PointIndex >= 0;
+				 --PointIndex)
+			{
+				const FVector ReturnPoint = CandidatePoints[PointIndex];
+				CandidatePoints.Add(ReturnPoint);
+			}
 		}
 
 		FCollisionQueryParams QueryParams(
@@ -618,7 +815,9 @@ void ABotanicusVisitorManager::RefreshCheckoutQueue(
 
 void ABotanicusVisitorManager::SpawnQueuedVisitor(
 	const TArray<FVector>& VisitorCircuit,
-	int32 CheckoutWaypointIndex)
+	int32 CheckoutWaypointIndex,
+	const TArray<FVector>& ArrivalRoute,
+	const TArray<FVector>& DirectReturnRoute)
 {
 	UWorld* World = GetWorld();
 	if (!World ||
@@ -670,7 +869,9 @@ void ABotanicusVisitorManager::SpawnQueuedVisitor(
 		Visitor->InitializeQueuedCircuit(
 			VisitorCircuit,
 			CheckoutWaypointIndex,
-			QueueLocation);
+			QueueLocation,
+			ArrivalRoute,
+			DirectReturnRoute);
 		WaitingVisitors.Add(Visitor);
 	}
 }

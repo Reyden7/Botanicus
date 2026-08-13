@@ -259,6 +259,11 @@ public:
 
 	void RequestSwapSlots(int32 SourceSlotIndex, int32 TargetSlotIndex);
 
+	/** Swaps two slots directly from authoritative startup/save gameplay. */
+	bool SwapSlotsAuthoritative(
+		int32 SourceSlotIndex,
+		int32 TargetSlotIndex);
+
 	/** Requests activation of the selected item. Gameplay listeners run on the server. */
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Quick Bar")
 	void ActivateSelectedSlot();
