@@ -10,6 +10,7 @@
 class ABotanicusPlayerController;
 class UButton;
 class UImage;
+class UProgressBar;
 class UScrollBox;
 class USlider;
 class USizeBox;
@@ -229,6 +230,14 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UVerticalBox> PendingOrdersBox;
+
+	TArray<FGuid> PendingOrderCardIds;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UTextBlock>> PendingOrderTimeLabels;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UProgressBar>> PendingOrderProgressBars;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> LevelLabel;

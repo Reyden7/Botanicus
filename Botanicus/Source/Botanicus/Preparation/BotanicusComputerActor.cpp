@@ -4,6 +4,7 @@
 
 #include "BotanicusCharacter.h"
 #include "BotanicusPlayerController.h"
+#include "Camera/CameraComponent.h"
 
 ABotanicusComputerActor::ABotanicusComputerActor()
 {
@@ -29,6 +30,16 @@ ABotanicusComputerActor::ABotanicusComputerActor()
 	Mesh->SetRelativeLocation(FVector::ZeroVector);
 	Mesh->SetRelativeRotation(FRotator::ZeroRotator);
 	Mesh->SetRelativeScale3D(FVector::OneVector);
+
+	InteractionCamera = CreateDefaultSubobject<UCameraComponent>(
+		TEXT("Computer Interaction Camera"));
+	InteractionCamera->SetupAttachment(SceneRoot);
+	// The default assumes that the front of the computer faces +X. Designers
+	// can fine-tune this inherited component in BP_Item_CommandComputer.
+	InteractionCamera->SetRelativeLocation(FVector(85.0f, 0.0f, 72.0f));
+	InteractionCamera->SetRelativeRotation(FRotator(-7.0f, 180.0f, 0.0f));
+	InteractionCamera->SetFieldOfView(48.0f);
+	InteractionCamera->bUsePawnControlRotation = false;
 }
 
 FBotanicusInteractionPrompt
@@ -77,6 +88,6 @@ void ABotanicusComputerActor::Interact_Implementation(
 			Character->GetController())
 		: nullptr)
 	{
-		Controller->ClientOpenOrderCatalogFromComputer();
+		Controller->ClientOpenOrderCatalogFromComputer(this);
 	}
 }

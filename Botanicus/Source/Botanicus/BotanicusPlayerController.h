@@ -195,7 +195,8 @@ public:
 	void ToggleDevelopmentPanel();
 
 	UFUNCTION(Client, Reliable)
-	void ClientOpenOrderCatalogFromComputer();
+	void ClientOpenOrderCatalogFromComputer(
+		ABotanicusComputerActor* Computer);
 
 	UFUNCTION(Client, Reliable)
 	void ClientOpenPreparationWorkbenchUpgrade(
@@ -429,6 +430,9 @@ protected:
 	void SetHudCursorMode(bool bEnabled);
 	void InitializeTopDownToolbarWidget();
 	void InitializeOrderCatalogWidget();
+	void FinishOpenOrderCatalogFromComputer();
+	void CloseOrderCatalogFromComputer();
+	void FinishCloseOrderCatalogFromComputer();
 	void InitializeWorkbenchUpgradeWidget();
 	void InitializeDevelopmentPanelWidget();
 	void InitializeBuildingCatalogWidget();
@@ -956,6 +960,21 @@ protected:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusOrderCatalogWidget> OrderCatalogWidget;
+
+	TWeakObjectPtr<ABotanicusComputerActor> ActiveComputerView;
+	FTimerHandle ComputerViewTransitionTimer;
+
+	UPROPERTY(
+		EditDefaultsOnly,
+		Category="Botanicus|Computer Camera",
+		meta=(ClampMin="0.0", ClampMax="2.0", Units="s"))
+	float ComputerCameraEnterBlendTime = 0.55f;
+
+	UPROPERTY(
+		EditDefaultsOnly,
+		Category="Botanicus|Computer Camera",
+		meta=(ClampMin="0.0", ClampMax="2.0", Units="s"))
+	float ComputerCameraExitBlendTime = 0.4f;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusWorkbenchUpgradeWidget>

@@ -186,30 +186,6 @@ void AddIconAndText(
 	Button->AddChild(Content);
 }
 
-const TCHAR* ElementTextureForDefinition(
-	const FBotanicusItemDefinition& Definition)
-{
-	const FString Search =
-		(Definition.ItemKey.ToString() + TEXT(" ") +
-		 Definition.DisplayName.ToString()).ToLower();
-	if (Search.Contains(TEXT("feu")) || Search.Contains(TEXT("braise")) ||
-		Search.Contains(TEXT("flamme")))
-	{
-		return TEXT("T_Command_Fire");
-	}
-	if (Search.Contains(TEXT("glace")) || Search.Contains(TEXT("givre")) ||
-		Search.Contains(TEXT("cristal")))
-	{
-		return TEXT("T_Command_Ice");
-	}
-	if (Search.Contains(TEXT("eau")) || Search.Contains(TEXT("hyd")) ||
-		Search.Contains(TEXT("onde")))
-	{
-		return TEXT("T_Command_Water");
-	}
-	return TEXT("T_Command_Nature");
-}
-
 struct FCommandElementStyle
 {
 	const TCHAR* Background;
@@ -561,11 +537,6 @@ void UBotanicusOrderItemRowWidget::InitializeRow(
 	if (ItemIcon)
 	{
 		UTexture2D* Texture = InDefinition.Icon.LoadSynchronous();
-		if (!Texture && bInShowSeedElement)
-		{
-			Texture = LoadCommandTexture(
-				ElementTextureForDefinition(InDefinition));
-		}
 		if (Texture)
 		{
 			ItemIcon->SetBrushFromTexture(Texture, true);
@@ -573,8 +544,9 @@ void UBotanicusOrderItemRowWidget::InitializeRow(
 		if (ItemIconArea)
 		{
 			ItemIconArea->SetVisibility(
-				Texture ? ESlateVisibility::HitTestInvisible
-						: ESlateVisibility::Collapsed);
+				!bInShowSeedElement && Texture
+					? ESlateVisibility::HitTestInvisible
+					: ESlateVisibility::Collapsed);
 		}
 	}
 	if (ElementBadgeArea)
@@ -667,7 +639,7 @@ void UBotanicusOrderItemRowWidget::BuildLayout()
 	{
 		Root->SetBrushFromTexture(ItemBackground);
 	}
-	Root->SetPadding(FMargin(10.0f, 6.0f));
+	Root->SetPadding(FMargin(26.0f, 6.0f, 10.0f, 6.0f));
 	WidgetTree->RootWidget = Root;
 
 	UHorizontalBox* Row =
@@ -818,6 +790,7 @@ void UBotanicusOrderCatalogWidget::InitializeWithController(
 void UBotanicusOrderCatalogWidget::NativeOnInitialized()
 {
 	Super::NativeOnInitialized();
+	SetIsFocusable(true);
 	const bool bDesignerLayoutBound = BindDesignerLayout();
 	if (!bDesignerLayoutBound && GetClass() == StaticClass())
 	{
@@ -1870,12 +1843,15 @@ void UBotanicusOrderCatalogWidget::Refresh()
 	}
 	const TArray<FBotanicusPendingOrder>& Orders =
 		BotanicusController->GetPendingOrders();
-	if (PendingOrdersBox)
-	{
-		PendingOrdersBox->ClearChildren();
-	}
 	if (Orders.Num() == 0)
 	{
+		if (PendingOrdersBox && PendingOrderCardIds.Num() > 0)
+		{
+			PendingOrdersBox->ClearChildren();
+			PendingOrderCardIds.Reset();
+			PendingOrderTimeLabels.Reset();
+			PendingOrderProgressBars.Reset();
+		}
 		PendingOrdersLabel->SetText(
 			NSLOCTEXT(
 				"BotanicusOrders",
@@ -1906,8 +1882,95 @@ void UBotanicusOrderCatalogWidget::Refresh()
 				? DeliveryGameInstance->GetSubsystem<
 					UBotanicusItemCatalogSubsystem>()
 				: nullptr;
-		for (const FBotanicusPendingOrder& Order : Orders)
+		bool bMustRebuildCards =
+			PendingOrderCardIds.Num() != Orders.Num();
+		if (!bMustRebuildCards)
 		{
+			for (int32 Index = 0; Index < Orders.Num(); ++Index)
+			{
+				if (PendingOrderCardIds[Index] != Orders[Index].OrderId)
+				{
+					bMustRebuildCards = true;
+					break;
+				}
+			}
+		}
+
+		if (bMustRebuildCards)
+		{
+			PendingOrdersBox->ClearChildren();
+			PendingOrderCardIds.Reset();
+			PendingOrderTimeLabels.Reset();
+			PendingOrderProgressBars.Reset();
+
+			for (const FBotanicusPendingOrder& Order : Orders)
+			{
+				UBorder* OrderCard = WidgetTree->ConstructWidget<UBorder>();
+				OrderCard->SetBrushColor(
+					FLinearColor(0.07f, 0.23f, 0.13f, 1.0f));
+				OrderCard->SetPadding(FMargin(7.0f));
+				UVerticalBoxSlot* CardSlot =
+					PendingOrdersBox->AddChildToVerticalBox(OrderCard);
+				CardSlot->SetPadding(FMargin(0.0f, 0.0f, 0.0f, 7.0f));
+
+				UHorizontalBox* CardRow =
+					WidgetTree->ConstructWidget<UHorizontalBox>();
+				OrderCard->AddChild(CardRow);
+				UVerticalBox* CardColumn =
+					WidgetTree->ConstructWidget<UVerticalBox>();
+				UHorizontalBoxSlot* CardCopySlot =
+					CardRow->AddChildToHorizontalBox(CardColumn);
+				CardCopySlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+				CardCopySlot->SetVerticalAlignment(VAlign_Center);
+				UTextBlock* OrderName =
+					WidgetTree->ConstructWidget<UTextBlock>();
+				OrderName->SetText(Order.DisplayName);
+				OrderName->SetColorAndOpacity(FSlateColor(CommandCream));
+				OrderName->SetAutoWrapText(true);
+				SetTextSize(OrderName, 10);
+				CardColumn->AddChildToVerticalBox(OrderName);
+
+				UTextBlock* OrderTime =
+					WidgetTree->ConstructWidget<UTextBlock>();
+				OrderTime->SetColorAndOpacity(FSlateColor(CommandGold));
+				SetTextSize(OrderTime, 9);
+				CardColumn->AddChildToVerticalBox(OrderTime);
+
+				UProgressBar* Progress =
+					WidgetTree->ConstructWidget<UProgressBar>();
+				Progress->SetFillColorAndOpacity(
+					FLinearColor(0.58f, 0.78f, 0.13f, 1.0f));
+				UVerticalBoxSlot* ProgressSlot =
+					CardColumn->AddChildToVerticalBox(
+						WrapAtSize(WidgetTree, Progress, 146.0f, 7.0f));
+				ProgressSlot->SetPadding(
+					FMargin(0.0f, 5.0f, 0.0f, 0.0f));
+
+				UImage* ParcelIcon = MakeCommandImage(
+					WidgetTree,
+					TEXT("T_Command_Parcel"),
+					Layout->ParcelIcon.Size);
+				ApplyLayoutOffset(ParcelIcon, Layout->ParcelIcon.Offset);
+				UHorizontalBoxSlot* ParcelSlot =
+					CardRow->AddChildToHorizontalBox(
+						WrapAtSize(
+							WidgetTree,
+							ParcelIcon,
+							Layout->ParcelIcon.Size.X,
+							Layout->ParcelIcon.Size.Y));
+				ParcelSlot->SetVerticalAlignment(VAlign_Center);
+				ParcelSlot->SetPadding(
+					FMargin(7.0f, 0.0f, 0.0f, 0.0f));
+
+				PendingOrderCardIds.Add(Order.OrderId);
+				PendingOrderTimeLabels.Add(OrderTime);
+				PendingOrderProgressBars.Add(Progress);
+			}
+		}
+
+		for (int32 Index = 0; Index < Orders.Num(); ++Index)
+		{
+			const FBotanicusPendingOrder& Order = Orders[Index];
 			const float Remaining = FMath::Max(
 				0.0f, Order.DeliveryServerTime - ServerTime);
 			float TotalDuration = FMath::Max(0.1f, Remaining);
@@ -1920,65 +1983,21 @@ void UBotanicusOrderCatalogWidget::Refresh()
 						0.1f, Definition->DeliveryDelaySeconds);
 				}
 			}
-
-			UBorder* OrderCard = WidgetTree->ConstructWidget<UBorder>();
-			OrderCard->SetBrushColor(
-				FLinearColor(0.07f, 0.23f, 0.13f, 1.0f));
-			OrderCard->SetPadding(FMargin(7.0f));
-			UVerticalBoxSlot* CardSlot =
-				PendingOrdersBox->AddChildToVerticalBox(OrderCard);
-			CardSlot->SetPadding(FMargin(0.0f, 0.0f, 0.0f, 7.0f));
-
-			UHorizontalBox* CardRow =
-				WidgetTree->ConstructWidget<UHorizontalBox>();
-			OrderCard->AddChild(CardRow);
-			UVerticalBox* CardColumn =
-				WidgetTree->ConstructWidget<UVerticalBox>();
-			UHorizontalBoxSlot* CardCopySlot =
-				CardRow->AddChildToHorizontalBox(CardColumn);
-			CardCopySlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-			CardCopySlot->SetVerticalAlignment(VAlign_Center);
-			UTextBlock* OrderName = WidgetTree->ConstructWidget<UTextBlock>();
-			OrderName->SetText(Order.DisplayName);
-			OrderName->SetColorAndOpacity(FSlateColor(CommandCream));
-			OrderName->SetAutoWrapText(true);
-			SetTextSize(OrderName, 10);
-			CardColumn->AddChildToVerticalBox(OrderName);
-
-			UTextBlock* OrderTime = WidgetTree->ConstructWidget<UTextBlock>();
-			OrderTime->SetText(FText::FromString(FString::Printf(
-				TEXT("x%d  -  arrivee dans %.1f s"),
-				Order.Quantity,
-				Remaining)));
-			OrderTime->SetColorAndOpacity(FSlateColor(CommandGold));
-			SetTextSize(OrderTime, 9);
-			CardColumn->AddChildToVerticalBox(OrderTime);
-
-			UProgressBar* Progress =
-				WidgetTree->ConstructWidget<UProgressBar>();
-			Progress->SetPercent(FMath::Clamp(
-				1.0f - Remaining / TotalDuration, 0.03f, 1.0f));
-			Progress->SetFillColorAndOpacity(
-				FLinearColor(0.58f, 0.78f, 0.13f, 1.0f));
-			UVerticalBoxSlot* ProgressSlot =
-				CardColumn->AddChildToVerticalBox(
-					WrapAtSize(WidgetTree, Progress, 146.0f, 7.0f));
-			ProgressSlot->SetPadding(FMargin(0.0f, 5.0f, 0.0f, 0.0f));
-
-			UImage* ParcelIcon = MakeCommandImage(
-				WidgetTree,
-				TEXT("T_Command_Parcel"),
-				Layout->ParcelIcon.Size);
-			ApplyLayoutOffset(ParcelIcon, Layout->ParcelIcon.Offset);
-			UHorizontalBoxSlot* ParcelSlot =
-				CardRow->AddChildToHorizontalBox(
-					WrapAtSize(
-						WidgetTree,
-						ParcelIcon,
-						Layout->ParcelIcon.Size.X,
-						Layout->ParcelIcon.Size.Y));
-			ParcelSlot->SetVerticalAlignment(VAlign_Center);
-			ParcelSlot->SetPadding(FMargin(7.0f, 0.0f, 0.0f, 0.0f));
+			if (PendingOrderTimeLabels.IsValidIndex(Index) &&
+				PendingOrderTimeLabels[Index])
+			{
+				PendingOrderTimeLabels[Index]->SetText(
+					FText::FromString(FString::Printf(
+						TEXT("x%d  -  arrivée dans %.1f s"),
+						Order.Quantity,
+						Remaining)));
+			}
+			if (PendingOrderProgressBars.IsValidIndex(Index) &&
+				PendingOrderProgressBars[Index])
+			{
+				PendingOrderProgressBars[Index]->SetPercent(FMath::Clamp(
+					1.0f - Remaining / TotalDuration, 0.03f, 1.0f));
+			}
 		}
 		return;
 	}

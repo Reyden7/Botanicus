@@ -4247,6 +4247,11 @@ void ABotanicusPlayerController::ToggleOrderCatalog()
 	const bool bOpening =
 		OrderCatalogWidget->GetVisibility() !=
 			ESlateVisibility::Visible;
+	if (!bOpening && bOrderCatalogOpenedFromComputer)
+	{
+		CloseOrderCatalogFromComputer();
+		return;
+	}
 	if (bOpening && !bBuildingTopDownViewActive)
 	{
 		return;
@@ -4266,12 +4271,6 @@ void ABotanicusPlayerController::ToggleOrderCatalog()
 		bAzertyLeftPressed = false;
 		bAzertyRightPressed = false;
 		OrderCatalogWidget->Refresh();
-	}
-	else if (bOrderCatalogOpenedFromComputer)
-	{
-		bOrderCatalogOpenedFromComputer = false;
-		bShowMouseCursor = false;
-		SetInputMode(FInputModeGameOnly());
 	}
 }
 
@@ -4338,7 +4337,8 @@ void ABotanicusPlayerController::ToggleDevelopmentPanel()
 }
 
 void ABotanicusPlayerController::
-	ClientOpenOrderCatalogFromComputer_Implementation()
+ClientOpenOrderCatalogFromComputer_Implementation(
+	ABotanicusComputerActor* Computer)
 {
 	if (!IsLocalPlayerController())
 	{
@@ -4351,21 +4351,113 @@ void ABotanicusPlayerController::
 	}
 
 	bOrderCatalogOpenedFromComputer = true;
-	OrderCatalogWidget->SetVisibility(ESlateVisibility::Visible);
+	ActiveComputerView = Computer;
+	OrderCatalogWidget->SetVisibility(ESlateVisibility::Collapsed);
 	if (BuildingCatalogWidget)
 	{
 		BuildingCatalogWidget->SetVisibility(
 			ESlateVisibility::Collapsed);
 	}
+	bAzertyForwardPressed = false;
+	bAzertyBackwardPressed = false;
+	bAzertyLeftPressed = false;
+	bAzertyRightPressed = false;
+	SetIgnoreMoveInput(true);
+	SetIgnoreLookInput(true);
+	bShowMouseCursor = false;
+	SetInputMode(FInputModeGameOnly());
+
+	SetInteractionTargetHighlighted(
+		LocalInteractionHighlightActor.Get(), false);
+	LocalInteractionHighlightActor.Reset();
+	if (InteractionTargetWidget)
+	{
+		InteractionTargetWidget->ClearTarget();
+	}
+
+	GetWorldTimerManager().ClearTimer(ComputerViewTransitionTimer);
+	if (IsValid(Computer) && ComputerCameraEnterBlendTime > KINDA_SMALL_NUMBER)
+	{
+		SetViewTargetWithBlend(
+			Computer,
+			ComputerCameraEnterBlendTime,
+			EViewTargetBlendFunction::VTBlend_Cubic);
+		GetWorldTimerManager().SetTimer(
+			ComputerViewTransitionTimer,
+			this,
+			&ABotanicusPlayerController::FinishOpenOrderCatalogFromComputer,
+			ComputerCameraEnterBlendTime,
+			false);
+	}
+	else
+	{
+		FinishOpenOrderCatalogFromComputer();
+	}
+}
+
+void ABotanicusPlayerController::FinishOpenOrderCatalogFromComputer()
+{
+	if (!IsLocalPlayerController() ||
+		!bOrderCatalogOpenedFromComputer ||
+		!OrderCatalogWidget)
+	{
+		return;
+	}
+
+	OrderCatalogWidget->SetRenderOpacity(1.0f);
+	OrderCatalogWidget->SetVisibility(ESlateVisibility::Visible);
+	OrderCatalogWidget->Refresh();
 	bShowMouseCursor = true;
 	FInputModeGameAndUI InputMode;
 	InputMode.SetHideCursorDuringCapture(false);
-	InputMode.SetLockMouseToViewportBehavior(
-		EMouseLockMode::DoNotLock);
-	InputMode.SetWidgetToFocus(
-		OrderCatalogWidget->TakeWidget());
+	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	InputMode.SetWidgetToFocus(OrderCatalogWidget->TakeWidget());
 	SetInputMode(InputMode);
-	OrderCatalogWidget->Refresh();
+	OrderCatalogWidget->SetKeyboardFocus();
+}
+
+void ABotanicusPlayerController::CloseOrderCatalogFromComputer()
+{
+	GetWorldTimerManager().ClearTimer(ComputerViewTransitionTimer);
+	if (OrderCatalogWidget)
+	{
+		OrderCatalogWidget->SetVisibility(ESlateVisibility::Collapsed);
+	}
+	bOrderCatalogOpenedFromComputer = false;
+	bShowMouseCursor = false;
+	SetInputMode(FInputModeGameOnly());
+
+	APawn* ControlledPawn = GetPawn();
+	if (ControlledPawn && ComputerCameraExitBlendTime > KINDA_SMALL_NUMBER)
+	{
+		SetViewTargetWithBlend(
+			ControlledPawn,
+			ComputerCameraExitBlendTime,
+			EViewTargetBlendFunction::VTBlend_Cubic);
+		GetWorldTimerManager().SetTimer(
+			ComputerViewTransitionTimer,
+			this,
+			&ABotanicusPlayerController::FinishCloseOrderCatalogFromComputer,
+			ComputerCameraExitBlendTime,
+			false);
+	}
+	else
+	{
+		FinishCloseOrderCatalogFromComputer();
+	}
+}
+
+void ABotanicusPlayerController::FinishCloseOrderCatalogFromComputer()
+{
+	ActiveComputerView.Reset();
+	if (bBuildingTopDownViewActive)
+	{
+		return;
+	}
+	SetIgnoreMoveInput(false);
+	SetIgnoreLookInput(false);
+	bShowMouseCursor = false;
+	SetInputMode(FInputModeGameOnly());
 }
 
 void ABotanicusPlayerController::

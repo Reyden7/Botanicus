@@ -154,7 +154,7 @@ void UBotanicusBuildingCatalogRowWidget::BuildLayout()
 		Root->SetBrushFromTexture(ItemBackground);
 		Root->SetBrushColor(FLinearColor::White);
 	}
-	Root->SetPadding(FMargin(10.0f, 7.0f));
+	Root->SetPadding(FMargin(26.0f, 7.0f, 10.0f, 7.0f));
 	WidgetTree->RootWidget = Root;
 
 	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
