@@ -61,6 +61,7 @@ public:
 
 protected:
 	virtual void OnEquipmentDefinitionApplied() {}
+	void SetInteractionIndicatorVisibility(bool bVisible);
 	bool IsUsingItemDataMesh() const
 	{
 		return bUsingItemDataMesh;

@@ -7,10 +7,9 @@
 #include "BotanicusStorageShelfActor.generated.h"
 
 class UStaticMeshComponent;
-class UTextRenderComponent;
 class ABotanicusPlaceableItemActor;
 
-/** Physical floor or wall shelf with fixed snap points for small stock items. */
+/** Floor or wall shelf whose Blueprint StorageSlot components define capacity. */
 UCLASS()
 class BOTANICUS_API ABotanicusStorageShelfActor
 	: public ABotanicusLargeEquipmentActor
@@ -20,6 +19,7 @@ class BOTANICUS_API ABotanicusStorageShelfActor
 public:
 	ABotanicusStorageShelfActor();
 
+	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual bool CanInteract_Implementation(
@@ -82,9 +82,12 @@ protected:
 	virtual void OnEquipmentDefinitionApplied() override;
 
 private:
+	bool UsesBlueprintAuthoredSlots() const;
+	void GetOrderedBlueprintSlotMarkers(
+		TArray<UStaticMeshComponent*>& OutMarkers) const;
 	void RefreshShelfConfiguration();
 	void RefreshSlotPreviewVisibility();
-	void RefreshLocalStockLabel();
+	void MigrateLegacyCenteredItems();
 	FVector GetSlotBaseLocalLocation(int32 SlotIndex) const;
 	FTransform GetStorageSlotTransform(
 		int32 SlotIndex,
@@ -98,21 +101,32 @@ private:
 	void ApplyStoredItemTransforms();
 	void ClearStoredItemTransforms();
 
-	UPROPERTY(VisibleAnywhere)
-	TArray<TObjectPtr<UStaticMeshComponent>> ShelfBoards;
-
-	UPROPERTY(VisibleAnywhere)
-	TArray<TObjectPtr<UStaticMeshComponent>> SidePanels;
-
-	UPROPERTY(VisibleAnywhere)
+	/**
+	 * Default editable support surfaces used by the shelf Blueprint.
+	 * Additional Static Mesh Components named StorageSlot5, StorageSlot6, etc.
+	 * (or tagged StorageSlot) are discovered automatically at runtime.
+	 * A stored actor uses the marker's position and rotation, then its bottom
+	 * is placed on that surface using the actor's actual half-height.
+	 */
+	UPROPERTY(
+		EditDefaultsOnly,
+		BlueprintReadOnly,
+		Category = "Stockage|Emplacements",
+		meta = (AllowPrivateAccess = "true"))
 	TArray<TObjectPtr<UStaticMeshComponent>> SlotMarkers;
 
-	UPROPERTY(VisibleAnywhere)
-	TObjectPtr<UTextRenderComponent> ShelfLabel;
+	/** Displays the physical slot plates in game for visual positioning. */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Stockage|Emplacements",
+		meta = (AllowPrivateAccess = "true"))
+	bool bShowSlotMarkersInGame = true;
 
 	TArray<FVector> SlotBaseLocations;
 	FVector ConfiguredExtent = FVector(30.0f, 85.0f, 75.0f);
 	float LastLocalPreviewTime = -1000.0f;
+	float NextLegacySlotMigrationTime = 0.0f;
 	FName LocallyPreviewedItemKey = NAME_None;
 	TWeakObjectPtr<const AActor> LocallyIgnoredItem;
 	TArray<TWeakObjectPtr<ABotanicusPlaceableItemActor>>

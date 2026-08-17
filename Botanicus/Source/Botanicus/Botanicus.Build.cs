@@ -20,6 +20,7 @@ public class Botanicus : ModuleRules
 			"OnlineSubsystem",
 			"OnlineSubsystemUtils",
 			"AIModule",
+			"NavigationSystem",
 			"StateTreeModule",
 			"GameplayStateTreeModule",
 			"Landscape",

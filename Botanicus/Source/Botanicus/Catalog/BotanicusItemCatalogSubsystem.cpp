@@ -2,6 +2,7 @@
 
 #include "Catalog/BotanicusItemCatalogSubsystem.h"
 
+#include "Decoration/BotanicusBrokenFlowerPotActor.h"
 #include "Growing/BotanicusPlantPotActor.h"
 #include "Growing/BotanicusMultiPlantPotActor.h"
 #include "Growing/BotanicusWateringCanActor.h"
@@ -17,6 +18,12 @@
 
 namespace
 {
+bool IsDeprecatedStorageShelfType(FName ItemKey)
+{
+	return ItemKey == TEXT("StorageShelfFloorLarge") ||
+		ItemKey == TEXT("StorageShelfWallSmall");
+}
+
 struct FNativePlantItemEntry
 {
 	const TCHAR* Key;
@@ -68,6 +75,67 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	}
 	if (LoadedCatalog)
 	{
+		auto UseAuthoredShelfBlueprint =
+			[this](FName ItemKey, const TCHAR* BlueprintClassPath)
+			{
+				if (FBotanicusItemDefinition* Shelf =
+						LoadedCatalog->Items.FindByPredicate(
+							[ItemKey](
+								const FBotanicusItemDefinition& Definition)
+							{
+								return Definition.ItemKey == ItemKey;
+							}))
+				{
+					Shelf->WorldActorClass = TSoftClassPtr<AActor>(
+						FSoftObjectPath(BlueprintClassPath));
+				}
+			};
+		UseAuthoredShelfBlueprint(
+			TEXT("StorageShelfWallLarge"),
+			TEXT("/Game/Botanicus/blueprints/BP_Item_StorageShelfWallLarge.BP_Item_StorageShelfWallLarge_C"));
+		for (FBotanicusItemDefinition& Definition : LoadedCatalog->Items)
+		{
+			if (IsDeprecatedStorageShelfType(Definition.ItemKey))
+			{
+				Definition.bPurchasable = false;
+			}
+			else if (Definition.ItemKey == TEXT("StorageShelfFloorSmall"))
+			{
+				Definition.DisplayName = NSLOCTEXT(
+					"BotanicusCatalog",
+					"StorageShelfFloor",
+					"Etagere au sol");
+			}
+			else if (Definition.ItemKey == TEXT("StorageShelfWallLarge"))
+			{
+				Definition.DisplayName = NSLOCTEXT(
+					"BotanicusCatalog",
+					"StorageShelfWall",
+					"Etagere murale");
+			}
+		}
+
+		if (FBotanicusItemDefinition* FloorSmallShelf =
+				LoadedCatalog->Items.FindByPredicate(
+					[](const FBotanicusItemDefinition& Definition)
+					{
+						return Definition.ItemKey ==
+							TEXT("StorageShelfFloorSmall");
+					}))
+		{
+			// Runtime migration for catalog assets made before the authored shelf
+			// was imported. Its Blueprint StorageSlot components are authoritative;
+			// spawning the native C++ class would ignore their number/transforms.
+			FloorSmallShelf->WorldActorClass = TSoftClassPtr<AActor>(
+				FSoftObjectPath(TEXT(
+					"/Game/Botanicus/blueprints/BP_Item_StorageShelfFloorSmall.BP_Item_StorageShelfFloorSmall_C")));
+			FloorSmallShelf->WorldMesh = TSoftObjectPtr<UStaticMesh>(
+				FSoftObjectPath(TEXT(
+					"/Game/Botanicus/Items/furnituresMesh/etagère4Slot/etagère4Slot.etagère4Slot")));
+			FloorSmallShelf->WorldScale = FVector::OneVector;
+			FloorSmallShelf->CollisionHalfExtentOverride =
+				FVector(45.0f, 103.0f, 100.0f);
+		}
 		if (FBotanicusItemDefinition* WateringCan =
 				LoadedCatalog->Items.FindByPredicate(
 					[](const FBotanicusItemDefinition& Definition)
@@ -101,6 +169,31 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 			PottingSoil->MaximumStack = 5;
 		}
 	}
+
+	FBotanicusItemDefinition& BrokenFlowerPot =
+		NativeFallbackItems.AddDefaulted_GetRef();
+	BrokenFlowerPot.ItemKey = TEXT("BrokenFlowerPot");
+	BrokenFlowerPot.DisplayName = NSLOCTEXT(
+		"BotanicusCatalog",
+		"BrokenFlowerPot",
+		"Pot de fleurs casse");
+	BrokenFlowerPot.Category = EBotanicusItemCategory::Decoration;
+	BrokenFlowerPot.CatalogTabs =
+		static_cast<int32>(EBotanicusCatalogTab::None);
+	BrokenFlowerPot.WorldMesh = TSoftObjectPtr<UStaticMesh>(
+		FSoftObjectPath(TEXT(
+			"/Game/Botanicus/Items/itemsMesh/propsDeco/pot1/pot.pot")));
+	BrokenFlowerPot.WorldScale = FVector::OneVector;
+	BrokenFlowerPot.WorldActorClass = TSoftClassPtr<AActor>(
+		ABotanicusBrokenFlowerPotActor::StaticClass());
+	BrokenFlowerPot.MaximumStack = 1;
+	BrokenFlowerPot.WeightClass = EBotanicusItemWeightClass::Hotbar;
+	BrokenFlowerPot.Price = 0;
+	BrokenFlowerPot.bPurchasable = false;
+	BrokenFlowerPot.AllowedPlacementSurfaces =
+		static_cast<int32>(EBotanicusPlacementSurface::Floor);
+	BrokenFlowerPot.CollisionHalfExtentOverride =
+		FVector(28.0f, 28.0f, 24.0f);
 
 	FBotanicusItemDefinition& LargeTest =
 		NativeFallbackItems.AddDefaulted_GetRef();
@@ -660,10 +753,30 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 			Shelf.CatalogTabs =
 				static_cast<int32>(EBotanicusCatalogTab::Preparation);
 			Shelf.WorldMesh = TSoftObjectPtr<UStaticMesh>(
-				FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube.Cube")));
-			Shelf.WorldScale = WorldScale;
-			Shelf.WorldActorClass =
-				ABotanicusStorageShelfActor::StaticClass();
+				FSoftObjectPath(
+					ItemKey == TEXT("StorageShelfFloorSmall")
+						? TEXT("/Game/Botanicus/Items/furnituresMesh/etagère4Slot/etagère4Slot.etagère4Slot")
+						: TEXT("/Engine/BasicShapes/Cube.Cube")));
+			Shelf.WorldScale =
+				ItemKey == TEXT("StorageShelfFloorSmall")
+					? FVector::OneVector
+					: WorldScale;
+			const TCHAR* ShelfBlueprintClassPath = nullptr;
+			if (ItemKey == TEXT("StorageShelfFloorSmall"))
+			{
+				ShelfBlueprintClassPath =
+					TEXT("/Game/Botanicus/blueprints/BP_Item_StorageShelfFloorSmall.BP_Item_StorageShelfFloorSmall_C");
+			}
+			else if (ItemKey == TEXT("StorageShelfWallLarge"))
+			{
+				ShelfBlueprintClassPath =
+					TEXT("/Game/Botanicus/blueprints/BP_Item_StorageShelfWallLarge.BP_Item_StorageShelfWallLarge_C");
+			}
+			Shelf.WorldActorClass = ShelfBlueprintClassPath
+				? TSoftClassPtr<AActor>(
+					FSoftObjectPath(ShelfBlueprintClassPath))
+				: TSoftClassPtr<AActor>(
+					ABotanicusStorageShelfActor::StaticClass());
 			Shelf.MaximumStack = 1;
 			Shelf.WeightClass =
 				EBotanicusItemWeightClass::OnePlayerCarry;
@@ -676,44 +789,27 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 					bWallMounted
 						? EBotanicusPlacementSurface::Wall
 						: EBotanicusPlacementSurface::Floor);
-			Shelf.CollisionHalfExtentOverride = CollisionExtent;
+			Shelf.CollisionHalfExtentOverride =
+				ItemKey == TEXT("StorageShelfFloorSmall")
+					? FVector(45.0f, 103.0f, 100.0f)
+					: CollisionExtent;
 		};
 	AddStorageShelf(
 		TEXT("StorageShelfFloorSmall"),
 		NSLOCTEXT(
 			"BotanicusCatalog",
-			"StorageShelfFloorSmall",
-			"Etagere au sol - 4 places"),
+			"StorageShelfFloor",
+			"Etagere au sol"),
 		FVector(0.6f, 1.7f, 1.5f),
 		FVector(30.0f, 85.0f, 75.0f),
 		180,
 		false);
 	AddStorageShelf(
-		TEXT("StorageShelfFloorLarge"),
-		NSLOCTEXT(
-			"BotanicusCatalog",
-			"StorageShelfFloorLarge",
-			"Etagere au sol - 8 places"),
-		FVector(0.7f, 2.5f, 1.8f),
-		FVector(35.0f, 125.0f, 90.0f),
-		320,
-		false);
-	AddStorageShelf(
-		TEXT("StorageShelfWallSmall"),
-		NSLOCTEXT(
-			"BotanicusCatalog",
-			"StorageShelfWallSmall",
-			"Etagere murale - 3 places"),
-		FVector(0.32f, 1.3f, 0.5f),
-		FVector(16.0f, 65.0f, 25.0f),
-		120,
-		true);
-	AddStorageShelf(
 		TEXT("StorageShelfWallLarge"),
 		NSLOCTEXT(
 			"BotanicusCatalog",
-			"StorageShelfWallLarge",
-			"Etagere murale - 6 places"),
+			"StorageShelfWall",
+			"Etagere murale"),
 		FVector(0.36f, 1.9f, 0.96f),
 		FVector(18.0f, 95.0f, 48.0f),
 		220,
@@ -854,7 +950,8 @@ UBotanicusItemCatalogSubsystem::GetAllItems() const
 		for (const FBotanicusItemDefinition& Definition :
 			LoadedCatalog->Items)
 		{
-			if (!Definition.ItemKey.ToString().StartsWith(
+			if (!IsDeprecatedStorageShelfType(Definition.ItemKey) &&
+				!Definition.ItemKey.ToString().StartsWith(
 					TEXT("SeedPacket_")))
 			{
 				Result.Add(Definition);

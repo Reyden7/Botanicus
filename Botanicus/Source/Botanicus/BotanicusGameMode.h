@@ -51,6 +51,9 @@ private:
 	void RestorePlayerEconomy(AController* Controller);
 	void EnsureStarterFixtures(AController* Controller);
 	void FlushScheduledInventoryAutosave();
+	void MaintainBrokenFlowerPots();
+	bool FindBrokenFlowerPotSpawnTransform(
+		FTransform& OutTransform) const;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusWorldSaveGame> CurrentSaveGame;
@@ -60,6 +63,20 @@ private:
 	int32 NextPIERemotePlayerSlot = 0;
 	bool bAutosaveReady = false;
 	bool bInventoryAutosaveScheduled = false;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Ambient Props",
+		meta=(ClampMin="1", ClampMax="30"))
+	int32 MinimumBrokenFlowerPots = 6;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Ambient Props",
+		meta=(ClampMin="10.0", Units="s"))
+	float BrokenFlowerPotRespawnInterval = 75.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Ambient Props",
+		meta=(ClampMin="500.0", Units="cm"))
+	float BrokenFlowerPotSpawnRadius = 3000.0f;
+
+	FTimerHandle BrokenFlowerPotSpawnTimer;
 };
 
 

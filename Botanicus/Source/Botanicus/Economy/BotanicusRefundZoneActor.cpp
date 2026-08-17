@@ -317,8 +317,10 @@ bool ABotanicusRefundZoneActor::TryRefundObject(
 			: nullptr;
 	const FBotanicusItemDefinition* Definition =
 		Catalog ? Catalog->FindItem(ItemKey) : nullptr;
+	const bool bIsBrokenFlowerPot =
+		ItemKey == TEXT("BrokenFlowerPot");
 	if (!Definition ||
-		Definition->Price <= 0 ||
+		(!bIsBrokenFlowerPot && Definition->Price <= 0) ||
 		IsProtectedGameplayItem(*Definition))
 	{
 		if (!RejectedActors.Contains(Actor))
@@ -331,8 +333,9 @@ bool ABotanicusRefundZoneActor::TryRefundObject(
 		return false;
 	}
 
-	const int32 Refund =
-		FMath::Max(
+	const int32 Refund = bIsBrokenFlowerPot
+		? 5 * FMath::Max(1, Quantity)
+		: FMath::Max(
 			1,
 			Definition->Price *
 				FMath::Max(1, Quantity) *

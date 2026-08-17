@@ -35,6 +35,7 @@ class ABotanicusPathActor;
 class ABotanicusCommunicationDoorActor;
 class ABotanicusDeliveryParcelActor;
 class ABotanicusDeliveryZoneActor;
+class ABotanicusBrokenFlowerPotActor;
 class ABotanicusLargeEquipmentActor;
 class ABotanicusPlaceableItemActor;
 class ABotanicusPlantPotActor;
@@ -507,6 +508,7 @@ protected:
 	bool TryOpenNearbyWorkbenchUpgrade();
 	bool TryUseNearbyComputer();
 	bool TryMoveNearbyPlaceableItem();
+	bool TryBreakNearbyBrokenFlowerPot();
 	void BeginPlaceableItemMoveCharge(
 		ABotanicusPlaceableItemActor* WorldItem);
 	void UpdatePlaceableItemMoveCharge(float DeltaTime);
@@ -608,6 +610,7 @@ protected:
 	bool FindAimedStorageSlot(
 		ABotanicusStorageShelfActor*& OutShelf,
 		int32& OutSlotIndex) const;
+	bool TryStoreSelectedQuickBarItemOnAimedShelf();
 	bool FindStorageDestinationAtLocation(
 		FName ItemKey,
 		int32 ItemQuantity,
@@ -723,6 +726,10 @@ protected:
 	void ServerUseGardenTrowelForTransplant(AActor* TargetPot);
 
 	UFUNCTION(Server, Reliable)
+	void ServerBreakBrokenFlowerPot(
+		ABotanicusBrokenFlowerPotActor* BrokenPot);
+
+	UFUNCTION(Server, Reliable)
 	void ServerRetrieveDisplayedSalePot(
 		ABotanicusSalesDisplayActor* SalesDisplay);
 
@@ -827,6 +834,15 @@ protected:
 		float RequestedYaw,
 		int32 Quantity,
 		bool bFloorOnlyPlacement);
+
+	UFUNCTION(Server, Reliable)
+	void ServerStoreQuickBarItemOnShelf(
+		int32 QuickBarSlotIndex,
+		FGuid InstanceId,
+		FName ItemKey,
+		ABotanicusStorageShelfActor* Shelf,
+		int32 ShelfSlotIndex,
+		int32 Quantity);
 
 	UFUNCTION(Server, Reliable)
 	void ServerThrowQuickBarItem(

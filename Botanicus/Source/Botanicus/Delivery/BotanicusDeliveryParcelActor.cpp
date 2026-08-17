@@ -7,15 +7,18 @@
 #include "BotanicusPlayerController.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Catalog/BotanicusItemCatalogSubsystem.h"
+#include "Animation/AnimSequence.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "Delivery/BotanicusLargeEquipmentActor.h"
 #include "Delivery/BotanicusPlaceableItemActor.h"
 #include "Engine/GameInstance.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/SkeletalMesh.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
-#include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
 #include "Net/UnrealNetwork.h"
 #include "QuickBar/BotanicusQuickBarComponent.h"
 #include "UObject/ConstructorHelpers.h"
@@ -30,6 +33,8 @@ ABotanicusDeliveryParcelActor::ABotanicusDeliveryParcelActor()
 		NSLOCTEXT("BotanicusDelivery", "UnpackParcel", "Deballer");
 	InteractionName =
 		NSLOCTEXT("BotanicusDelivery", "DeliveryCarton", "Carton livre");
+	bUseBlueprintAppearance = true;
+	bUseSkeletalMeshAppearance = true;
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(
 		TEXT("/Engine/BasicShapes/Cube.Cube"));
@@ -37,6 +42,47 @@ ABotanicusDeliveryParcelActor::ABotanicusDeliveryParcelActor()
 	{
 		Mesh->SetStaticMesh(CubeFinder.Object);
 	}
+	Mesh->SetVisibility(false, true);
+	Mesh->SetHiddenInGame(true, true);
+	Mesh->SetCastShadow(false);
+
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> CartonMeshFinder(
+		TEXT("/Game/Botanicus/Items/itemsMesh/carton/Box1_anim.Box1_anim"));
+	if (CartonMeshFinder.Succeeded())
+	{
+		SkeletalMeshVisual->SetSkeletalMesh(CartonMeshFinder.Object);
+		SkeletalMeshVisual->SetVisibility(true, true);
+		SkeletalMeshVisual->SetHiddenInGame(false, true);
+		SkeletalMeshVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
+
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> OpeningAnimationFinder(
+		TEXT("/Game/Botanicus/Items/itemsMesh/carton/Box1_anim_Anim.Box1_anim_Anim"));
+	OpeningAnimation = OpeningAnimationFinder.Succeeded()
+		? OpeningAnimationFinder.Object
+		: nullptr;
+
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> CardboardFinder(
+		TEXT("/Game/Botanicus/Items/itemsMesh/carton/cardboard.cardboard"));
+	CardboardMaterial = CardboardFinder.Succeeded()
+		? CardboardFinder.Object
+		: nullptr;
+	if (SkeletalMeshVisual && CardboardMaterial)
+	{
+		const int32 MaterialCount = FMath::Max(
+			1,
+			SkeletalMeshVisual->GetNumMaterials());
+		for (int32 MaterialIndex = 0; MaterialIndex < MaterialCount; ++MaterialIndex)
+		{
+			SkeletalMeshVisual->SetMaterial(MaterialIndex, CardboardMaterial);
+		}
+	}
+
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> TapeMaterialFinder(
+		TEXT("/Game/Botanicus/Items/itemsMesh/carton/M_CartonTape.M_CartonTape"));
+	TapeMaterial = TapeMaterialFinder.Succeeded()
+		? TapeMaterialFinder.Object
+		: nullptr;
 
 	for (int32 SegmentIndex = 0;
 		 SegmentIndex < TapeSegmentCount;
@@ -51,14 +97,12 @@ ABotanicusDeliveryParcelActor::ABotanicusDeliveryParcelActor()
 		Segment->SetStaticMesh(
 			CubeFinder.Succeeded() ? CubeFinder.Object : nullptr);
 		Segment->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		TapeSegments.Add(Segment);
-		if (UMaterialInstanceDynamic* TapeMaterial =
-				Segment->CreateAndSetMaterialInstanceDynamic(0))
+		Segment->SetCastShadow(false);
+		if (TapeMaterial)
 		{
-			TapeMaterial->SetVectorParameterValue(
-				TEXT("Color"),
-				FLinearColor(1.0f, 0.015f, 0.015f, 1.0f));
+			Segment->SetMaterial(0, TapeMaterial);
 		}
+		TapeSegments.Add(Segment);
 	}
 
 	LeftFlap = CreateDefaultSubobject<UStaticMeshComponent>(
@@ -86,7 +130,7 @@ ABotanicusDeliveryParcelActor::ABotanicusDeliveryParcelActor()
 	InteractionIndicator->SetCollisionEnabled(
 		ECollisionEnabled::NoCollision);
 
-	RefreshParcelAppearance();
+	RefreshParcelAppearance(false);
 }
 
 void ABotanicusDeliveryParcelActor::GetLifetimeReplicatedProps(
@@ -162,7 +206,7 @@ void ABotanicusDeliveryParcelActor::RestoreParcelState(
 	Quantity = FMath::Max(1, InQuantity);
 	CutCoverageMask = InCutCoverageMask;
 	bOpened = bInOpened;
-	RefreshParcelAppearance();
+	RefreshParcelAppearance(false);
 	ForceNetUpdate();
 }
 
@@ -371,7 +415,8 @@ int32 ABotanicusDeliveryParcelActor::CountCutSegments() const
 	return Count;
 }
 
-void ABotanicusDeliveryParcelActor::RefreshParcelAppearance()
+void ABotanicusDeliveryParcelActor::RefreshParcelAppearance(
+	bool bPlayOpeningAnimation)
 {
 	const UGameInstance* GameInstance = GetGameInstance();
 	const UBotanicusItemCatalogSubsystem* Catalog =
@@ -412,11 +457,16 @@ void ABotanicusDeliveryParcelActor::RefreshParcelAppearance()
 	}
 	Mesh->SetRelativeScale3D(CartonScale);
 	ParcelHalfExtent = CartonScale * 50.0f;
+	RefreshAnimatedCarton(bPlayOpeningAnimation);
 
 	const float TapeLength = ParcelHalfExtent.X * 2.0f * 0.92f;
 	const float SegmentLength = TapeLength / TapeSegmentCount;
 	const float TapeWidth =
 		FMath::Clamp(ParcelHalfExtent.Y * 0.24f, 8.0f, 16.0f);
+	// The engine cube is 100 cm high. A Z scale of 0.001 produces a
+	// 1 mm adhesive strip: visible from above but virtually flat in profile.
+	constexpr float TapeThicknessScale = 0.001f;
+	constexpr float TapeSurfaceOffset = 0.055f;
 	for (int32 SegmentIndex = 0;
 		 SegmentIndex < TapeSegments.Num();
 		 ++SegmentIndex)
@@ -431,12 +481,12 @@ void ABotanicusDeliveryParcelActor::RefreshParcelAppearance()
 				-TapeLength * 0.5f +
 					(SegmentIndex + 0.5f) * SegmentLength,
 				0.0f,
-				ParcelHalfExtent.Z + 1.2f));
+				ParcelHalfExtent.Z + TapeSurfaceOffset));
 		Segment->SetRelativeScale3D(
 			FVector(
 				SegmentLength / 100.0f,
 				TapeWidth / 100.0f,
-				0.012f));
+				TapeThicknessScale));
 		Segment->SetVisibility(
 			!bOpened &&
 			(CutCoverageMask & (1u << SegmentIndex)) == 0);
@@ -455,7 +505,7 @@ void ABotanicusDeliveryParcelActor::RefreshParcelAppearance()
 				ParcelHalfExtent.Z + 5.0f));
 		LeftFlap->SetRelativeScale3D(FlapScale);
 		LeftFlap->SetRelativeRotation(FRotator(-28.0f, 0.0f, 0.0f));
-		LeftFlap->SetVisibility(bOpened);
+		LeftFlap->SetVisibility(false);
 	}
 	if (RightFlap)
 	{
@@ -466,13 +516,64 @@ void ABotanicusDeliveryParcelActor::RefreshParcelAppearance()
 				ParcelHalfExtent.Z + 5.0f));
 		RightFlap->SetRelativeScale3D(FlapScale);
 		RightFlap->SetRelativeRotation(FRotator(28.0f, 0.0f, 0.0f));
-		RightFlap->SetVisibility(bOpened);
+		RightFlap->SetVisibility(false);
 	}
 	if (InteractionIndicator)
 	{
 		InteractionIndicator->SetRelativeLocation(
 			FVector(0.0f, 0.0f, ParcelHalfExtent.Z + 70.0f));
 	}
+}
+
+void ABotanicusDeliveryParcelActor::RefreshAnimatedCarton(
+	bool bPlayOpeningAnimation)
+{
+	if (!SkeletalMeshVisual || !SkeletalMeshVisual->GetSkeletalMeshAsset())
+	{
+		return;
+	}
+
+	const FBoxSphereBounds SourceBounds =
+		SkeletalMeshVisual->GetSkeletalMeshAsset()->GetBounds();
+	const FVector SafeExtent(
+		FMath::Max(SourceBounds.BoxExtent.X, 0.01f),
+		FMath::Max(SourceBounds.BoxExtent.Y, 0.01f),
+		FMath::Max(SourceBounds.BoxExtent.Z, 0.01f));
+	const FVector VisualScale = ParcelHalfExtent / SafeExtent;
+	SkeletalMeshVisual->SetRelativeScale3D(VisualScale);
+	SkeletalMeshVisual->SetRelativeLocation(
+		-SourceBounds.Origin * VisualScale);
+	SkeletalMeshVisual->SetVisibility(true, true);
+	SkeletalMeshVisual->SetHiddenInGame(false, true);
+
+	if (!OpeningAnimation)
+	{
+		bLastRenderedOpenedState = bOpened;
+		return;
+	}
+
+	const bool bJustOpened = bOpened && !bLastRenderedOpenedState;
+	if (bOpened)
+	{
+		if (bJustOpened)
+		{
+			SkeletalMeshVisual->PlayAnimation(OpeningAnimation, false);
+			if (!bPlayOpeningAnimation)
+			{
+				SkeletalMeshVisual->SetPosition(
+					OpeningAnimation->GetPlayLength(),
+					false);
+				SkeletalMeshVisual->SetPlayRate(0.0f);
+			}
+		}
+	}
+	else
+	{
+		SkeletalMeshVisual->PlayAnimation(OpeningAnimation, false);
+		SkeletalMeshVisual->SetPosition(0.0f, false);
+		SkeletalMeshVisual->SetPlayRate(0.0f);
+	}
+	bLastRenderedOpenedState = bOpened;
 }
 
 void ABotanicusDeliveryParcelActor::Interact_Implementation(

@@ -13,6 +13,7 @@
 #include "Delivery/BotanicusDeliveryZoneActor.h"
 #include "Delivery/BotanicusLargeEquipmentActor.h"
 #include "Delivery/BotanicusPlaceableItemActor.h"
+#include "Decoration/BotanicusBrokenFlowerPotActor.h"
 #include "Economy/BotanicusRefundZoneActor.h"
 #include "Growing/BotanicusPlantPotActor.h"
 #include "Growing/BotanicusMultiPlantPotActor.h"
@@ -20,12 +21,14 @@
 #include "Sales/BotanicusSalesDisplayActor.h"
 #include "Sales/BotanicusSalePotActor.h"
 #include "Sales/BotanicusCashRegisterActor.h"
+#include "Storage/BotanicusStorageShelfActor.h"
 #include "Engine/LocalPlayer.h"
 #include "EngineUtils.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
 #include "Kismet/GameplayStatics.h"
+#include "NavigationSystem.h"
 #include "Path/BotanicusPathActor.h"
 #include "QuickBar/BotanicusQuickBarComponent.h"
 #include "Save/BotanicusWorldSaveGame.h"
@@ -104,9 +107,286 @@ void ABotanicusGameMode::BeginPlay()
 				RestorePlayerEconomy(ControllerIt->Get());
 				EnsureStarterFixtures(ControllerIt->Get());
 			}
+			// At this point the listen-server pawn already exists on normal maps.
+			// Populate immediately so the props are visible as soon as play starts.
+			MaintainBrokenFlowerPots();
+
+			World->GetTimerManager().SetTimer(
+				BrokenFlowerPotSpawnTimer,
+				this,
+				&ABotanicusGameMode::MaintainBrokenFlowerPots,
+				FMath::Max(10.0f, BrokenFlowerPotRespawnInterval),
+				true,
+				2.0f);
 		}
 		bAutosaveReady = true;
 	}
+}
+
+void ABotanicusGameMode::MaintainBrokenFlowerPots()
+{
+	UWorld* World = GetWorld();
+	if (!HasAuthority() || !World)
+	{
+		return;
+	}
+
+	int32 ExistingCount = 0;
+	TArray<ABotanicusBrokenFlowerPotActor*> PotsToRelocate;
+	for (TActorIterator<ABotanicusBrokenFlowerPotActor> PotIt(World);
+		 PotIt;
+		 ++PotIt)
+	{
+		if (IsValid(*PotIt) &&
+			!PotIt->IsActorBeingDestroyed() &&
+			!PotIt->ActorHasTag(TEXT("BotanicusPlacementPreview")))
+		{
+			// Older saves may contain pots placed on a roof or sky collision.
+			// Mark anything far above/below every current player for repair.
+			float ClosestVerticalDistance = TNumericLimits<float>::Max();
+			for (FConstPlayerControllerIterator ControllerIt =
+					 World->GetPlayerControllerIterator();
+				 ControllerIt;
+				 ++ControllerIt)
+			{
+				if (const APlayerController* Controller = ControllerIt->Get())
+				{
+					if (const APawn* Pawn = Controller->GetPawn())
+					{
+						ClosestVerticalDistance = FMath::Min(
+							ClosestVerticalDistance,
+							FMath::Abs(PotIt->GetActorLocation().Z -
+								Pawn->GetActorLocation().Z));
+					}
+				}
+			}
+			if (ClosestVerticalDistance > 1000.0f)
+			{
+				PotsToRelocate.Add(*PotIt);
+			}
+			++ExistingCount;
+		}
+	}
+
+	for (ABotanicusBrokenFlowerPotActor* Pot : PotsToRelocate)
+	{
+		FTransform RepairedTransform;
+		if (IsValid(Pot) &&
+			FindBrokenFlowerPotSpawnTransform(RepairedTransform))
+		{
+			Pot->SetActorTransform(
+				RepairedTransform,
+				false,
+				nullptr,
+				ETeleportType::TeleportPhysics);
+			Pot->ForceNetUpdate();
+			UE_LOG(
+				LogBotanicus,
+				Display,
+				TEXT("Repositioned sky pot '%s' at %s."),
+				*Pot->GetName(),
+				*Pot->GetActorLocation().ToCompactString());
+		}
+	}
+
+	const int32 SpawnCount = FMath::Max(
+		0,
+		MinimumBrokenFlowerPots - ExistingCount);
+	UE_LOG(
+		LogBotanicus,
+		Verbose,
+		TEXT("Broken flower pots: %d active, %d requested."),
+		ExistingCount,
+		SpawnCount);
+	int32 SpawnedCount = 0;
+	for (int32 Index = 0; Index < SpawnCount; ++Index)
+	{
+		FTransform SpawnTransform;
+		if (!FindBrokenFlowerPotSpawnTransform(SpawnTransform))
+		{
+			UE_LOG(
+				LogBotanicus,
+				Warning,
+				TEXT("Broken flower pot spawn: no valid ground location found."));
+			break;
+		}
+
+		FActorSpawnParameters SpawnParameters;
+		SpawnParameters.SpawnCollisionHandlingOverride =
+			ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+		if (ABotanicusBrokenFlowerPotActor* Pot =
+				World->SpawnActor<ABotanicusBrokenFlowerPotActor>(
+					ABotanicusBrokenFlowerPotActor::StaticClass(),
+					SpawnTransform,
+					SpawnParameters))
+		{
+			Pot->InitializePlacedItem(TEXT("BrokenFlowerPot"), 1);
+			Pot->ForceNetUpdate();
+			++SpawnedCount;
+		}
+	}
+	if (SpawnedCount > 0)
+	{
+		UE_LOG(
+			LogBotanicus,
+			Display,
+			TEXT("Spawned %d broken flower pot(s)."),
+			SpawnedCount);
+	}
+}
+
+bool ABotanicusGameMode::FindBrokenFlowerPotSpawnTransform(
+	FTransform& OutTransform) const
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	TArray<APawn*> PlayerPawns;
+	for (FConstPlayerControllerIterator ControllerIt =
+			 World->GetPlayerControllerIterator();
+		 ControllerIt;
+		 ++ControllerIt)
+	{
+		if (APlayerController* Controller = ControllerIt->Get())
+		{
+			if (APawn* Pawn = Controller->GetPawn())
+			{
+				PlayerPawns.Add(Pawn);
+			}
+		}
+	}
+	if (PlayerPawns.IsEmpty())
+	{
+		return false;
+	}
+
+	UNavigationSystemV1* Navigation =
+		FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
+
+	for (int32 Attempt = 0; Attempt < 20; ++Attempt)
+	{
+		APawn* CenterPawn =
+			PlayerPawns[FMath::RandRange(0, PlayerPawns.Num() - 1)];
+		FVector CandidateLocation = FVector::ZeroVector;
+		FNavLocation RandomLocation;
+		const bool bFoundNavigationPoint =
+			Navigation &&
+			Navigation->GetRandomReachablePointInRadius(
+				CenterPawn->GetActorLocation(),
+				BrokenFlowerPotSpawnRadius,
+				RandomLocation);
+		if (bFoundNavigationPoint)
+		{
+			CandidateLocation = RandomLocation.Location;
+		}
+		else
+		{
+			const float Angle = FMath::FRandRange(0.0f, 2.0f * PI);
+			const float Distance = FMath::FRandRange(
+				500.0f,
+				BrokenFlowerPotSpawnRadius);
+			CandidateLocation = CenterPawn->GetActorLocation() +
+				FVector(
+					FMath::Cos(Angle) * Distance,
+					FMath::Sin(Angle) * Distance,
+					0.0f);
+		}
+
+		bool bTooCloseToPlayer = false;
+		for (const APawn* PlayerPawn : PlayerPawns)
+		{
+			if (IsValid(PlayerPawn) &&
+				FVector::DistSquared2D(
+					CandidateLocation,
+					PlayerPawn->GetActorLocation()) <
+					FMath::Square(700.0f))
+			{
+				bTooCloseToPlayer = true;
+				break;
+			}
+		}
+		if (bTooCloseToPlayer)
+		{
+			continue;
+		}
+
+		bool bTooCloseToAnotherPot = false;
+		for (TActorIterator<ABotanicusBrokenFlowerPotActor> PotIt(World);
+			 PotIt;
+			 ++PotIt)
+		{
+			if (FVector::DistSquared2D(
+					CandidateLocation,
+					PotIt->GetActorLocation()) <
+				FMath::Square(250.0f))
+			{
+				bTooCloseToAnotherPot = true;
+				break;
+			}
+		}
+		if (bTooCloseToAnotherPot)
+		{
+			continue;
+		}
+
+		FCollisionQueryParams QueryParams(
+			SCENE_QUERY_STAT(BotanicusBrokenPotGround),
+			false);
+		for (const APawn* PlayerPawn : PlayerPawns)
+		{
+			QueryParams.AddIgnoredActor(PlayerPawn);
+		}
+		FHitResult GroundHit;
+		// Start close to the navigation/player height. Starting thousands of
+		// units overhead selected roofs and sky collision before the real floor.
+		const FVector TraceStart = FVector(
+			CandidateLocation.X,
+			CandidateLocation.Y,
+			CandidateLocation.Z + 150.0f);
+		const FVector TraceEnd = FVector(
+			CandidateLocation.X,
+			CandidateLocation.Y,
+			CandidateLocation.Z - 2000.0f);
+		FCollisionObjectQueryParams GroundObjectTypes;
+		GroundObjectTypes.AddObjectTypesToQuery(ECC_WorldStatic);
+		const bool bFoundStaticGround =
+			World->LineTraceSingleByObjectType(
+				GroundHit,
+				TraceStart,
+				TraceEnd,
+				GroundObjectTypes,
+				QueryParams)
+				&& GroundHit.ImpactNormal.Z >= 0.65f;
+		float PawnCollisionRadius = 0.0f;
+		float PawnCollisionHalfHeight = 0.0f;
+		CenterPawn->GetSimpleCollisionCylinder(
+			PawnCollisionRadius,
+			PawnCollisionHalfHeight);
+		const bool bGroundNearExpectedHeight =
+			bFoundStaticGround &&
+			FMath::Abs(GroundHit.ImpactPoint.Z - CandidateLocation.Z) <= 500.0f;
+		const FVector GroundLocation = bGroundNearExpectedHeight
+			? GroundHit.ImpactPoint
+			: FVector(
+				CandidateLocation.X,
+				CandidateLocation.Y,
+				CenterPawn->GetActorLocation().Z -
+					FMath::Max(1.0f, PawnCollisionHalfHeight));
+
+		const FRotator Rotation(
+			FMath::FRandRange(-6.0f, 6.0f),
+			FMath::FRandRange(0.0f, 360.0f),
+			FMath::FRandRange(-6.0f, 6.0f));
+		OutTransform = FTransform(
+			Rotation,
+			GroundLocation + FVector(0.0f, 0.0f, 4.0f));
+		return true;
+	}
+
+	return false;
 }
 
 void ABotanicusGameMode::EndPlay(
@@ -1116,6 +1396,15 @@ void ABotanicusGameMode::RestoreWorldState()
 			continue;
 		}
 
+		// Consolidate the two retired shelf SKUs into the two canonical shelf
+		// families while loading. The next save writes only the canonical key.
+		const FName RestoredItemKey =
+			SavedItem.ItemKey == TEXT("StorageShelfFloorLarge")
+				? FName(TEXT("StorageShelfFloorSmall"))
+				: SavedItem.ItemKey == TEXT("StorageShelfWallSmall")
+					? FName(TEXT("StorageShelfWallLarge"))
+					: SavedItem.ItemKey;
+
 		UClass* ItemClass = SavedItem.ActorClass.TryLoadClass<AActor>();
 		// Migrate pots saved before PlantPot used its authored Blueprint class.
 		// Otherwise an existing save would keep spawning the old native cylinder.
@@ -1141,6 +1430,24 @@ void ABotanicusGameMode::RestoreWorldState()
 							"/Game/Botanicus/blueprints/BP_Item_SalePot.BP_Item_SalePot_C")))
 			{
 				ItemClass = SalePotBlueprintClass;
+			}
+		}
+		// Existing saves may still reference the native shelf class. Restore
+		// every authored shelf from its Blueprint so its selected mesh and its
+		// exact number of editable StorageSlot components are preserved.
+		else if (RestoredItemKey == TEXT("StorageShelfFloorSmall") ||
+			RestoredItemKey == TEXT("StorageShelfWallLarge"))
+		{
+			const TCHAR* ShelfBlueprintClassPath =
+				RestoredItemKey == TEXT("StorageShelfFloorSmall")
+					? TEXT("/Game/Botanicus/blueprints/BP_Item_StorageShelfFloorSmall.BP_Item_StorageShelfFloorSmall_C")
+					: TEXT("/Game/Botanicus/blueprints/BP_Item_StorageShelfWallLarge.BP_Item_StorageShelfWallLarge_C");
+			if (UClass* ShelfBlueprintClass =
+					LoadClass<ABotanicusStorageShelfActor>(
+						nullptr,
+						ShelfBlueprintClassPath))
+			{
+				ItemClass = ShelfBlueprintClass;
 			}
 		}
 		if (!ItemClass ||
@@ -1275,7 +1582,7 @@ void ABotanicusGameMode::RestoreWorldState()
 		else if (ABotanicusLargeEquipmentActor* Equipment =
 			Cast<ABotanicusLargeEquipmentActor>(RestoredItem))
 		{
-			Equipment->InitializeEquipment(SavedItem.ItemKey);
+			Equipment->InitializeEquipment(RestoredItemKey);
 			if (ABotanicusPreparationWorkbenchActor* Workbench =
 					Cast<
 						ABotanicusPreparationWorkbenchActor>(

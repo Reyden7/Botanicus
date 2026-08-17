@@ -5,7 +5,6 @@
 #include "BotanicusCharacter.h"
 #include "Catalog/BotanicusItemCatalogSubsystem.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/TextRenderComponent.h"
 #include "Delivery/BotanicusPlaceableItemActor.h"
 #include "Engine/GameInstance.h"
 #include "Engine/StaticMesh.h"
@@ -26,6 +25,7 @@ namespace
 ABotanicusStorageShelfActor::ABotanicusStorageShelfActor()
 {
 	PrimaryActorTick.bCanEverTick = true;
+	SetInteractionIndicatorVisibility(false);
 	InteractionName =
 		NSLOCTEXT("BotanicusStorage", "StorageShelf", "Etagere de stockage");
 
@@ -43,54 +43,44 @@ ABotanicusStorageShelfActor::ABotanicusStorageShelfActor()
 	{
 		Mesh->SetStaticMesh(Cube);
 	}
-
-	for (int32 Index = 0; Index < 3; ++Index)
+	const FVector DefaultSlotPositions[] =
 	{
-		UStaticMeshComponent* Board =
-			CreateDefaultSubobject<UStaticMeshComponent>(
-				*FString::Printf(TEXT("StorageShelfBoard%d"), Index));
-		Board->SetupAttachment(SceneRoot);
-		Board->SetStaticMesh(Cube);
-		Board->SetCollisionProfileName(TEXT("BlockAll"));
-		ShelfBoards.Add(Board);
-	}
-	for (int32 Index = 0; Index < 2; ++Index)
-	{
-		UStaticMeshComponent* Panel =
-			CreateDefaultSubobject<UStaticMeshComponent>(
-				*FString::Printf(TEXT("StorageShelfSide%d"), Index));
-		Panel->SetupAttachment(SceneRoot);
-		Panel->SetStaticMesh(Cube);
-		Panel->SetCollisionProfileName(TEXT("BlockAll"));
-		SidePanels.Add(Panel);
-	}
-	for (int32 Index = 0; Index < 8; ++Index)
+		FVector(-12.0f, -50.0f, -60.0f),
+		FVector(-12.0f, 50.0f, -60.0f),
+		FVector(-12.0f, -50.0f, -165.0f),
+		FVector(-12.0f, 50.0f, -165.0f)
+	};
+	for (int32 Index = 0; Index < 4; ++Index)
 	{
 		UStaticMeshComponent* Marker =
 			CreateDefaultSubobject<UStaticMeshComponent>(
-				*FString::Printf(TEXT("StorageSlot%d"), Index));
+				*FString::Printf(TEXT("StorageSlot%d"), Index + 1));
 		Marker->SetupAttachment(SceneRoot);
 		Marker->SetStaticMesh(Cube);
+		Marker->SetRelativeLocation(DefaultSlotPositions[Index]);
 		Marker->SetRelativeScale3D(FVector(0.32f, 0.32f, 0.025f));
 		Marker->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Marker->SetVisibility(false);
+		Marker->bEditableWhenInherited = true;
+		Marker->ComponentTags.AddUnique(TEXT("StorageSlot"));
 		if (GreenMarkerMaterial)
 		{
 			Marker->SetMaterial(0, GreenMarkerMaterial);
 		}
 		SlotMarkers.Add(Marker);
 	}
+}
 
-	ShelfLabel =
-		CreateDefaultSubobject<UTextRenderComponent>(
-			TEXT("StorageShelfLabel"));
-	ShelfLabel->SetupAttachment(SceneRoot);
-	ShelfLabel->SetHorizontalAlignment(EHTA_Center);
-	ShelfLabel->SetVerticalAlignment(EVRTA_TextCenter);
-	ShelfLabel->SetWorldSize(14.0f);
-	ShelfLabel->SetTextRenderColor(FColor(80, 255, 120));
-	ShelfLabel->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-
+void ABotanicusStorageShelfActor::OnConstruction(
+	const FTransform& Transform)
+{
+	// Blueprint shelf children own their mesh, materials and transforms. Keep
+	// native fallback shelves catalogue-driven for backwards compatibility.
+	if (UsesBlueprintAuthoredSlots())
+	{
+		bUseBlueprintAppearance = true;
+	}
+	Super::OnConstruction(Transform);
 	RefreshShelfConfiguration();
 }
 
@@ -126,7 +116,13 @@ void ABotanicusStorageShelfActor::Tick(float DeltaSeconds)
 	}
 
 	RefreshSlotPreviewVisibility();
-	RefreshLocalStockLabel();
+	if (HasAuthority() && GetWorld() &&
+		GetWorld()->GetTimeSeconds() >= NextLegacySlotMigrationTime)
+	{
+		NextLegacySlotMigrationTime =
+			GetWorld()->GetTimeSeconds() + 0.5f;
+		MigrateLegacyCenteredItems();
+	}
 }
 
 bool ABotanicusStorageShelfActor::CanInteract_Implementation(
@@ -231,13 +227,88 @@ int32 ABotanicusStorageShelfActor::GetStorageStackLimit(
 
 bool ABotanicusStorageShelfActor::IsWallMountedShelf() const
 {
-	return GetItemKey() == WallShelfSmallKey ||
-		GetItemKey() == WallShelfLargeKey;
+	if (GetItemKey() == WallShelfSmallKey ||
+		GetItemKey() == WallShelfLargeKey)
+	{
+		return true;
+	}
+
+	// A visual variant can have any class name, but one of its parent classes
+	// remains BP_Item_StorageShelfWallLarge. Walking the hierarchy keeps every
+	// Blueprint child wall-mounted without adding another C++ shelf type.
+	for (const UClass* Class = GetClass();
+		 Class;
+		 Class = Class->GetSuperClass())
+	{
+		if (Class->GetName().Contains(TEXT("StorageShelfWallLarge")) ||
+			Class->GetName().Contains(TEXT("StorageShelfWallSmall")))
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 int32 ABotanicusStorageShelfActor::GetStorageSlotCount() const
 {
+	if (UsesBlueprintAuthoredSlots())
+	{
+		TArray<UStaticMeshComponent*> AuthoredMarkers;
+		GetOrderedBlueprintSlotMarkers(AuthoredMarkers);
+		return AuthoredMarkers.Num();
+	}
 	return SlotBaseLocations.Num();
+}
+
+bool ABotanicusStorageShelfActor::UsesBlueprintAuthoredSlots() const
+{
+	// The native class retains its procedural fallback layout. Any Blueprint
+	// child is authored directly in Unreal: its StorageSlot components are the
+	// sole source of truth for both capacity and placement transforms.
+	return GetClass() != ABotanicusStorageShelfActor::StaticClass();
+}
+
+void ABotanicusStorageShelfActor::GetOrderedBlueprintSlotMarkers(
+	TArray<UStaticMeshComponent*>& OutMarkers) const
+{
+	OutMarkers.Reset();
+	TArray<UStaticMeshComponent*> Components;
+	GetComponents<UStaticMeshComponent>(Components);
+	for (UStaticMeshComponent* Component : Components)
+	{
+		if (!IsValid(Component))
+		{
+			continue;
+		}
+
+		const FString ComponentName = Component->GetName();
+		if (ComponentName.StartsWith(TEXT("StorageSlot")) ||
+			Component->ComponentHasTag(TEXT("StorageSlot")))
+		{
+			OutMarkers.Add(Component);
+		}
+	}
+
+	auto GetSortIndex = [](const UStaticMeshComponent& Component)
+	{
+		const FString Prefix(TEXT("StorageSlot"));
+		const FString Name = Component.GetName();
+		return Name.StartsWith(Prefix)
+			? FCString::Atoi(*Name.RightChop(Prefix.Len()))
+			: MAX_int32;
+	};
+	OutMarkers.Sort(
+		[&GetSortIndex](
+			const UStaticMeshComponent& Left,
+			const UStaticMeshComponent& Right)
+		{
+			const int32 LeftIndex = GetSortIndex(Left);
+			const int32 RightIndex = GetSortIndex(Right);
+			return LeftIndex == RightIndex
+				? Left.GetName().Compare(
+					Right.GetName(), ESearchCase::IgnoreCase) < 0
+				: LeftIndex < RightIndex;
+		});
 }
 
 bool ABotanicusStorageShelfActor::HasStoredItems() const
@@ -378,7 +449,9 @@ void ABotanicusStorageShelfActor::RefreshShelfConfiguration()
 {
 	const FName Key = GetItemKey();
 	const bool bWall = IsWallMountedShelf();
-	const bool bCustomVisual = IsUsingItemDataMesh();
+	const bool bUsesAuthoredSlots = UsesBlueprintAuthoredSlots();
+	const bool bCustomVisual =
+		UsesBlueprintAppearance() || IsUsingItemDataMesh();
 	const bool bLarge =
 		Key == FloorShelfLargeKey || Key == WallShelfLargeKey;
 
@@ -405,104 +478,89 @@ void ABotanicusStorageShelfActor::RefreshShelfConfiguration()
 	}
 	else
 	{
-		ConfiguredExtent = bLarge
-			? FVector(35.0f, 125.0f, 90.0f)
-			: FVector(30.0f, 85.0f, 75.0f);
+		ConfiguredExtent =
+			Key == FloorShelfSmallKey
+			? FVector(45.0f, 103.0f, 100.0f)
+			: bLarge
+				? FVector(35.0f, 125.0f, 90.0f)
+				: FVector(30.0f, 85.0f, 75.0f);
 		const int32 Columns = bLarge ? 4 : 2;
 		const int32 Rows = 2;
-		const float SpacingY = bLarge ? 58.0f : 70.0f;
+		const float SpacingY = bLarge
+			? 58.0f
+			: Key == FloorShelfSmallKey
+				? 100.0f
+				: 70.0f;
 		for (int32 Row = 0; Row < Rows; ++Row)
 		{
 			for (int32 Column = 0; Column < Columns; ++Column)
 			{
 				SlotBaseLocations.Add(
 					FVector(
-						8.0f,
+						// The authored shelf has a solid back.  Its usable
+						// display surface is toward local +X, so keeping the
+						// item at X=0 embeds it in the cabinet and makes it
+						// look as if it vanished after being stored.
+						Key == FloorShelfSmallKey ? 36.0f : 8.0f,
 						(Column - (Columns - 1) * 0.5f) * SpacingY,
-						-25.0f + Row * 75.0f));
+						Key == FloorShelfSmallKey
+							? -42.0f + Row * 74.0f
+							: -25.0f + Row * 75.0f));
 			}
 		}
 	}
 
-	Mesh->SetRelativeLocation(
-		bCustomVisual
-			? FVector::ZeroVector
-			: FVector(-ConfiguredExtent.X + 5.0f, 0.0f, 0.0f));
-	Mesh->SetRelativeScale3D(
-		bCustomVisual
-			? FVector::OneVector
-			: FVector(
-				0.10f,
-				ConfiguredExtent.Y / 50.0f,
-				ConfiguredExtent.Z / 50.0f));
-
-	for (int32 Index = 0; Index < ShelfBoards.Num(); ++Index)
+	if (bUsesAuthoredSlots)
 	{
-		const bool bVisible =
-			!bCustomVisual &&
-			Index < (bWall ? (bLarge ? 2 : 1) : 3);
-		ShelfBoards[Index]->SetVisibility(bVisible);
-		ShelfBoards[Index]->SetCollisionEnabled(
-			bVisible
-				? ECollisionEnabled::QueryAndPhysics
-				: ECollisionEnabled::NoCollision);
-		if (bVisible)
+		SlotBaseLocations.Reset();
+		TArray<UStaticMeshComponent*> AuthoredMarkers;
+		GetOrderedBlueprintSlotMarkers(AuthoredMarkers);
+		for (UStaticMeshComponent* SlotMarker : AuthoredMarkers)
 		{
-			const float BoardZ = bWall
-				? (-ConfiguredExtent.Z + 10.0f + Index * 58.0f)
-				: (-ConfiguredExtent.Z + 45.0f + Index * 75.0f);
-			ShelfBoards[Index]->SetRelativeLocation(
-				FVector(6.0f, 0.0f, BoardZ));
-			ShelfBoards[Index]->SetRelativeScale3D(
-				FVector(
-					ConfiguredExtent.X / 50.0f,
-					ConfiguredExtent.Y / 50.0f,
-					0.06f));
+			SlotMarker->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			SlotBaseLocations.Add(SlotMarker->GetRelativeLocation());
 		}
 	}
-	for (int32 Index = 0; Index < SidePanels.Num(); ++Index)
+
+	// For a Blueprint shelf, Mesh is fully controlled from the Blueprint
+	// viewport. Only the native fallback receives a generated transform.
+	if (!UsesBlueprintAppearance())
 	{
-		SidePanels[Index]->SetVisibility(!bCustomVisual);
-		SidePanels[Index]->SetCollisionEnabled(
+		Mesh->SetRelativeLocation(
 			bCustomVisual
-				? ECollisionEnabled::NoCollision
-				: ECollisionEnabled::QueryAndPhysics);
-		SidePanels[Index]->SetRelativeLocation(
-			FVector(
-				0.0f,
-				Index == 0
-					? ConfiguredExtent.Y - 4.0f
-					: -ConfiguredExtent.Y + 4.0f,
-				0.0f));
-		SidePanels[Index]->SetRelativeScale3D(
-			FVector(
-				ConfiguredExtent.X / 50.0f,
-				0.08f,
-				ConfiguredExtent.Z / 50.0f));
+				? FVector::ZeroVector
+				: FVector(-ConfiguredExtent.X + 5.0f, 0.0f, 0.0f));
+		Mesh->SetRelativeRotation(FRotator::ZeroRotator);
+		Mesh->SetRelativeScale3D(
+			bCustomVisual
+				? FVector::OneVector
+				: FVector(
+					0.10f,
+					ConfiguredExtent.Y / 50.0f,
+					ConfiguredExtent.Z / 50.0f));
 	}
 
-	for (int32 Index = 0; Index < SlotMarkers.Num(); ++Index)
+	TArray<UStaticMeshComponent*> VisibleMarkers;
+	if (bUsesAuthoredSlots)
 	{
-		SlotMarkers[Index]->SetVisibility(false);
-		if (SlotBaseLocations.IsValidIndex(Index))
+		GetOrderedBlueprintSlotMarkers(VisibleMarkers);
+	}
+	else
+	{
+		for (UStaticMeshComponent* Marker : SlotMarkers)
 		{
-			SlotMarkers[Index]->SetRelativeLocation(
-				SlotBaseLocations[Index] + FVector(0.0f, 0.0f, 2.0f));
+			VisibleMarkers.Add(Marker);
 		}
 	}
-	if (ShelfLabel)
+	for (int32 Index = 0; Index < VisibleMarkers.Num(); ++Index)
 	{
-		ShelfLabel->SetRelativeLocation(
-			FVector(
-				ConfiguredExtent.X + 10.0f,
-				0.0f,
-				ConfiguredExtent.Z + 25.0f));
-		ShelfLabel->SetText(
-			FText::FromString(
-				FString::Printf(
-					TEXT("%s - %d PLACES"),
-					bWall ? TEXT("ETAGERE MURALE") : TEXT("ETAGERE AU SOL"),
-					GetStorageSlotCount())));
+		VisibleMarkers[Index]->SetVisibility(bShowSlotMarkersInGame);
+		if (!bUsesAuthoredSlots &&
+			SlotBaseLocations.IsValidIndex(Index))
+		{
+			VisibleMarkers[Index]->SetRelativeLocation(
+				SlotBaseLocations[Index]);
+		}
 	}
 }
 
@@ -512,7 +570,19 @@ void ABotanicusStorageShelfActor::RefreshSlotPreviewVisibility()
 	const bool bPreviewActive =
 		Now - LastLocalPreviewTime <= 0.15f &&
 		IsCatalogItemCompatible(this, LocallyPreviewedItemKey);
-	for (int32 SlotIndex = 0; SlotIndex < SlotMarkers.Num(); ++SlotIndex)
+	TArray<UStaticMeshComponent*> PreviewMarkers;
+	if (UsesBlueprintAuthoredSlots())
+	{
+		GetOrderedBlueprintSlotMarkers(PreviewMarkers);
+	}
+	else
+	{
+		for (UStaticMeshComponent* Marker : SlotMarkers)
+		{
+			PreviewMarkers.Add(Marker);
+		}
+	}
+	for (int32 SlotIndex = 0; SlotIndex < PreviewMarkers.Num(); ++SlotIndex)
 	{
 		const bool bAvailable =
 			bPreviewActive &&
@@ -522,115 +592,23 @@ void ABotanicusStorageShelfActor::RefreshSlotPreviewVisibility()
 				LocallyPreviewedItemKey,
 				LocallyIgnoredItem.Get(),
 				1);
-		SlotMarkers[SlotIndex]->SetVisibility(bAvailable);
+		PreviewMarkers[SlotIndex]->SetVisibility(
+			bShowSlotMarkersInGame || bAvailable);
 	}
-}
-
-void ABotanicusStorageShelfActor::RefreshLocalStockLabel()
-{
-	if (!ShelfLabel || !GetWorld())
-	{
-		return;
-	}
-
-	const APlayerController* LocalController =
-		GetWorld()->GetFirstPlayerController();
-	const APawn* LocalPawn =
-		LocalController ? LocalController->GetPawn() : nullptr;
-	bool bShowStock = false;
-	if (LocalController && LocalPawn &&
-		FVector::DistSquared(
-			LocalPawn->GetActorLocation(),
-			GetActorLocation()) <= FMath::Square(650.0f))
-	{
-		FVector ViewLocation;
-		FRotator ViewRotation;
-		LocalController->GetPlayerViewPoint(
-			ViewLocation,
-			ViewRotation);
-		FCollisionQueryParams QueryParams(
-			SCENE_QUERY_STAT(BotanicusShelfStockLabel),
-			false,
-			LocalPawn);
-		FHitResult Hit;
-		if (GetWorld()->LineTraceSingleByChannel(
-				Hit,
-				ViewLocation,
-				ViewLocation + ViewRotation.Vector() * 650.0f,
-				ECC_Visibility,
-				QueryParams))
-		{
-			if (Hit.GetActor() == this)
-			{
-				bShowStock = true;
-			}
-			else if (const ABotanicusPlaceableItemActor* HitItem =
-				Cast<ABotanicusPlaceableItemActor>(
-					Hit.GetActor()))
-			{
-				bShowStock =
-					FindStorageSlotIndexForItem(HitItem) !=
-						INDEX_NONE;
-			}
-		}
-	}
-
-	const FString ShelfTitle = FString::Printf(
-		TEXT("%s - %d PLACES"),
-		IsWallMountedShelf()
-			? TEXT("ETAGERE MURALE")
-			: TEXT("ETAGERE AU SOL"),
-		GetStorageSlotCount());
-	if (!bShowStock)
-	{
-		ShelfLabel->SetWorldSize(14.0f);
-		ShelfLabel->SetText(FText::FromString(ShelfTitle));
-		return;
-	}
-
-	const UGameInstance* GameInstance = GetGameInstance();
-	const UBotanicusItemCatalogSubsystem* Catalog =
-		GameInstance
-			? GameInstance->GetSubsystem<
-				UBotanicusItemCatalogSubsystem>()
-			: nullptr;
-	FString StockText = ShelfTitle + TEXT("\n");
-	bool bHasStock = false;
-	for (int32 SlotIndex = 0;
-		 SlotIndex < GetStorageSlotCount();
-		 ++SlotIndex)
-	{
-		const ABotanicusPlaceableItemActor* Item =
-			GetStoredItemInSlot(SlotIndex);
-		if (!Item)
-		{
-			continue;
-		}
-
-		bHasStock = true;
-		const FBotanicusItemDefinition* Definition =
-			Catalog ? Catalog->FindItem(Item->GetItemKey()) : nullptr;
-		const FString ItemName = Definition
-			? Definition->DisplayName.ToString()
-			: Item->GetItemKey().ToString();
-		StockText += FString::Printf(
-			TEXT("\n%d. %s  x%d/%d"),
-			SlotIndex + 1,
-			*ItemName,
-			Item->GetQuantity(),
-			GetStorageStackLimit(Item->GetItemKey()));
-	}
-	if (!bHasStock)
-	{
-		StockText += TEXT("\n\nVIDE");
-	}
-	ShelfLabel->SetWorldSize(11.0f);
-	ShelfLabel->SetText(FText::FromString(StockText));
 }
 
 FVector ABotanicusStorageShelfActor::GetSlotBaseLocalLocation(
 	int32 SlotIndex) const
 {
+	if (UsesBlueprintAuthoredSlots())
+	{
+		TArray<UStaticMeshComponent*> AuthoredMarkers;
+		GetOrderedBlueprintSlotMarkers(AuthoredMarkers);
+		if (AuthoredMarkers.IsValidIndex(SlotIndex))
+		{
+			return AuthoredMarkers[SlotIndex]->GetRelativeLocation();
+		}
+	}
 	return SlotBaseLocations.IsValidIndex(SlotIndex)
 		? SlotBaseLocations[SlotIndex]
 		: FVector::ZeroVector;
@@ -640,18 +618,36 @@ FTransform ABotanicusStorageShelfActor::GetStorageSlotTransform(
 	int32 SlotIndex,
 	const FVector& ItemExtent) const
 {
+	// The Blueprint marker represents the supporting surface, not the item's
+	// centre.  Lift the actor by its half-height so the bottom of every stored
+	// mesh rests on the marker plate.
 	const FVector LocalLocation =
-		GetSlotBaseLocalLocation(SlotIndex) +
-		FVector(0.0f, 0.0f, FMath::Max(3.0f, ItemExtent.Z) + 3.0f);
-	return FTransform(
-		GetActorRotation(),
-		GetActorTransform().TransformPosition(LocalLocation));
+		GetSlotBaseLocalLocation(SlotIndex);
+	FQuat WorldRotation = GetActorQuat();
+	TArray<UStaticMeshComponent*> AuthoredMarkers;
+	if (UsesBlueprintAuthoredSlots())
+	{
+		GetOrderedBlueprintSlotMarkers(AuthoredMarkers);
+	}
+	if (AuthoredMarkers.IsValidIndex(SlotIndex))
+	{
+		WorldRotation =
+			GetActorQuat() *
+			AuthoredMarkers[SlotIndex]->GetRelativeRotation().Quaternion();
+	}
+	const FVector SurfaceLocation =
+		GetActorTransform().TransformPosition(LocalLocation);
+	const FVector ItemLocation =
+		SurfaceLocation +
+		WorldRotation.GetUpVector() * FMath::Max(0.0f, ItemExtent.Z);
+	return FTransform(WorldRotation, ItemLocation);
 }
 
 int32 ABotanicusStorageShelfActor::FindStorageSlotIndexForItem(
 	const ABotanicusPlaceableItemActor* Item) const
 {
 	if (!IsValid(Item) ||
+		!IsCatalogItemCompatible(this, Item->GetItemKey()) ||
 		Item->ActorHasTag(TEXT("BotanicusPlacementPreview")))
 	{
 		return INDEX_NONE;
@@ -708,8 +704,7 @@ FVector ABotanicusStorageShelfActor::GetStorageSlotAimLocation(
 	int32 SlotIndex) const
 {
 	return GetActorTransform().TransformPosition(
-		GetSlotBaseLocalLocation(SlotIndex) +
-			FVector(0.0f, 0.0f, 28.0f));
+		GetSlotBaseLocalLocation(SlotIndex));
 }
 
 bool ABotanicusStorageShelfActor::GetStorageSlotPlacement(
@@ -725,7 +720,7 @@ bool ABotanicusStorageShelfActor::GetStorageSlotPlacement(
 	{
 		*OutExistingStack = nullptr;
 	}
-	if (!SlotBaseLocations.IsValidIndex(SlotIndex) ||
+	if (SlotIndex < 0 || SlotIndex >= GetStorageSlotCount() ||
 		!CanSlotAcceptItem(
 			SlotIndex,
 			InItemKey,
@@ -737,9 +732,10 @@ bool ABotanicusStorageShelfActor::GetStorageSlotPlacement(
 
 	ABotanicusPlaceableItemActor* ExistingStack =
 		GetStoredItemInSlot(SlotIndex, IgnoredItem);
-	OutTransform = ExistingStack
-		? ExistingStack->GetActorTransform()
-		: GetStorageSlotTransform(SlotIndex, ItemExtent);
+	// The slot anchor remains authoritative even for an existing stack.
+	// Otherwise a stack created with an older/bad layout permanently keeps
+	// that stale transform and every later deposit appears to vanish there.
+	OutTransform = GetStorageSlotTransform(SlotIndex, ItemExtent);
 	if (OutExistingStack)
 	{
 		*OutExistingStack = ExistingStack;
@@ -752,7 +748,8 @@ ABotanicusStorageShelfActor::GetStoredItemInSlot(
 	int32 SlotIndex,
 	const AActor* IgnoredItem) const
 {
-	if (!GetWorld() || !SlotBaseLocations.IsValidIndex(SlotIndex))
+	if (!GetWorld() || SlotIndex < 0 ||
+		SlotIndex >= GetStorageSlotCount())
 	{
 		return nullptr;
 	}
@@ -838,6 +835,50 @@ void ABotanicusStorageShelfActor::ApplyStoredItemTransforms()
 			Item->FlushNetDormancy();
 			Item->ForceNetUpdate();
 		}
+	}
+}
+
+void ABotanicusStorageShelfActor::MigrateLegacyCenteredItems()
+{
+	if (!GetWorld() || !UsesBlueprintAuthoredSlots())
+	{
+		return;
+	}
+
+	for (TActorIterator<ABotanicusPlaceableItemActor> It(GetWorld());
+		 It;
+		 ++It)
+	{
+		ABotanicusPlaceableItemActor* Item = *It;
+		if (!IsValid(Item) ||
+			!IsCatalogItemCompatible(this, Item->GetItemKey()) ||
+			Item->ActorHasTag(TEXT("BotanicusPlacementPreview")))
+		{
+			continue;
+		}
+
+		const int32 SlotIndex = FindStorageSlotIndexForItem(Item);
+		if (SlotIndex == INDEX_NONE)
+		{
+			continue;
+		}
+
+		const FTransform DesiredTransform = GetStorageSlotTransform(
+			SlotIndex,
+			Item->GetPlacementBoxExtent().GetAbs());
+		if (Item->GetActorTransform().Equals(DesiredTransform, 0.5f))
+		{
+			continue;
+		}
+
+		Item->SetActorTransform(
+			DesiredTransform,
+			false,
+			nullptr,
+			ETeleportType::TeleportPhysics);
+		Item->SetNetDormancy(DORM_Awake);
+		Item->FlushNetDormancy();
+		Item->ForceNetUpdate();
 	}
 }
 

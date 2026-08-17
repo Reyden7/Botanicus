@@ -34,8 +34,11 @@ public:
 	FName GetItemKey() const { return ItemKey; }
 	int32 GetQuantity() const { return Quantity; }
 
+protected:
+	/** Lets specialized placeable actors refine the catalogue appearance. */
+	virtual void ApplyItemDefinition();
+
 private:
-	void ApplyItemDefinition();
 	void ApplyPlacementMaterial(UMaterialInterface* Material);
 	void RestorePlacementMaterials();
 

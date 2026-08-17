@@ -83,6 +83,15 @@ ABotanicusLargeEquipmentActor::ABotanicusLargeEquipmentActor()
 		ECollisionEnabled::NoCollision);
 }
 
+void ABotanicusLargeEquipmentActor::SetInteractionIndicatorVisibility(
+	bool bVisible)
+{
+	if (InteractionIndicator)
+	{
+		InteractionIndicator->SetVisibility(bVisible);
+	}
+}
+
 void ABotanicusLargeEquipmentActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);

@@ -101,7 +101,7 @@ void UBotanicusStorageQuantityWidget::SetQuantitySelection(
 	{
 		InstructionText->SetText(FText::FromString(
 			bStoring
-				? TEXT("pour poser au sol")
+				? TEXT("CTRL + molette : quantité\nClic : poser au sol")
 				: TEXT("pour choisir la quantité à prendre")));
 	}
 	SetVisibility(ESlateVisibility::HitTestInvisible);

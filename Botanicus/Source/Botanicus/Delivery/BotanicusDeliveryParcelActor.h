@@ -7,6 +7,8 @@
 #include "BotanicusDeliveryParcelActor.generated.h"
 
 class UTextRenderComponent;
+class UAnimSequence;
+class UMaterialInterface;
 class UStaticMeshComponent;
 
 /** Replicated delivery carton opened by tracing a cutter along its tape. */
@@ -47,7 +49,8 @@ public:
 	FVector GetParcelHalfExtent() const { return ParcelHalfExtent; }
 
 private:
-	void RefreshParcelAppearance();
+	void RefreshParcelAppearance(bool bPlayOpeningAnimation = true);
+	void RefreshAnimatedCarton(bool bPlayOpeningAnimation);
 	void UpdateCutterTrace();
 	void MarkTapeSegment(int32 SegmentIndex);
 	int32 CountCutSegments() const;
@@ -83,10 +86,23 @@ private:
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UStaticMeshComponent> RightFlap;
 
+	/** Imported animation played once when the tape has been completely cut. */
+	UPROPERTY(VisibleAnywhere, Category="Botanicus|Parcel|Appearance")
+	TObjectPtr<UAnimSequence> OpeningAnimation;
+
+	/** Stylised cardboard material applied to the imported carton mesh. */
+	UPROPERTY(VisibleAnywhere, Category="Botanicus|Parcel|Appearance")
+	TObjectPtr<UMaterialInterface> CardboardMaterial;
+
+	/** Thin red adhesive material used by the cuttable tape segments. */
+	UPROPERTY(VisibleAnywhere, Category="Botanicus|Parcel|Appearance")
+	TObjectPtr<UMaterialInterface> TapeMaterial;
+
 	TWeakObjectPtr<class ABotanicusCharacter> ActiveCutter;
 	FVector ParcelHalfExtent = FVector(27.5f, 22.5f, 17.5f);
 	float LastCutLocalX = 0.0f;
 	bool bHasLastCutSample = false;
+	bool bLastRenderedOpenedState = false;
 
 	static constexpr int32 TapeSegmentCount = 16;
 };
