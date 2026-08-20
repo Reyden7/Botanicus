@@ -2,10 +2,12 @@
 
 #include "Growing/BotanicusPlantCompatibility.h"
 
+#include "Engine/GameInstance.h"
 #include "EngineUtils.h"
 #include "Growing/BotanicusMultiPlantPotActor.h"
 #include "Growing/BotanicusPlantCatalog.h"
 #include "Growing/BotanicusPlantPotActor.h"
+#include "Growing/BotanicusPlantSubsystem.h"
 
 namespace
 {
@@ -15,6 +17,7 @@ namespace
 		const FVector& TargetLocation,
 		float RadiusSquared,
 		const FBotanicusPlantDefinition& Definition,
+		const UBotanicusPlantSubsystem* PlantSubsystem,
 		FBotanicusPlantCompatibilityResult& Result)
 	{
 		if (NeighbourPlantKey.IsNone() ||
@@ -32,6 +35,31 @@ namespace
 					 NeighbourPlantKey))
 		{
 			++Result.IncompatibleNeighbourCount;
+		}
+		else if (NeighbourPlantKey == Definition.PlantKey)
+		{
+			// A second plant of the same species is always a compatible
+			// neighbour unless the designer explicitly overrides it above.
+			++Result.CompatibleNeighbourCount;
+		}
+		else if (PlantSubsystem)
+		{
+			if (const FBotanicusPlantDefinition* NeighbourDefinition =
+					PlantSubsystem->FindPlant(NeighbourPlantKey))
+			{
+				// Explicit catalogue relations have priority. For every other
+				// living neighbour, plants of the same element cooperate and
+				// plants of different elements compete. This keeps blue strictly
+				// reserved for an empty interaction radius.
+				if (NeighbourDefinition->Element == Definition.Element)
+				{
+					++Result.CompatibleNeighbourCount;
+				}
+				else
+				{
+					++Result.IncompatibleNeighbourCount;
+				}
+			}
 		}
 	}
 }
@@ -53,6 +81,11 @@ FBotanicusPlantCompatibilityResult EvaluateBotanicusPlantCompatibility(
 	}
 
 	const float RadiusSquared = FMath::Square(Radius);
+	const UBotanicusPlantSubsystem* PlantSubsystem =
+		World->GetGameInstance()
+			? World->GetGameInstance()->GetSubsystem<
+				UBotanicusPlantSubsystem>()
+			: nullptr;
 	for (TActorIterator<ABotanicusPlantPotActor> PotIt(World); PotIt; ++PotIt)
 	{
 		const ABotanicusPlantPotActor* Pot = *PotIt;
@@ -62,7 +95,8 @@ FBotanicusPlantCompatibilityResult EvaluateBotanicusPlantCompatibility(
 		}
 		// Local placement silhouettes copy the complete plant state. They are
 		// visual-only and must never be counted as an additional neighbour.
-		if (Pot->ActorHasTag(TEXT("BotanicusPlacementPreview")))
+		if (Pot->ActorHasTag(TEXT("BotanicusPlacementPreview")) ||
+			Pot->ActorHasTag(TEXT("BotanicusInspectionPreview")))
 		{
 			continue;
 		}
@@ -88,6 +122,7 @@ FBotanicusPlantCompatibilityResult EvaluateBotanicusPlantCompatibility(
 						TargetLocation,
 						RadiusSquared,
 						Definition,
+						PlantSubsystem,
 						Result);
 				}
 			}
@@ -104,6 +139,7 @@ FBotanicusPlantCompatibilityResult EvaluateBotanicusPlantCompatibility(
 			TargetLocation,
 			RadiusSquared,
 			Definition,
+			PlantSubsystem,
 			Result);
 	}
 
