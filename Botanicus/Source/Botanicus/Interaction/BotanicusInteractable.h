@@ -18,7 +18,7 @@ struct BOTANICUS_API FBotanicusInteractionPrompt
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Interaction")
 	FText ActionText = NSLOCTEXT("BotanicusInteraction", "DefaultAction", "Interagir");
 
-	/** Optional name of the focused object, for example "Monstera". */
+	/** Optional name of the focused object, for example "Aurélia Douce". */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Interaction")
 	FText TargetName;
 

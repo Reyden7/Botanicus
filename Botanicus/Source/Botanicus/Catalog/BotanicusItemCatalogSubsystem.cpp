@@ -75,24 +75,6 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	}
 	if (LoadedCatalog)
 	{
-		auto UseAuthoredShelfBlueprint =
-			[this](FName ItemKey, const TCHAR* BlueprintClassPath)
-			{
-				if (FBotanicusItemDefinition* Shelf =
-						LoadedCatalog->Items.FindByPredicate(
-							[ItemKey](
-								const FBotanicusItemDefinition& Definition)
-							{
-								return Definition.ItemKey == ItemKey;
-							}))
-				{
-					Shelf->WorldActorClass = TSoftClassPtr<AActor>(
-						FSoftObjectPath(BlueprintClassPath));
-				}
-			};
-		UseAuthoredShelfBlueprint(
-			TEXT("StorageShelfWallLarge"),
-			TEXT("/Game/Botanicus/blueprints/BP_Item_StorageShelfWallLarge.BP_Item_StorageShelfWallLarge_C"));
 		for (FBotanicusItemDefinition& Definition : LoadedCatalog->Items)
 		{
 			if (IsDeprecatedStorageShelfType(Definition.ItemKey))
@@ -113,28 +95,6 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 					"StorageShelfWall",
 					"Etagere murale");
 			}
-		}
-
-		if (FBotanicusItemDefinition* FloorSmallShelf =
-				LoadedCatalog->Items.FindByPredicate(
-					[](const FBotanicusItemDefinition& Definition)
-					{
-						return Definition.ItemKey ==
-							TEXT("StorageShelfFloorSmall");
-					}))
-		{
-			// Runtime migration for catalog assets made before the authored shelf
-			// was imported. Its Blueprint StorageSlot components are authoritative;
-			// spawning the native C++ class would ignore their number/transforms.
-			FloorSmallShelf->WorldActorClass = TSoftClassPtr<AActor>(
-				FSoftObjectPath(TEXT(
-					"/Game/Botanicus/blueprints/BP_Item_StorageShelfFloorSmall.BP_Item_StorageShelfFloorSmall_C")));
-			FloorSmallShelf->WorldMesh = TSoftObjectPtr<UStaticMesh>(
-				FSoftObjectPath(TEXT(
-					"/Game/Botanicus/Items/furnituresMesh/etagère4Slot/etagère4Slot.etagère4Slot")));
-			FloorSmallShelf->WorldScale = FVector::OneVector;
-			FloorSmallShelf->CollisionHalfExtentOverride =
-				FVector(45.0f, 103.0f, 100.0f);
 		}
 		if (FBotanicusItemDefinition* WateringCan =
 				LoadedCatalog->Items.FindByPredicate(
@@ -765,12 +725,12 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 			if (ItemKey == TEXT("StorageShelfFloorSmall"))
 			{
 				ShelfBlueprintClassPath =
-					TEXT("/Game/Botanicus/blueprints/BP_Item_StorageShelfFloorSmall.BP_Item_StorageShelfFloorSmall_C");
+					TEXT("/Game/Botanicus/blueprints/BP_Item_StorageShelfFlooBase4.BP_Item_StorageShelfFlooBase4_C");
 			}
 			else if (ItemKey == TEXT("StorageShelfWallLarge"))
 			{
 				ShelfBlueprintClassPath =
-					TEXT("/Game/Botanicus/blueprints/BP_Item_StorageShelfWallLarge.BP_Item_StorageShelfWallLarge_C");
+					TEXT("/Game/Botanicus/blueprints/BP_Item_StorageShelfWallBase4.BP_Item_StorageShelfWallBase4_C");
 			}
 			Shelf.WorldActorClass = ShelfBlueprintClassPath
 				? TSoftClassPtr<AActor>(
@@ -899,6 +859,18 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 const FBotanicusItemDefinition*
 UBotanicusItemCatalogSubsystem::FindItem(FName ItemKey) const
 {
+	// Shelf definitions are designer-authored. Their actor class can be a
+	// Blueprint child with a custom mesh and any number of StorageSlot
+	// components, so the Data Asset must win over the native fallback.
+	if (ItemKey.ToString().StartsWith(TEXT("StorageShelf")) && LoadedCatalog)
+	{
+		if (const FBotanicusItemDefinition* Definition =
+				LoadedCatalog->FindItem(ItemKey))
+		{
+			return Definition;
+		}
+	}
+
 	if (const FBotanicusItemDefinition* NativeDefinition =
 		NativeFallbackItems.FindByPredicate(
 			[ItemKey](const FBotanicusItemDefinition& Definition)

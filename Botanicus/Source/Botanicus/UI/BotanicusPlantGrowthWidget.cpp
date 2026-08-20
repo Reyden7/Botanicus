@@ -88,7 +88,7 @@ void UBotanicusPlantGrowthWidget::NativeOnInitialized()
 		UCanvasPanel* Canvas = WidgetTree->ConstructWidget<UCanvasPanel>();
 		Root->SetContent(Canvas);
 		PlantNameText = AddPlantText(WidgetTree, Canvas, TEXT("PlantNameText"),
-			TEXT("ORCHIDEE ROSE"), FVector2D(30.0f, 2.0f),
+			TEXT("AURÉLIA DOUCE"), FVector2D(30.0f, 2.0f),
 			FVector2D(300.0f, 34.0f), 21);
 		WaterIcon = AddPlantIcon(WidgetTree, Canvas, TEXT("WaterIcon"),
 			TEXT("/Game/Botanicus/UI/Plant/Textures/T_PlantUI_Water.T_PlantUI_Water"),

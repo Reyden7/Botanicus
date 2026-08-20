@@ -64,7 +64,7 @@ void UBotanicusSalesDisplayOccupiedWidget::NativeOnInitialized()
 			TEXT("/Game/Botanicus/UI/Sales/Textures/T_SalesOccupied_Decoration.T_SalesOccupied_Decoration"),
 			FVector2D(70.0f, -105.0f), FVector2D(480.0f, 320.0f), 0);
 		PlantNameText = AddSalesText(WidgetTree, Canvas, TEXT("PlantNameText"),
-			TEXT("ORCHIDEE ROSE"), FVector2D(45.0f, 62.0f),
+			TEXT("AURÉLIA DOUCE"), FVector2D(45.0f, 62.0f),
 			FVector2D(530.0f, 52.0f), 34);
 
 		AddSalesImage(WidgetTree, Canvas, TEXT("QualityBackground"),

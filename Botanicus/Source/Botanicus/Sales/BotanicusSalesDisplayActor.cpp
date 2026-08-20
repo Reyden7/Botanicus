@@ -59,32 +59,9 @@ void GetMatureDisplayedPlantShape(
 	float& OutStemHeight,
 	FVector& OutFoliageShape)
 {
-	FString BaseKey = PlantItemKey.ToString();
-	BaseKey.RemoveFromEnd(TEXT("_Beautiful"));
-	BaseKey.RemoveFromEnd(TEXT("_Exceptional"));
-	float HeightMultiplier = 1.0f;
+	(void)PlantItemKey;
 	OutFoliageShape = FVector(1.0f, 1.0f, 0.7f);
-	if (BaseKey == TEXT("Harvest_Orchid"))
-	{
-		HeightMultiplier = 1.15f;
-		OutFoliageShape = FVector(0.7f, 0.7f, 1.3f);
-	}
-	else if (BaseKey == TEXT("Harvest_Monstera"))
-	{
-		HeightMultiplier = 0.9f;
-		OutFoliageShape = FVector(1.55f, 1.3f, 0.65f);
-	}
-	else if (BaseKey == TEXT("Harvest_Lavender"))
-	{
-		HeightMultiplier = 1.3f;
-		OutFoliageShape = FVector(0.62f, 0.62f, 1.5f);
-	}
-	else if (BaseKey == TEXT("Harvest_Violet"))
-	{
-		HeightMultiplier = 0.62f;
-		OutFoliageShape = FVector(1.35f, 1.35f, 0.58f);
-	}
-	OutStemHeight = 80.0f * HeightMultiplier;
+	OutStemHeight = 80.0f;
 }
 }
 

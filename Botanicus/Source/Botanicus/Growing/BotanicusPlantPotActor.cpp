@@ -1416,26 +1416,6 @@ void ABotanicusPlantPotActor::RefreshVisuals()
 		GetPlantDefinition();
 	float HeightMultiplier = 1.0f;
 	FVector FoliageShape(1.0f, 1.0f, 0.7f);
-	if (PlantKey == TEXT("Orchid"))
-	{
-		HeightMultiplier = 1.15f;
-		FoliageShape = FVector(0.7f, 0.7f, 1.3f);
-	}
-	else if (PlantKey == TEXT("Monstera"))
-	{
-		HeightMultiplier = 0.9f;
-		FoliageShape = FVector(1.55f, 1.3f, 0.65f);
-	}
-	else if (PlantKey == TEXT("Lavender"))
-	{
-		HeightMultiplier = 1.3f;
-		FoliageShape = FVector(0.62f, 0.62f, 1.5f);
-	}
-	else if (PlantKey == TEXT("Violet"))
-	{
-		HeightMultiplier = 0.62f;
-		FoliageShape = FVector(1.35f, 1.35f, 0.58f);
-	}
 	const float VisualGrowth =
 		FMath::Clamp(GrowthProgress, 0.02f, 1.0f);
 	const float LegacyStemHeight =

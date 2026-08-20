@@ -6,6 +6,7 @@
 #include "BotanicusCharacter.h"
 #include "BotanicusGameState.h"
 #include "BotanicusPlayerController.h"
+#include "Catalog/BotanicusItemCatalogSubsystem.h"
 #include "Building/BotanicusCatalogBuildingActor.h"
 #include "Building/BotanicusCommunicationDoorActor.h"
 #include "Building/BotanicusElementalGreenhouseActor.h"
@@ -1432,20 +1433,24 @@ void ABotanicusGameMode::RestoreWorldState()
 				ItemClass = SalePotBlueprintClass;
 			}
 		}
-		// Existing saves may still reference the native shelf class. Restore
-		// every authored shelf from its Blueprint so its selected mesh and its
-		// exact number of editable StorageSlot components are preserved.
-		else if (RestoredItemKey == TEXT("StorageShelfFloorSmall") ||
-			RestoredItemKey == TEXT("StorageShelfWallLarge"))
+		// The catalogue is authoritative for every shelf variant. This preserves
+		// renamed base Blueprints and child classes with extra slots when loading
+		// an existing save.
+		else if (RestoredItemKey.ToString().StartsWith(TEXT("StorageShelf")))
 		{
-			const TCHAR* ShelfBlueprintClassPath =
-				RestoredItemKey == TEXT("StorageShelfFloorSmall")
-					? TEXT("/Game/Botanicus/blueprints/BP_Item_StorageShelfFloorSmall.BP_Item_StorageShelfFloorSmall_C")
-					: TEXT("/Game/Botanicus/blueprints/BP_Item_StorageShelfWallLarge.BP_Item_StorageShelfWallLarge_C");
-			if (UClass* ShelfBlueprintClass =
-					LoadClass<ABotanicusStorageShelfActor>(
-						nullptr,
-						ShelfBlueprintClassPath))
+			const UBotanicusItemCatalogSubsystem* Catalog =
+				World->GetGameInstance()
+					? World->GetGameInstance()->GetSubsystem<
+						UBotanicusItemCatalogSubsystem>()
+					: nullptr;
+			const FBotanicusItemDefinition* Definition =
+				Catalog ? Catalog->FindItem(RestoredItemKey) : nullptr;
+			UClass* ShelfBlueprintClass = Definition
+				? Definition->WorldActorClass.LoadSynchronous()
+				: nullptr;
+			if (ShelfBlueprintClass &&
+				ShelfBlueprintClass->IsChildOf(
+					ABotanicusStorageShelfActor::StaticClass()))
 			{
 				ItemClass = ShelfBlueprintClass;
 			}

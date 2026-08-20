@@ -232,16 +232,28 @@ bool ABotanicusStorageShelfActor::IsWallMountedShelf() const
 	{
 		return true;
 	}
+	if (const UGameInstance* GameInstance = GetGameInstance())
+	{
+		if (const UBotanicusItemCatalogSubsystem* Catalog =
+				GameInstance->GetSubsystem<UBotanicusItemCatalogSubsystem>())
+		{
+			if (const FBotanicusItemDefinition* Definition =
+					Catalog->FindItem(GetItemKey()))
+			{
+				return (Definition->AllowedPlacementSurfaces &
+					static_cast<int32>(EBotanicusPlacementSurface::Wall)) != 0;
+			}
+		}
+	}
 
-	// A visual variant can have any class name, but one of its parent classes
-	// remains BP_Item_StorageShelfWallLarge. Walking the hierarchy keeps every
-	// Blueprint child wall-mounted without adding another C++ shelf type.
+	// Fallback used while a preview actor has not received its catalogue key.
+	// Match the family name instead of one exact asset name so renamed bases
+	// and all of their Blueprint children keep the correct behaviour.
 	for (const UClass* Class = GetClass();
 		 Class;
 		 Class = Class->GetSuperClass())
 	{
-		if (Class->GetName().Contains(TEXT("StorageShelfWallLarge")) ||
-			Class->GetName().Contains(TEXT("StorageShelfWallSmall")))
+		if (Class->GetName().Contains(TEXT("StorageShelfWall")))
 		{
 			return true;
 		}

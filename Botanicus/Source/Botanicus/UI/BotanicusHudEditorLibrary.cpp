@@ -379,7 +379,7 @@ bool UBotanicusHudEditorLibrary::BuildEditableHudElement(
 			AddImage(Tree, Root, TEXT("PlantDecoration"),
 				TEXT("/Game/Botanicus/UI/Sales/Textures/T_SalesOccupied_Decoration.T_SalesOccupied_Decoration"),
 				FVector2D(70.0f, -105.0f), FVector2D(480.0f, 320.0f));
-			AddText(Tree, Root, TEXT("PlantNameText"), TEXT("ORCHIDEE ROSE"),
+			AddText(Tree, Root, TEXT("PlantNameText"), TEXT("AURÉLIA DOUCE"),
 				FVector2D(45.0f, 62.0f), FVector2D(530.0f, 52.0f),
 				34, true, ETextJustify::Center);
 			AddImage(Tree, Root, TEXT("QualityBackground"),
@@ -403,7 +403,7 @@ bool UBotanicusHudEditorLibrary::BuildEditableHudElement(
 		}
 		else if (Type == TEXT("PlantGrowthInfo"))
 		{
-			AddText(Tree, Root, TEXT("PlantNameText"), TEXT("ORCHIDEE ROSE"),
+			AddText(Tree, Root, TEXT("PlantNameText"), TEXT("AURÉLIA DOUCE"),
 				FVector2D(30.0f, 2.0f), FVector2D(300.0f, 34.0f),
 				21, true, ETextJustify::Center);
 			AddImage(Tree, Root, TEXT("WaterIcon"),
