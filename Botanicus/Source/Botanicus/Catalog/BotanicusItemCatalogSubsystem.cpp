@@ -3,6 +3,7 @@
 #include "Catalog/BotanicusItemCatalogSubsystem.h"
 
 #include "Decoration/BotanicusBrokenFlowerPotActor.h"
+#include "Environment/BotanicusClimateDeviceActor.h"
 #include "Growing/BotanicusPlantPotActor.h"
 #include "Growing/BotanicusMultiPlantPotActor.h"
 #include "Growing/BotanicusWateringCanActor.h"
@@ -192,6 +193,85 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	SoloLargeTest.bPurchasable = false;
 	SoloLargeTest.DeliveryDelaySeconds = 6.0f;
 
+	const auto AddClimateFurniture =
+		[this](
+			FName ItemKey,
+			const FText& DisplayName,
+			TSubclassOf<ABotanicusClimateDeviceActor> ActorClass,
+			int32 Price,
+			const FVector& ProxyScale)
+		{
+			FBotanicusItemDefinition& Device =
+				NativeFallbackItems.AddDefaulted_GetRef();
+			Device.ItemKey = ItemKey;
+			Device.DisplayName = DisplayName;
+			Device.Category = EBotanicusItemCategory::Equipment;
+			Device.CatalogTabs = static_cast<int32>(
+				EBotanicusCatalogTab::GardeningTools);
+			Device.WorldMesh = TSoftObjectPtr<UStaticMesh>(
+				FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube.Cube")));
+			Device.WorldScale = ProxyScale;
+			Device.WorldActorClass = ActorClass;
+			Device.MaximumStack = 1;
+			Device.WeightClass =
+				EBotanicusItemWeightClass::OnePlayerCarry;
+			Device.CarryMovementSpeedMultiplier = 0.8f;
+			Device.Price = Price;
+			Device.DeliveryQuantity = 1;
+			Device.DeliveryDelaySeconds = 3.0f;
+			Device.AllowedPlacementSurfaces = static_cast<int32>(
+				EBotanicusPlacementSurface::Floor);
+			Device.CollisionHalfExtentOverride = ProxyScale * 50.0f;
+		};
+	const auto AddClimateFurnitureLevels =
+		[&AddClimateFurniture](
+			const TCHAR* KeyPrefix,
+			const TCHAR* Name,
+			TSubclassOf<ABotanicusClimateDeviceActor> ActorClass,
+			int32 BasePrice,
+			const FVector& ProxyScale)
+		{
+			static const float PriceMultipliers[] = {1.0f, 1.6f, 2.2f, 3.0f};
+			for (int32 Level = 1; Level <= 4; ++Level)
+			{
+				AddClimateFurniture(
+					FName(*FString::Printf(TEXT("%s_Level%d"), KeyPrefix, Level)),
+					FText::Format(
+						NSLOCTEXT(
+							"BotanicusCatalog", "ClimateDeviceLevelName",
+							"{0} - Niv. {1}"),
+						FText::FromString(Name),
+						FText::AsNumber(Level)),
+					ActorClass,
+					FMath::RoundToInt(BasePrice * PriceMultipliers[Level - 1]),
+					ProxyScale);
+			}
+		};
+	AddClimateFurnitureLevels(
+		TEXT("ClimateHeater"), TEXT("Chauffage"),
+		ABotanicusHeatingDeviceActor::StaticClass(), 450,
+		FVector(1.0f, 0.8f, 1.8f));
+	AddClimateFurnitureLevels(
+		TEXT("ClimateCooler"), TEXT("Refroidisseur"),
+		ABotanicusCoolingDeviceActor::StaticClass(), 550,
+		FVector(1.1f, 0.9f, 1.5f));
+	AddClimateFurnitureLevels(
+		TEXT("ClimateGrowLight"), TEXT("Lampe horticole"),
+		ABotanicusGrowLightDeviceActor::StaticClass(), 350,
+		FVector(2.5f, 1.0f, 2.2f));
+	AddClimateFurnitureLevels(
+		TEXT("ClimateMister"), TEXT("Brumisateur"),
+		ABotanicusMisterDeviceActor::StaticClass(), 400,
+		FVector(1.0f, 0.8f, 1.8f));
+	AddClimateFurnitureLevels(
+		TEXT("ClimateShade"), TEXT("Ombrière"),
+		ABotanicusShadeDeviceActor::StaticClass(), 300,
+		FVector(2.3f, 2.3f, 2.4f));
+	AddClimateFurnitureLevels(
+		TEXT("ClimateDehumidifier"), TEXT("Déshumidificateur"),
+		ABotanicusDehumidifierDeviceActor::StaticClass(), 475,
+		FVector(1.1f, 0.9f, 1.5f));
+
 	FBotanicusItemDefinition& PlantPot =
 		NativeFallbackItems.AddDefaulted_GetRef();
 	PlantPot.ItemKey = TEXT("PlantPot");
@@ -209,6 +289,60 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	PlantPot.Price = 75;
 	PlantPot.DeliveryQuantity = 1;
 	PlantPot.DeliveryDelaySeconds = 2.0f;
+
+	const auto AddElementalPlantPot =
+		[this](
+			FName ItemKey,
+			const FText& DisplayName,
+			const TCHAR* MeshPath,
+			const TCHAR* BlueprintClassPath,
+			int32 Price)
+		{
+			FBotanicusItemDefinition& ElementalPot =
+				NativeFallbackItems.AddDefaulted_GetRef();
+			ElementalPot.ItemKey = ItemKey;
+			ElementalPot.DisplayName = DisplayName;
+			ElementalPot.Category =
+				EBotanicusItemCategory::Decoration;
+			ElementalPot.CatalogTabs =
+				static_cast<int32>(
+					EBotanicusCatalogTab::Preparation);
+			ElementalPot.WorldMesh = TSoftObjectPtr<UStaticMesh>(
+				FSoftObjectPath(MeshPath));
+			ElementalPot.WorldScale = FVector::OneVector;
+			ElementalPot.WorldActorClass = TSoftClassPtr<AActor>(
+				FSoftObjectPath(BlueprintClassPath));
+			ElementalPot.MaximumStack = 10;
+			ElementalPot.WeightClass =
+				EBotanicusItemWeightClass::Hotbar;
+			ElementalPot.Price = Price;
+			ElementalPot.DeliveryQuantity = 1;
+			ElementalPot.DeliveryDelaySeconds = 2.0f;
+		};
+	AddElementalPlantPot(
+		TEXT("PlantPotFire"),
+		NSLOCTEXT("BotanicusCatalog", "PlantPotFire", "Pot de culture Feu"),
+		TEXT("/Game/Botanicus/Items/itemsMesh/potPreparation/meshs/pot_culture_feu.pot_culture_feu"),
+		TEXT("/Game/Botanicus/blueprints/BP_Item_PlantPotFire.BP_Item_PlantPotFire_C"),
+		120);
+	AddElementalPlantPot(
+		TEXT("PlantPotWater"),
+		NSLOCTEXT("BotanicusCatalog", "PlantPotWater", "Pot de culture Eau"),
+		TEXT("/Game/Botanicus/Items/itemsMesh/potPreparation/meshs/pot_culture_eau.pot_culture_eau"),
+		TEXT("/Game/Botanicus/blueprints/BP_Item_PlantPotWater.BP_Item_PlantPotWater_C"),
+		120);
+	AddElementalPlantPot(
+		TEXT("PlantPotIce"),
+		NSLOCTEXT("BotanicusCatalog", "PlantPotIce", "Pot de culture Glace"),
+		TEXT("/Game/Botanicus/Items/itemsMesh/potPreparation/meshs/pot_culture_glace.pot_culture_glace"),
+		TEXT("/Game/Botanicus/blueprints/BP_Item_PlantPotIce.BP_Item_PlantPotIce_C"),
+		120);
+	AddElementalPlantPot(
+		TEXT("PlantPotShadow"),
+		NSLOCTEXT("BotanicusCatalog", "PlantPotShadow", "Pot de culture Tenebres"),
+		TEXT("/Game/Botanicus/Items/itemsMesh/potPreparation/meshs/pot_culture_ténèbre.pot_culture_ténèbre"),
+		TEXT("/Game/Botanicus/blueprints/BP_Item_PlantPotShadow.BP_Item_PlantPotShadow_C"),
+		120);
 
 	FBotanicusItemDefinition& SquarePlantPot =
 		NativeFallbackItems.AddDefaulted_GetRef();

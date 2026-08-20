@@ -8,6 +8,7 @@
 #include "UI/BotanicusCrosshairWidget.h"
 #include "UI/BotanicusHudMessageWidget.h"
 #include "UI/BotanicusInteractionTargetWidget.h"
+#include "UI/BotanicusOutdoorEnvironmentWidget.h"
 #include "UI/BotanicusQuickBarWidget.h"
 #include "UI/BotanicusReputationWidget.h"
 #include "UI/BotanicusSharedFundsWidget.h"
@@ -47,6 +48,10 @@ void UBotanicusHudLayoutWidget::NativeOnInitialized()
 
 	ClockWidget = CreateElement<UBotanicusClockWidget>(ClockSlot,
 		TEXT("/Game/Botanicus/UI/HUD/Elements/WBP_HUD_Clock.WBP_HUD_Clock_C"));
+	OutdoorEnvironmentWidget =
+		CreateElement<UBotanicusOutdoorEnvironmentWidget>(
+			OutdoorEnvironmentSlot,
+			TEXT("/Game/Botanicus/UI/HUD/Elements/WBP_HUD_OutdoorEnvironment.WBP_HUD_OutdoorEnvironment_C"));
 	CreditsWidget = CreateElement<UBotanicusSharedFundsWidget>(CreditsSlot,
 		TEXT("/Game/Botanicus/UI/HUD/Elements/WBP_HUD_Credits.WBP_HUD_Credits_C"));
 	ReputationWidget =

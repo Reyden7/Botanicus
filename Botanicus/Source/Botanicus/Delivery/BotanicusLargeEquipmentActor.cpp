@@ -25,7 +25,8 @@ namespace
 		const FString ItemKeyString = ItemKey.ToString();
 		return ItemKey == TEXT("PreparationWorkbench")
 			|| ItemKeyString.StartsWith(TEXT("StorageShelf"))
-			|| ItemKeyString.StartsWith(TEXT("WorkSurface"));
+			|| ItemKeyString.StartsWith(TEXT("WorkSurface"))
+			|| ItemKeyString.StartsWith(TEXT("Climate"));
 	}
 }
 
@@ -238,6 +239,17 @@ void ABotanicusLargeEquipmentActor::Interact_Implementation(
 	{
 		PickUp(Character);
 	}
+}
+
+void ABotanicusLargeEquipmentActor::BeginFurnitureMove(
+	ABotanicusCharacter* Character)
+{
+	if (!HasAuthority() || !IsValid(Character) || IsValid(Carrier) ||
+		!ABotanicusLargeEquipmentActor::CanInteract_Implementation(Character))
+	{
+		return;
+	}
+	PickUp(Character);
 }
 
 void ABotanicusLargeEquipmentActor::PickUp(

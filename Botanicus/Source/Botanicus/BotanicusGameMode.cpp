@@ -16,6 +16,7 @@
 #include "Delivery/BotanicusPlaceableItemActor.h"
 #include "Decoration/BotanicusBrokenFlowerPotActor.h"
 #include "Economy/BotanicusRefundZoneActor.h"
+#include "Environment/BotanicusClimateDeviceActor.h"
 #include "Growing/BotanicusPlantPotActor.h"
 #include "Growing/BotanicusMultiPlantPotActor.h"
 #include "Growing/BotanicusWateringCanActor.h"
@@ -510,7 +511,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 
 	CurrentSaveGame->MapName =
 		UGameplayStatics::GetCurrentLevelName(this, true);
-	CurrentSaveGame->SaveVersion = 26;
+	CurrentSaveGame->SaveVersion = 30;
 	if (const ABotanicusGameState* BotanicusGameState =
 		World->GetGameState<ABotanicusGameState>())
 	{
@@ -571,6 +572,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		AActor* Actor = *ActorIt;
 		if (!IsValid(Actor) ||
 			(!Actor->ActorHasTag(PurchasedBuildingTag) &&
+			 !Actor->IsA<ABotanicusGreenhouseActor>() &&
 			 !Actor->GetClass()->GetPathName().Contains(
 				 TEXT("/EasyBuildingSystem/Blueprints/BuildingObjects/"))))
 		{
@@ -584,11 +586,19 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		SavedActor.Transform = Actor->GetActorTransform();
 		SavedActor.bRuntimeSpawned =
 			Actor->ActorHasTag(PurchasedBuildingTag);
-		if (const ABotanicusElementalGreenhouseActor* Greenhouse =
-			Cast<ABotanicusElementalGreenhouseActor>(Actor))
+		if (const ABotanicusGreenhouseActor* Greenhouse =
+			Cast<ABotanicusGreenhouseActor>(Actor))
 		{
 			SavedActor.ElementalGreenhouseLevel =
 				Greenhouse->GetGreenhouseLevel();
+			SavedActor.GreenhouseLevel =
+				Greenhouse->GetGreenhouseLevel();
+			SavedActor.GreenhouseTemperatureCelsius =
+				Greenhouse->GetTemperatureCelsius();
+			SavedActor.GreenhouseAirHumidityPercent =
+				Greenhouse->GetAirHumidityPercent();
+			SavedActor.GreenhouseLuminosityPercent =
+				Greenhouse->GetLuminosityPercent();
 		}
 	}
 
@@ -706,6 +716,18 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		{
 			SavedItem.PreparationWorkbenchLevel =
 				Workbench->GetWorkbenchLevel();
+		}
+		if (const ABotanicusClimateDeviceActor* ClimateDevice =
+				Cast<ABotanicusClimateDeviceActor>(*EquipmentIt))
+		{
+			SavedItem.bClimateDeviceEnabled =
+				ClimateDevice->IsClimateDeviceEnabled();
+			SavedItem.ClimateDeviceInfluenceRadius =
+				ClimateDevice->GetInfluenceRadius();
+			SavedItem.ClimateDeviceMaximumEffectStrength =
+				ClimateDevice->GetMaximumEffectStrength();
+			SavedItem.ClimateDevicePowerLevel =
+				ClimateDevice->GetPowerLevel();
 		}
 	}
 
@@ -1059,8 +1081,9 @@ void ABotanicusGameMode::RestoreWorldState()
 	{
 		AActor* Actor = *ActorIt;
 		if (IsValid(Actor) &&
-			Actor->GetClass()->GetPathName().Contains(
-				TEXT("/EasyBuildingSystem/Blueprints/BuildingObjects/")))
+			(Actor->IsA<ABotanicusGreenhouseActor>() ||
+			 Actor->GetClass()->GetPathName().Contains(
+				 TEXT("/EasyBuildingSystem/Blueprints/BuildingObjects/"))))
 		{
 			BuildingActorsByName.Add(Actor->GetFName(), Actor);
 		}
@@ -1126,11 +1149,22 @@ void ABotanicusGameMode::RestoreWorldState()
 			false,
 			nullptr,
 			ETeleportType::TeleportPhysics);
-		if (ABotanicusElementalGreenhouseActor* Greenhouse =
-			Cast<ABotanicusElementalGreenhouseActor>(RestoredActor))
+		if (ABotanicusGreenhouseActor* Greenhouse =
+			Cast<ABotanicusGreenhouseActor>(RestoredActor))
 		{
-			Greenhouse->RestoreGreenhouseLevel(
-				SavedActor.ElementalGreenhouseLevel);
+			Greenhouse->RestoreGreenhouseState(
+				CurrentSaveGame->SaveVersion >= 27
+					? SavedActor.GreenhouseLevel
+					: SavedActor.ElementalGreenhouseLevel,
+				CurrentSaveGame->SaveVersion >= 27
+					? SavedActor.GreenhouseTemperatureCelsius
+					: 20.0f,
+				CurrentSaveGame->SaveVersion >= 27
+					? SavedActor.GreenhouseAirHumidityPercent
+					: 50.0f,
+				CurrentSaveGame->SaveVersion >= 27
+					? SavedActor.GreenhouseLuminosityPercent
+					: 50.0f);
 		}
 		++RestoredCount;
 	}
@@ -1407,15 +1441,24 @@ void ABotanicusGameMode::RestoreWorldState()
 					: SavedItem.ItemKey;
 
 		UClass* ItemClass = SavedItem.ActorClass.TryLoadClass<AActor>();
-		// Migrate pots saved before PlantPot used its authored Blueprint class.
-		// Otherwise an existing save would keep spawning the old native cylinder.
-		if (SavedItem.ItemKey == TEXT("PlantPot"))
+		// The item catalogue is authoritative for every culture-pot variant.
+		// This also migrates elemental pots saved before their individual
+		// Blueprints existed, so their editable soil settings are applied.
+		if (RestoredItemKey.ToString().StartsWith(TEXT("PlantPot")))
 		{
-			if (UClass* PlantPotBlueprintClass =
-					LoadClass<ABotanicusPlantPotActor>(
-						nullptr,
-						TEXT(
-							"/Game/Botanicus/blueprints/BP_Item_PlantPot.BP_Item_PlantPot_C")))
+			const UBotanicusItemCatalogSubsystem* Catalog =
+				World->GetGameInstance()
+					? World->GetGameInstance()->GetSubsystem<
+						UBotanicusItemCatalogSubsystem>()
+					: nullptr;
+			const FBotanicusItemDefinition* Definition =
+				Catalog ? Catalog->FindItem(RestoredItemKey) : nullptr;
+			UClass* PlantPotBlueprintClass = Definition
+				? Definition->WorldActorClass.LoadSynchronous()
+				: nullptr;
+			if (PlantPotBlueprintClass &&
+				PlantPotBlueprintClass->IsChildOf(
+					ABotanicusPlantPotActor::StaticClass()))
 			{
 				ItemClass = PlantPotBlueprintClass;
 			}
@@ -1595,6 +1638,23 @@ void ABotanicusGameMode::RestoreWorldState()
 			{
 				Workbench->RestoreWorkbenchLevel(
 					SavedItem.PreparationWorkbenchLevel);
+			}
+			if (ABotanicusClimateDeviceActor* ClimateDevice =
+					Cast<ABotanicusClimateDeviceActor>(Equipment))
+			{
+				ClimateDevice->RestoreClimateDeviceState(
+					CurrentSaveGame->SaveVersion >= 28
+						? SavedItem.bClimateDeviceEnabled
+						: true,
+					CurrentSaveGame->SaveVersion >= 28
+						? SavedItem.ClimateDeviceInfluenceRadius
+						: ClimateDevice->GetInfluenceRadius(),
+					CurrentSaveGame->SaveVersion >= 30
+						? SavedItem.ClimateDeviceMaximumEffectStrength
+						: ClimateDevice->GetMaximumEffectStrength(),
+					CurrentSaveGame->SaveVersion >= 29
+						? SavedItem.ClimateDevicePowerLevel
+						: 1.0f);
 			}
 		}
 

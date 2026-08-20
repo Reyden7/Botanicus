@@ -37,23 +37,3 @@ protected:
 	UPROPERTY()
 	TObjectPtr<UStaticMesh> CubeMesh;
 };
-
-UCLASS()
-class BOTANICUS_API ABotanicusCompactGreenhouseActor
-	: public ABotanicusCatalogBuildingActor
-{
-	GENERATED_BODY()
-
-public:
-	ABotanicusCompactGreenhouseActor();
-};
-
-UCLASS()
-class BOTANICUS_API ABotanicusWorkshopGreenhouseActor
-	: public ABotanicusCatalogBuildingActor
-{
-	GENERATED_BODY()
-
-public:
-	ABotanicusWorkshopGreenhouseActor();
-};

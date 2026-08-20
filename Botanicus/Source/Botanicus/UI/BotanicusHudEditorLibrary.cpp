@@ -10,6 +10,7 @@
 #include "Components/Button.h"
 #include "Components/Image.h"
 #include "Components/NamedSlot.h"
+#include "Components/Slider.h"
 #include "Components/TextBlock.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Styling/CoreStyle.h"
@@ -95,6 +96,48 @@ UImage* AddImage(
 	AddToCanvas(Parent, Image, Position, Size, ZOrder);
 	return Image;
 }
+
+UButton* AddTexturedButton(
+	UWidgetTree* Tree,
+	UCanvasPanel* Parent,
+	const TCHAR* Name,
+	const TCHAR* NormalTexturePath,
+	const TCHAR* PressedTexturePath,
+	const TCHAR* LabelName,
+	const TCHAR* LabelText,
+	const FVector2D& Position,
+	const FVector2D& Size)
+{
+	UButton* Button = Tree->ConstructWidget<UButton>(
+		UButton::StaticClass(), FName(Name));
+	FButtonStyle Style = Button->GetStyle();
+	auto MakeBrush = [&Size](const TCHAR* Path)
+	{
+		FSlateBrush Brush;
+		Brush.SetResourceObject(LoadObject<UTexture2D>(nullptr, Path));
+		Brush.ImageSize = Size;
+		Brush.DrawAs = ESlateBrushDrawType::Image;
+		return Brush;
+	};
+	const FSlateBrush NormalBrush = MakeBrush(NormalTexturePath);
+	const FSlateBrush PressedBrush = MakeBrush(PressedTexturePath);
+	Style.SetNormal(NormalBrush);
+	Style.SetHovered(NormalBrush);
+	Style.SetPressed(PressedBrush);
+	Button->SetStyle(Style);
+	UTextBlock* Label = Tree->ConstructWidget<UTextBlock>(
+		UTextBlock::StaticClass(), FName(LabelName));
+	Label->SetText(FText::FromString(LabelText));
+	Label->SetJustification(ETextJustify::Center);
+	Label->SetColorAndOpacity(FLinearColor(1.0f, 0.95f, 0.82f, 1.0f));
+	FSlateFontInfo Font = Label->GetFont();
+	Font.Size = 22;
+	Font.TypefaceFontName = TEXT("Bold");
+	Label->SetFont(Font);
+	Button->AddChild(Label);
+	AddToCanvas(Parent, Button, Position, Size, 5);
+	return Button;
+}
 }
 #endif
 
@@ -150,6 +193,9 @@ bool UBotanicusHudEditorLibrary::BuildEditableHudLayout(
 	AddHudSlot(TEXT("ClockSlot"), FAnchors(0.0f, 0.0f),
 		FVector2D::ZeroVector, FVector2D(18.0f, 16.0f),
 		FVector2D(420.0f, 175.0f), 10);
+	AddHudSlot(TEXT("OutdoorEnvironmentSlot"), FAnchors(0.0f, 0.0f),
+		FVector2D::ZeroVector, FVector2D(18.0f, 190.0f),
+		FVector2D(420.0f, 66.0f), 10);
 	AddHudSlot(TEXT("CreditsSlot"), FAnchors(1.0f, 0.0f),
 		FVector2D(1.0f, 0.0f), FVector2D(-274.0f, 20.0f),
 		FVector2D(232.0f, 72.0f), 10);
@@ -181,7 +227,8 @@ bool UBotanicusHudEditorLibrary::BuildEditableHudLayout(
 	UWidgetTree* CompiledTree =
 		GeneratedClass ? GeneratedClass->GetWidgetTreeArchetype() : nullptr;
 	const TCHAR* RequiredNames[] = {
-		TEXT("ClockSlot"), TEXT("CreditsSlot"),
+		TEXT("ClockSlot"), TEXT("OutdoorEnvironmentSlot"),
+		TEXT("CreditsSlot"),
 		TEXT("ReputationSlot"), TEXT("ObjectivesSlot"),
 		TEXT("QuickBarSlot"), TEXT("InteractionSlot"),
 		TEXT("MessageSlot"), TEXT("CrosshairSlot")};
@@ -247,6 +294,72 @@ bool UBotanicusHudEditorLibrary::BuildEditableHudElement(
 				FVector2D(116.0f, 151.0f), FVector2D(260.0f, 24.0f),
 				12, true);
 			Furniture->SetVisibility(ESlateVisibility::Collapsed);
+		}
+		else if (Type == TEXT("OutdoorEnvironment"))
+		{
+			const TCHAR* IconNames[] = {
+				TEXT("T_HUD_Temperature"),
+				TEXT("T_HUD_AirHumidity"),
+				TEXT("T_HUD_Luminosity")};
+			const TCHAR* WidgetNames[] = {
+				TEXT("TemperatureIcon"),
+				TEXT("AirHumidityIcon"),
+				TEXT("LuminosityIcon")};
+			const TCHAR* TextNames[] = {
+				TEXT("TemperatureText"),
+				TEXT("AirHumidityText"),
+				TEXT("LuminosityText")};
+			const TCHAR* PreviewValues[] = {
+				TEXT("18.5 C"), TEXT("65%"), TEXT("70%")};
+			for (int32 Index = 0; Index < 3; ++Index)
+			{
+				const float X = static_cast<float>(Index) * 140.0f;
+				AddImage(Tree, Root, WidgetNames[Index], IconNames[Index],
+					FVector2D(X, 7.0f), FVector2D(52.0f, 52.0f), 1);
+				AddText(Tree, Root, TextNames[Index], PreviewValues[Index],
+					FVector2D(X + 45.0f, 17.0f), FVector2D(91.0f, 36.0f),
+					17, true, ETextJustify::Center);
+			}
+		}
+		else if (Type == TEXT("ClimateDeviceControl"))
+		{
+			UCanvasPanel* Panel = Tree->ConstructWidget<UCanvasPanel>(
+				UCanvasPanel::StaticClass(), TEXT("ClimateControlPanel"));
+			UCanvasPanelSlot* PanelSlot = Root->AddChildToCanvas(Panel);
+			PanelSlot->SetAnchors(FAnchors(0.5f, 0.5f));
+			PanelSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+			PanelSlot->SetPosition(FVector2D::ZeroVector);
+			PanelSlot->SetSize(FVector2D(1000.0f, 620.0f));
+			AddImage(Tree, Panel, TEXT("GeneralBackground"),
+				TEXT("/Game/Botanicus/UI/Command/Textures/T_Command_GeneralBackground.T_Command_GeneralBackground"),
+				FVector2D(47.0f, 38.0f), FVector2D(906.0f, 544.0f));
+			AddImage(Tree, Panel, TEXT("ComputerFrame"),
+				TEXT("/Game/Botanicus/UI/Command/Textures/T_Command_Frame.T_Command_Frame"),
+				FVector2D::ZeroVector, FVector2D(1000.0f, 620.0f), 1);
+			AddText(Tree, Panel, TEXT("DeviceNameText"), TEXT("CHAUFFAGE"),
+				FVector2D(245.0f, 86.0f), FVector2D(510.0f, 58.0f),
+				30, true, ETextJustify::Center);
+			AddTexturedButton(Tree, Panel, TEXT("CloseButton"),
+				TEXT("/Game/Botanicus/UI/Command/Textures/T_Command_CloseNormal.T_Command_CloseNormal"),
+				TEXT("/Game/Botanicus/UI/Command/Textures/T_Command_ClosePressed.T_Command_ClosePressed"),
+				TEXT("CloseButtonText"), TEXT("FERMER"),
+				FVector2D(805.0f, 64.0f), FVector2D(135.0f, 64.0f));
+			AddTexturedButton(Tree, Panel, TEXT("PowerToggleButton"),
+				TEXT("/Game/Botanicus/UI/Command/Textures/T_Command_CloseNormal.T_Command_CloseNormal"),
+				TEXT("/Game/Botanicus/UI/Command/Textures/T_Command_ClosePressed.T_Command_ClosePressed"),
+				TEXT("PowerToggleText"), TEXT("ÉTEINDRE"),
+				FVector2D(350.0f, 232.0f), FVector2D(300.0f, 108.0f));
+			AddText(Tree, Panel, TEXT("PowerValueText"), TEXT("PUISSANCE : 100%"),
+				FVector2D(260.0f, 414.0f), FVector2D(480.0f, 42.0f),
+				22, true, ETextJustify::Center);
+			USlider* Slider = Tree->ConstructWidget<USlider>(
+				USlider::StaticClass(), TEXT("PowerSlider"));
+			Slider->SetValue(1.0f);
+			Slider->SetStepSize(0.01f);
+			Slider->SetSliderBarColor(FLinearColor(0.12f, 0.58f, 0.30f, 1.0f));
+			Slider->SetSliderHandleColor(FLinearColor(1.0f, 0.52f, 0.18f, 1.0f));
+			AddToCanvas(Panel, Slider, FVector2D(230.0f, 475.0f),
+				FVector2D(540.0f, 48.0f), 5);
 		}
 		else if (Type == TEXT("Credits"))
 		{
@@ -419,6 +532,35 @@ bool UBotanicusHudEditorLibrary::BuildEditableHudElement(
 				FVector2D(191.0f, 124.0f), FVector2D(86.0f, 32.0f),
 				19, true, ETextJustify::Center);
 		}
+		else if (Type == TEXT("PlantEnvironmentAlerts"))
+		{
+			AddImage(Tree, Root, TEXT("TemperatureImage"),
+				TEXT("/Game/Botanicus/UI/Plant/Environment/T_PlantEnvironment_TemperatureLow.T_PlantEnvironment_TemperatureLow"),
+				FVector2D(4.0f, 0.0f), FVector2D(72.0f, 72.0f));
+			AddImage(Tree, Root, TEXT("AirHumidityImage"),
+				TEXT("/Game/Botanicus/UI/Plant/Environment/T_PlantEnvironment_HumidityLow.T_PlantEnvironment_HumidityLow"),
+				FVector2D(84.0f, 0.0f), FVector2D(72.0f, 72.0f));
+			AddImage(Tree, Root, TEXT("LuminosityImage"),
+				TEXT("/Game/Botanicus/UI/Plant/Environment/T_PlantEnvironment_LuminosityLow.T_PlantEnvironment_LuminosityLow"),
+				FVector2D(164.0f, 0.0f), FVector2D(72.0f, 72.0f));
+		}
+		else if (Type == TEXT("PlantEnvironmentDebug"))
+		{
+			UTextBlock* Temperature = AddText(
+				Tree, Root, TEXT("TemperatureText"), TEXT("TEMP : 20.0 C"),
+				FVector2D(4.0f, 2.0f), FVector2D(252.0f, 34.0f), 18, true);
+			UTextBlock* Humidity = AddText(
+				Tree, Root, TEXT("AirHumidityText"), TEXT("HUMIDITE : 50%"),
+				FVector2D(4.0f, 37.0f), FVector2D(252.0f, 34.0f), 18, true);
+			UTextBlock* Luminosity = AddText(
+				Tree, Root, TEXT("LuminosityText"), TEXT("LUMINOSITE : 50%"),
+				FVector2D(4.0f, 72.0f), FVector2D(252.0f, 34.0f), 18, true);
+			const FSlateColor DebugGreen(
+				FLinearColor(0.15f, 1.0f, 0.2f, 1.0f));
+			Temperature->SetColorAndOpacity(DebugGreen);
+			Humidity->SetColorAndOpacity(DebugGreen);
+			Luminosity->SetColorAndOpacity(DebugGreen);
+		}
 		else if (Type == TEXT("PlantInspection"))
 		{
 			AddImage(Tree, Root, TEXT("QualityBackground"),
@@ -492,6 +634,53 @@ bool UBotanicusHudEditorLibrary::AddCrosshairToLayout(
 		if (!Blueprint->WidgetVariableNameToGuidMap.Contains(TEXT("CrosshairDesignerGuide")))
 		{
 			Blueprint->OnVariableAdded(TEXT("CrosshairDesignerGuide"));
+		}
+	}
+	Blueprint->Modify();
+	Blueprint->MarkPackageDirty();
+	FKismetEditorUtilities::CompileBlueprint(Blueprint);
+	return Blueprint->Status != BS_Error;
+#else
+	return false;
+#endif
+}
+
+bool UBotanicusHudEditorLibrary::AddOutdoorEnvironmentToLayout(
+	UObject* WidgetBlueprintAsset)
+{
+#if WITH_EDITOR
+	UWidgetBlueprint* Blueprint = Cast<UWidgetBlueprint>(WidgetBlueprintAsset);
+	UWidgetTree* Tree = Blueprint ? Blueprint->WidgetTree : nullptr;
+	UCanvasPanel* Root = Tree ? Cast<UCanvasPanel>(Tree->RootWidget) : nullptr;
+	if (!Blueprint || !Tree || !Root)
+	{
+		return false;
+	}
+	if (!Tree->FindWidget(TEXT("OutdoorEnvironmentSlot")))
+	{
+		UNamedSlot* EnvironmentSlot = Tree->ConstructWidget<UNamedSlot>(
+			UNamedSlot::StaticClass(), TEXT("OutdoorEnvironmentSlot"));
+		UTextBlock* Guide = Tree->ConstructWidget<UTextBlock>(
+			UTextBlock::StaticClass(), TEXT("OutdoorEnvironmentDesignerGuide"));
+		Guide->SetText(FText::FromString(TEXT("ENVIRONNEMENT EXTERIEUR")));
+		Guide->SetJustification(ETextJustify::Center);
+		Guide->SetColorAndOpacity(FLinearColor(0.58f, 0.86f, 0.46f, 0.7f));
+		EnvironmentSlot->SetContent(Guide);
+		UCanvasPanelSlot* CanvasSlot = Root->AddChildToCanvas(EnvironmentSlot);
+		CanvasSlot->SetAnchors(FAnchors(0.0f, 0.0f));
+		CanvasSlot->SetAlignment(FVector2D::ZeroVector);
+		CanvasSlot->SetPosition(FVector2D(18.0f, 190.0f));
+		CanvasSlot->SetSize(FVector2D(420.0f, 66.0f));
+		CanvasSlot->SetZOrder(10);
+		if (!Blueprint->WidgetVariableNameToGuidMap.Contains(
+				TEXT("OutdoorEnvironmentSlot")))
+		{
+			Blueprint->OnVariableAdded(TEXT("OutdoorEnvironmentSlot"));
+		}
+		if (!Blueprint->WidgetVariableNameToGuidMap.Contains(
+				TEXT("OutdoorEnvironmentDesignerGuide")))
+		{
+			Blueprint->OnVariableAdded(TEXT("OutdoorEnvironmentDesignerGuide"));
 		}
 	}
 	Blueprint->Modify();

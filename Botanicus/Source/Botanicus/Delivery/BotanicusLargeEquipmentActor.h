@@ -35,6 +35,8 @@ public:
 	ABotanicusCharacter* GetHelper() const { return Helper; }
 	FName GetItemKey() const { return ItemKey; }
 	virtual void InitializeEquipment(FName InItemKey);
+	/** Starts carrying through furniture mode without invoking the furniture's use action. */
+	void BeginFurnitureMove(ABotanicusCharacter* Character);
 	bool RequiresTwoPlayers() const { return bCooperativeCarry; }
 	bool IsWaitingForHelper() const
 	{

@@ -64,10 +64,18 @@ float ReadSalePotBlueprintFloatSetting(
 	const FName PropertyName,
 	const float Fallback)
 {
-	if (const FFloatProperty* Property =
-		FindFProperty<FFloatProperty>(Object->GetClass(), PropertyName))
+	const FProperty* Property =
+		FindFProperty<FProperty>(Object->GetClass(), PropertyName);
+	if (const FFloatProperty* FloatProperty =
+			CastField<FFloatProperty>(Property))
 	{
-		return Property->GetPropertyValue_InContainer(Object);
+		return FloatProperty->GetPropertyValue_InContainer(Object);
+	}
+	if (const FDoubleProperty* DoubleProperty =
+			CastField<FDoubleProperty>(Property))
+	{
+		return static_cast<float>(
+			DoubleProperty->GetPropertyValue_InContainer(Object));
 	}
 	return Fallback;
 }

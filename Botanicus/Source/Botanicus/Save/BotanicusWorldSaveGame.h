@@ -26,6 +26,20 @@ struct BOTANICUS_API FBotanicusSavedBuildingActor
 
 	UPROPERTY()
 	int32 ElementalGreenhouseLevel = 1;
+
+	/** Unified greenhouse state introduced in save version 27. */
+	UPROPERTY()
+	int32 GreenhouseLevel = 1;
+
+	UPROPERTY()
+	float GreenhouseTemperatureCelsius = 20.0f;
+
+	UPROPERTY()
+	float GreenhouseAirHumidityPercent = 50.0f;
+
+	UPROPERTY()
+	float GreenhouseLuminosityPercent = 50.0f;
+
 };
 
 USTRUCT()
@@ -234,6 +248,19 @@ struct BOTANICUS_API FBotanicusSavedWorldItem
 
 	UPROPERTY()
 	int32 PreparationWorkbenchLevel = 1;
+
+	/** Climate furniture state introduced in save version 28. */
+	UPROPERTY()
+	bool bClimateDeviceEnabled = true;
+
+	UPROPERTY()
+	float ClimateDeviceInfluenceRadius = 500.0f;
+
+	UPROPERTY()
+	float ClimateDeviceMaximumEffectStrength = 0.0f;
+
+	UPROPERTY()
+	float ClimateDevicePowerLevel = 1.0f;
 };
 
 /** Server-owned persistent state for one Botanicus map. */
@@ -244,7 +271,7 @@ class BOTANICUS_API UBotanicusWorldSaveGame : public USaveGame
 
 public:
 	UPROPERTY()
-	int32 SaveVersion = 26;
+	int32 SaveVersion = 30;
 
 	UPROPERTY()
 	FString MapName;

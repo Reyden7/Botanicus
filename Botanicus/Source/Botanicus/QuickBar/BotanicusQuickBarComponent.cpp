@@ -514,6 +514,15 @@ void UBotanicusQuickBarComponent::SelectSlot(int32 SlotIndex)
 	{
 		return;
 	}
+	const APawn* OwnerPawn = Cast<APawn>(GetOwner());
+	const ABotanicusPlayerController* BotanicusController = OwnerPawn
+		? Cast<ABotanicusPlayerController>(OwnerPawn->GetController())
+		: nullptr;
+	if (BotanicusController &&
+		BotanicusController->IsMovingWorldItemOutsideInventory())
+	{
+		return;
+	}
 
 	SetSelectedSlotInternal(SlotIndex);
 
@@ -630,6 +639,15 @@ bool UBotanicusQuickBarComponent::SwapSlotsAuthoritative(
 void UBotanicusQuickBarComponent::ActivateSelectedSlot()
 {
 	if (!CanLocallyControlQuickBar() || GetSelectedSlot().IsEmpty())
+	{
+		return;
+	}
+	const APawn* OwnerPawn = Cast<APawn>(GetOwner());
+	const ABotanicusPlayerController* BotanicusController = OwnerPawn
+		? Cast<ABotanicusPlayerController>(OwnerPawn->GetController())
+		: nullptr;
+	if (BotanicusController &&
+		BotanicusController->IsMovingWorldItemOutsideInventory())
 	{
 		return;
 	}
@@ -766,6 +784,15 @@ void UBotanicusQuickBarComponent::ActivateSelectedSlotOnServer()
 	{
 		return;
 	}
+	const APawn* OwnerPawn = Cast<APawn>(OwnerActor);
+	const ABotanicusPlayerController* BotanicusController = OwnerPawn
+		? Cast<ABotanicusPlayerController>(OwnerPawn->GetController())
+		: nullptr;
+	if (BotanicusController &&
+		BotanicusController->IsMovingWorldItemOutsideInventory())
+	{
+		return;
+	}
 
 	const FBotanicusQuickBarSlot Slot = Slots[SelectedSlotIndex];
 	if (Slot.IsEmpty() || !IsItemKeyValid(Slot.ItemKey))
@@ -803,7 +830,13 @@ void UBotanicusQuickBarComponent::OnRep_SelectedSlotIndex()
 
 void UBotanicusQuickBarComponent::ServerSelectSlot_Implementation(int32 SlotIndex)
 {
-	if (IsValidSlotIndex(SlotIndex))
+	const APawn* OwnerPawn = Cast<APawn>(GetOwner());
+	const ABotanicusPlayerController* BotanicusController = OwnerPawn
+		? Cast<ABotanicusPlayerController>(OwnerPawn->GetController())
+		: nullptr;
+	if (IsValidSlotIndex(SlotIndex) &&
+		(!BotanicusController ||
+		 !BotanicusController->IsMovingWorldItemOutsideInventory()))
 	{
 		SetSelectedSlotInternal(SlotIndex);
 	}

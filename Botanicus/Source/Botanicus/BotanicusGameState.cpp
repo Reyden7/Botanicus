@@ -34,6 +34,7 @@ void ABotanicusGameState::Tick(float DeltaSeconds)
 		FMath::Fmod(
 			DayTimeMinutes + FMath::Max(0.0f, DeltaSeconds),
 			1440.0f);
+	RefreshOutdoorEnvironment();
 	if (DidClockCrossMinute(
 			PreviousMinute,
 			DayTimeMinutes,
@@ -77,6 +78,7 @@ void ABotanicusGameState::GetLifetimeReplicatedProps(
 	DOREPLIFETIME(ABotanicusGameState, LastDayRevenueTarget);
 	DOREPLIFETIME(ABotanicusGameState, DevelopmentTimeScale);
 	DOREPLIFETIME(ABotanicusGameState, DayTimeMinutes);
+	DOREPLIFETIME(ABotanicusGameState, OutdoorEnvironment);
 	DOREPLIFETIME(ABotanicusGameState, TotalPlantsSold);
 	DOREPLIFETIME(ABotanicusGameState, TotalCatalogOrders);
 	DOREPLIFETIME(ABotanicusGameState, ShopReputationPoints);
@@ -258,6 +260,7 @@ void ABotanicusGameState::InitializeDayCycle(
 		FMath::Fmod(
 			FMath::Max(0.0f, InDayTimeMinutes),
 			1440.0f);
+	RefreshOutdoorEnvironment();
 	if (!bShopDayActive)
 	{
 		DailyPlantsSold = 0;
@@ -385,6 +388,23 @@ void ABotanicusGameState::ApplyDevelopmentTimeScale()
 	}
 }
 
+void ABotanicusGameState::RefreshOutdoorEnvironment()
+{
+	const UBotanicusSeasonSettings* Settings =
+		GetDefault<UBotanicusSeasonSettings>();
+	if (!Settings)
+	{
+		return;
+	}
+	const FBotanicusOutdoorEnvironmentState NewEnvironment =
+		Settings->EvaluateEnvironment(CurrentDayNumber, DayTimeMinutes);
+	if (!OutdoorEnvironment.IsNearlyEqual(NewEnvironment))
+	{
+		OutdoorEnvironment = NewEnvironment;
+		ForceNetUpdate();
+	}
+}
+
 bool ABotanicusGameState::DidClockCrossMinute(
 	float PreviousMinute,
 	float CurrentMinute,
@@ -427,6 +447,7 @@ void ABotanicusGameState::FinishShopDay()
 	LastDayRevenueTarget = GetDailyRevenueTarget();
 	++DaySummaryRevision;
 	++CurrentDayNumber;
+	RefreshOutdoorEnvironment();
 	bShopDayActive = false;
 	DailyPlantsSold = 0;
 	DailyRevenue = 0;

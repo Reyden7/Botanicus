@@ -10,6 +10,7 @@ class UBotanicusClockWidget;
 class UBotanicusCrosshairWidget;
 class UBotanicusHudMessageWidget;
 class UBotanicusInteractionTargetWidget;
+class UBotanicusOutdoorEnvironmentWidget;
 class UBotanicusQuickBarWidget;
 class UBotanicusReputationWidget;
 class UBotanicusSharedFundsWidget;
@@ -27,6 +28,10 @@ class BOTANICUS_API UBotanicusHudLayoutWidget : public UUserWidget
 
 public:
 	UBotanicusClockWidget* GetClockWidget() const { return ClockWidget; }
+	UBotanicusOutdoorEnvironmentWidget* GetOutdoorEnvironmentWidget() const
+	{
+		return OutdoorEnvironmentWidget;
+	}
 	UBotanicusSharedFundsWidget* GetCreditsWidget() const { return CreditsWidget; }
 	UBotanicusReputationWidget* GetReputationWidget() const { return ReputationWidget; }
 	UBotanicusShopObjectivesWidget* GetObjectivesWidget() const { return ObjectivesWidget; }
@@ -47,6 +52,11 @@ private:
 
 	UPROPERTY(meta=(BindWidget))
 	TObjectPtr<UNamedSlot> ClockSlot;
+
+	// Optional during migration of older WBP_BotanicusHUD assets; the editor
+	// migration adds this named slot without rebuilding the user's layout.
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNamedSlot> OutdoorEnvironmentSlot;
 
 	UPROPERTY(meta=(BindWidget))
 	TObjectPtr<UNamedSlot> CreditsSlot;
@@ -71,6 +81,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusClockWidget> ClockWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBotanicusOutdoorEnvironmentWidget> OutdoorEnvironmentWidget;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusSharedFundsWidget> CreditsWidget;

@@ -17,10 +17,12 @@
 #include "Components/ActorComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Components/MeshComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/OverlapResult.h"
+#include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
@@ -41,6 +43,7 @@
 #include "BotanicusGameState.h"
 #include "Building/BotanicusCatalogBuildingActor.h"
 #include "Building/BotanicusCommunicationDoorActor.h"
+#include "Building/BotanicusElementalGreenhouseActor.h"
 #include "Catalog/BotanicusBuildingCatalogSubsystem.h"
 #include "Catalog/BotanicusItemCatalogSubsystem.h"
 #include "Delivery/BotanicusDeliveryParcelActor.h"
@@ -50,6 +53,7 @@
 #include "Decoration/BotanicusBrokenFlowerPotActor.h"
 #include "DrawDebugHelpers.h"
 #include "Economy/BotanicusRefundZoneActor.h"
+#include "Environment/BotanicusClimateDeviceActor.h"
 #include "Growing/BotanicusPlantPotActor.h"
 #include "Growing/BotanicusPlantCatalog.h"
 #include "Growing/BotanicusPlantSubsystem.h"
@@ -72,6 +76,7 @@
 #include "UI/BotanicusClockWidget.h"
 #include "UI/BotanicusStorageQuantityWidget.h"
 #include "UI/BotanicusInteractionTargetWidget.h"
+#include "UI/BotanicusClimateDeviceControlWidget.h"
 #include "UI/BotanicusHudMessageWidget.h"
 #include "UI/BotanicusHudLayoutWidget.h"
 #include "UI/BotanicusThrowPowerWidget.h"
@@ -99,6 +104,40 @@ namespace
 	{
 		return ItemKey == TEXT("SalePot") ||
 			ItemKey == TEXT("SalePotSquare");
+	}
+
+	bool IsPreparedPotActor(
+		const ABotanicusPlaceableItemActor* WorldItem)
+	{
+		if (const ABotanicusMultiPlantPotActor* MultiPlanter =
+				Cast<ABotanicusMultiPlantPotActor>(WorldItem))
+		{
+			if (MultiPlanter->GetSoilUnits() > 0)
+			{
+				return true;
+			}
+			for (const FBotanicusMultiPlantSlotState& Slot :
+				 MultiPlanter->GetPlantSlots())
+			{
+				if (!Slot.PlantKey.IsNone())
+				{
+					return true;
+				}
+			}
+			return false;
+		}
+		if (const ABotanicusPlantPotActor* PlantPot =
+				Cast<ABotanicusPlantPotActor>(WorldItem))
+		{
+			return PlantPot->HasSoil() ||
+				!PlantPot->GetPlantKey().IsNone();
+		}
+		if (const ABotanicusSalePotActor* SalePot =
+				Cast<ABotanicusSalePotActor>(WorldItem))
+		{
+			return SalePot->HasSoil() || SalePot->IsReadyForSale();
+		}
+		return false;
 	}
 
 	bool CanCharacterUseWaterReserve(
@@ -1110,6 +1149,7 @@ void ABotanicusPlayerController::PlayerTick(float DeltaTime)
 		}
 	}
 	UpdateLargeEquipmentPlacement(DeltaTime);
+	UpdateHeldWorldItemPreview();
 	UpdateQuickBarItemPlacement(DeltaTime);
 	UpdateEquippedQuickBarItem();
 	UpdateThrowPowerWidget();
@@ -1305,6 +1345,13 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		}
 	}
 
+	// While a prepared pot is held outside the inventory, E cannot trigger
+	// another world interaction. Placement controls are handled below.
+	if (IsValid(LocalMovedPlaceableItem) && Params.Key == EKeys::E)
+	{
+		return true;
+	}
+
 	if (Params.Key == EKeys::LeftShift &&
 		Params.Event == IE_Pressed &&
 		!bBuildingTopDownViewActive &&
@@ -1396,7 +1443,8 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 			{
 				CancelLargeEquipmentPlacement();
 			}
-			if (IsValid(LocalQuickBarItemPreview))
+			if (IsValid(LocalQuickBarItemPreview) ||
+				IsValid(LocalMovedPlaceableItem))
 			{
 				CancelQuickBarItemPlacement();
 			}
@@ -1436,6 +1484,24 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		if (IsValid(LocalParcelMoveCandidate))
 		{
 			CancelParcelMoveCharge();
+			return true;
+		}
+	}
+
+	if (Params.Key == EKeys::E &&
+		Params.Event == IE_Pressed &&
+		!bBuildingTopDownViewActive &&
+		!bFurnitureMoveModeActive)
+	{
+		if (ABotanicusClimateDeviceActor* ClimateDevice =
+				Cast<ABotanicusClimateDeviceActor>(
+					LocalInteractionHighlightActor.Get());
+			IsValid(ClimateDevice) &&
+			ClimateDevice->CanInteract_Implementation(GetPawn()))
+		{
+			// Use exactly the actor represented by WBP_HUD_Interaction. This
+			// avoids a second, shorter interaction trace selecting no target.
+			OpenClimateDeviceControl(ClimateDevice);
 			return true;
 		}
 	}
@@ -1552,7 +1618,14 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 			 Params.Key == EKeys::Escape) &&
 			Params.Event == IE_Pressed)
 		{
-			CancelQuickBarItemPlacement();
+			if (IsValid(LocalMovedPlaceableItem))
+			{
+				ReturnMovedWorldItemToHand();
+			}
+			else
+			{
+				CancelQuickBarItemPlacement();
+			}
 			return true;
 		}
 	}
@@ -1593,9 +1666,43 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 			!IsValid(LocalQuickBarItemPreview) &&
 			!IsValid(LocalParcelMovePreview))
 		{
-			BeginQuickBarItemPlacement();
+			if (IsValid(LocalMovedPlaceableItem))
+			{
+				BeginHeldWorldItemPlacement();
+			}
+			else
+			{
+				BeginQuickBarItemPlacement();
+			}
 		}
 		return true;
+	}
+
+	// A prepared pot carried outside the inventory is deliberately inert
+	// until A starts its ground-placement preview. Right click/Escape returns
+	// it to its original position; other item-use clicks are consumed.
+	if (IsValid(LocalMovedPlaceableItem) &&
+		!IsValid(LocalQuickBarItemPreview) &&
+		!bBuildingTopDownViewActive)
+	{
+		if (Params.Key == EKeys::LeftMouseButton &&
+			Params.Event == IE_Pressed)
+		{
+			TryPlaceHeldSalePotOnWorkbench();
+			return true;
+		}
+		if ((Params.Key == EKeys::RightMouseButton ||
+			 Params.Key == EKeys::Escape) &&
+			Params.Event == IE_Pressed)
+		{
+			CancelQuickBarItemPlacement();
+		}
+		if (Params.Key == EKeys::LeftMouseButton ||
+			Params.Key == EKeys::RightMouseButton ||
+			Params.Key == EKeys::Escape)
+		{
+			return true;
+		}
 	}
 
 	if (Params.Key == EKeys::MiddleMouseButton &&
@@ -1935,7 +2042,16 @@ bool ABotanicusPlayerController::IsQuickBarInputBlocked() const
 	return bBuildingTopDownViewActive ||
 		bQuickBarReorganizationMode ||
 		IsValid(LocalQuickBarItemPreview) ||
-		IsValid(LocalParcelMovePreview);
+		IsValid(LocalParcelMovePreview) ||
+		IsValid(LocalMovedPlaceableItem) ||
+		IsValid(ServerMovedPlaceableItem);
+}
+
+bool ABotanicusPlayerController::
+	IsMovingWorldItemOutsideInventory() const
+{
+	return IsValid(LocalMovedPlaceableItem) ||
+		IsValid(ServerMovedPlaceableItem);
 }
 
 void ABotanicusPlayerController::ToggleFurnitureMoveMode()
@@ -1991,7 +2107,8 @@ bool ABotanicusPlayerController::IsFurnitureActor(
 		ItemKey == TEXT("SalesDisplay") ||
 		ItemKey == TEXT("WaterReserve") ||
 		ItemKey.ToString().StartsWith(TEXT("WorkSurface")) ||
-		ItemKey.ToString().StartsWith(TEXT("StorageShelf"));
+		ItemKey.ToString().StartsWith(TEXT("StorageShelf")) ||
+		ItemKey.ToString().StartsWith(TEXT("Climate"));
 }
 
 void ABotanicusPlayerController::SetFurnitureActorHighlighted(
@@ -2109,6 +2226,7 @@ void ABotanicusPlayerController::RefreshInteractionTargetHighlight()
 		bFurnitureMoveModeActive ||
 		bBuildingTopDownViewActive ||
 		IsValid(LocalLargeEquipmentPlacement) ||
+		IsValid(LocalMovedPlaceableItem) ||
 		IsValid(LocalQuickBarItemPreview) ||
 		IsValid(LocalParcelMovePreview) ||
 		(DevelopmentPanelWidget &&
@@ -2119,7 +2237,9 @@ void ABotanicusPlayerController::RefreshInteractionTargetHighlight()
 			 ESlateVisibility::Visible) ||
 		(OrderCatalogWidget &&
 		 OrderCatalogWidget->GetVisibility() ==
-			 ESlateVisibility::Visible);
+			 ESlateVisibility::Visible) ||
+		(ClimateDeviceControlWidget &&
+		 ClimateDeviceControlWidget->IsInViewport());
 
 	if (!bInteractionViewBlocked && GetWorld() && GetPawn())
 	{
@@ -2179,6 +2299,15 @@ void ABotanicusPlayerController::RefreshInteractionTargetHighlight()
 				SalesDisplay->IsDisplayedSalePotTargeted(GetPawn()))
 			{
 				NewTarget = SalesDisplay;
+			}
+			else if (ABotanicusClimateDeviceActor* ClimateDevice =
+					Cast<ABotanicusClimateDeviceActor>(HitActor);
+				IsValid(ClimateDevice) &&
+				ClimateDevice->CanInteract_Implementation(GetPawn()))
+			{
+				// Climate devices are movable furniture, but their normal-mode
+				// power action must still be presented by WBP_HUD_Interaction.
+				NewTarget = ClimateDevice;
 			}
 			else if (IsValid(HitActor) &&
 				!HitActor->ActorHasTag(
@@ -2364,6 +2493,23 @@ void ABotanicusPlayerController::RefreshInteractionTargetName(
 				"BotanicusInteraction",
 				"ComputerTargetName",
 				"Ordinateur"));
+		return;
+	}
+	if (const ABotanicusClimateDeviceActor* ClimateDevice =
+			Cast<ABotanicusClimateDeviceActor>(TargetActor))
+	{
+		if (bFurnitureMoveModeActive ||
+			!ClimateDevice->CanInteract_Implementation(GetPawn()))
+		{
+			InteractionTargetWidget->ClearTarget();
+			return;
+		}
+		InteractionTargetWidget->SetKeyboardPrompt(
+			NSLOCTEXT(
+				"BotanicusInteraction",
+				"ConfigureClimateDeviceAction",
+				"POUR CONFIGURER"),
+			ClimateDevice->GetInteractionPrompt_Implementation(GetPawn()).TargetName);
 		return;
 	}
 
@@ -2587,6 +2733,77 @@ void ABotanicusPlayerController::RefreshInteractionTargetName(
 			TargetName);
 	}
 	InteractionTargetWidget->SetTargetName(TargetName);
+}
+
+void ABotanicusPlayerController::OpenClimateDeviceControl(
+	ABotanicusClimateDeviceActor* ClimateDevice)
+{
+	if (!IsLocalPlayerController() || bFurnitureMoveModeActive ||
+		!IsValid(ClimateDevice))
+	{
+		return;
+	}
+	if (!ClimateDeviceControlWidget)
+	{
+		UClass* WidgetClass = LoadClass<UBotanicusClimateDeviceControlWidget>(
+			nullptr,
+			TEXT("/Game/Botanicus/UI/ClimateDevice/WBP_ClimateDeviceControl.WBP_ClimateDeviceControl_C"));
+		if (!WidgetClass)
+		{
+			WidgetClass = UBotanicusClimateDeviceControlWidget::StaticClass();
+		}
+		ClimateDeviceControlWidget =
+			CreateWidget<UBotanicusClimateDeviceControlWidget>(this, WidgetClass);
+	}
+	if (!ClimateDeviceControlWidget)
+	{
+		return;
+	}
+	if (!ClimateDeviceControlWidget->IsInViewport())
+	{
+		ClimateDeviceControlWidget->AddToViewport(250);
+	}
+	ClimateDeviceControlWidget->OpenForDevice(ClimateDevice);
+	SetIgnoreMoveInput(true);
+	SetIgnoreLookInput(true);
+	bShowMouseCursor = true;
+	FInputModeUIOnly InputMode;
+	InputMode.SetWidgetToFocus(ClimateDeviceControlWidget->TakeWidget());
+	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	SetInputMode(InputMode);
+}
+
+void ABotanicusPlayerController::CloseClimateDeviceControl()
+{
+	if (ClimateDeviceControlWidget)
+	{
+		ClimateDeviceControlWidget->RemoveFromParent();
+		ClimateDeviceControlWidget = nullptr;
+	}
+	SetIgnoreMoveInput(false);
+	SetIgnoreLookInput(false);
+	bShowMouseCursor = false;
+	SetInputMode(FInputModeGameOnly());
+}
+
+void ABotanicusPlayerController::RequestToggleClimateDevice(
+	ABotanicusClimateDeviceActor* ClimateDevice)
+{
+	if (!bFurnitureMoveModeActive && IsValid(ClimateDevice))
+	{
+		ServerInteractClimateDevice(ClimateDevice);
+	}
+}
+
+void ABotanicusPlayerController::RequestSetClimateDevicePower(
+	ABotanicusClimateDeviceActor* ClimateDevice,
+	float PowerLevel)
+{
+	if (!bFurnitureMoveModeActive && IsValid(ClimateDevice))
+	{
+		ServerSetClimateDevicePower(
+			ClimateDevice, FMath::Clamp(PowerLevel, 0.0f, 1.0f));
+	}
 }
 
 void ABotanicusPlayerController::EnterBuildingTopDownView()
@@ -3717,30 +3934,6 @@ void ABotanicusPlayerController::ZoomBuildingCamera(float Direction)
 		return;
 	}
 
-	if (LocalBuildingGroup.Num() > 0)
-	{
-		if (!bBuildingCameraOrbitInitialized)
-		{
-			InitializeBuildingCameraOrbitFromCurrentView();
-		}
-		const float MinimumDistance =
-			FMath::Min(
-				MinimumBuildingCameraHeight,
-				MaximumBuildingCameraHeight);
-		const float MaximumDistance =
-			FMath::Max(
-				MinimumBuildingCameraHeight,
-				MaximumBuildingCameraHeight);
-		BuildingCameraOrbitDistance = FMath::Clamp(
-			BuildingCameraOrbitDistance -
-				Direction * BuildingCameraZoomStep,
-			MinimumDistance,
-			MaximumDistance);
-		ApplyBuildingCameraOrbit();
-		return;
-	}
-
-	bBuildingCameraOrbitInitialized = false;
 	FVector CameraLocation = BuildingCameraActor->GetActorLocation();
 	float GroundHeight = 0.0f;
 	if (!FindLandscapeHeight(
@@ -3765,6 +3958,18 @@ void ABotanicusPlayerController::ZoomBuildingCamera(float Direction)
 
 	CameraLocation.Z = GroundHeight + NewHeight;
 	BuildingCameraActor->SetActorLocation(CameraLocation);
+
+	// Zoom always changes height only. When a building is selected, rebuild
+	// the orbit parameters from this unchanged X/Y position so a later orbit
+	// gesture starts smoothly without pulling the camera toward the building.
+	if (LocalBuildingGroup.Num() > 0)
+	{
+		InitializeBuildingCameraOrbitFromCurrentView();
+	}
+	else
+	{
+		bBuildingCameraOrbitInitialized = false;
+	}
 }
 
 void ABotanicusPlayerController::BeginBuildingCameraOrbit()
@@ -4540,12 +4745,16 @@ void ABotanicusPlayerController::CloseOrderCatalogFromComputer()
 void ABotanicusPlayerController::FinishCloseOrderCatalogFromComputer()
 {
 	ActiveComputerView.Reset();
+	// Opening the computer catalog adds its own move/look input lock before the
+	// top-down view adds another one. Always release the computer lock, including
+	// when a purchase transitioned directly to top-down; otherwise leaving
+	// top-down only removes one lock and the character remains unable to walk.
+	SetIgnoreMoveInput(false);
+	SetIgnoreLookInput(false);
 	if (bBuildingTopDownViewActive)
 	{
 		return;
 	}
-	SetIgnoreMoveInput(false);
-	SetIgnoreLookInput(false);
 	bShowMouseCursor = false;
 	SetInputMode(FInputModeGameOnly());
 }
@@ -6157,6 +6366,56 @@ void ABotanicusPlayerController::ApplyCarriedItemState(
 	}
 }
 
+void ABotanicusPlayerController::CopyWorldItemStateToPreview(
+	const ABotanicusPlaceableItemActor* WorldItem,
+	ABotanicusPlaceableItemActor* Preview) const
+{
+	if (!IsValid(WorldItem) || !IsValid(Preview))
+	{
+		return;
+	}
+	if (const ABotanicusMultiPlantPotActor* Source =
+			Cast<ABotanicusMultiPlantPotActor>(WorldItem))
+	{
+		if (ABotanicusMultiPlantPotActor* Target =
+				Cast<ABotanicusMultiPlantPotActor>(Preview))
+		{
+			Target->RestoreMultiPlantState(
+				Source->GetSoilUnits(), Source->GetPlantSlots());
+		}
+		return;
+	}
+	if (const ABotanicusPlantPotActor* Source =
+			Cast<ABotanicusPlantPotActor>(WorldItem))
+	{
+		if (ABotanicusPlantPotActor* Target =
+				Cast<ABotanicusPlantPotActor>(Preview))
+		{
+			Target->RestoreGrowingState(
+				Source->HasSoil(),
+				Source->GetPlantKey(),
+				Source->GetWaterLevel(),
+				Source->GetGrowthProgress(),
+				Source->GetCareScore(),
+				Source->IsElementalDead());
+			Target->RestoreWateringCount(
+				Source->GetWateringCount());
+		}
+		return;
+	}
+	if (const ABotanicusSalePotActor* Source =
+			Cast<ABotanicusSalePotActor>(WorldItem))
+	{
+		if (ABotanicusSalePotActor* Target =
+				Cast<ABotanicusSalePotActor>(Preview))
+		{
+			Target->RestoreSalePotState(
+				Source->GetSoilItemKey(),
+				Source->GetPlantItemKey());
+		}
+	}
+}
+
 void ABotanicusPlayerController::HandleEquippedQuickBarChanged()
 {
 	bLocalEquippedQuickBarDirty = true;
@@ -6284,6 +6543,77 @@ void ABotanicusPlayerController::UpdateEquippedQuickBarItem()
 		LocalEquippedQuickBarItem->InitializePlacedItem(
 			DisplayItemKey,
 			1);
+		const UBotanicusPlantSubsystem* Plants =
+			GetGameInstance()
+				? GetGameInstance()->GetSubsystem<
+					UBotanicusPlantSubsystem>()
+				: nullptr;
+
+		// A transplanted plant keeps its exact species and growth progress outside
+		// the quick bar.  The harvested-item catalogue mesh is only a generic
+		// fallback, so replace it with the same growth-stage mesh that was visible
+		// in the pot before the plant was removed.
+		if (HasCarriedTransplant() && Plants)
+		{
+			const FBotanicusPlantDefinition* PlantDefinition =
+				Plants->FindPlant(CarriedTransplantPlantKey);
+			if (PlantDefinition)
+			{
+				TSoftObjectPtr<UStaticMesh> GrowthStageMeshReference;
+				if (CarriedTransplantGrowth >=
+					1.0f - KINDA_SMALL_NUMBER)
+				{
+					GrowthStageMeshReference =
+						PlantDefinition->MatureGrowthMesh;
+				}
+				else if (CarriedTransplantGrowth >= 0.70f)
+				{
+					GrowthStageMeshReference =
+						PlantDefinition->LargeGrowthMesh;
+				}
+				else if (CarriedTransplantGrowth >= 0.30f)
+				{
+					GrowthStageMeshReference =
+						PlantDefinition->MediumGrowthMesh;
+				}
+				else
+				{
+					GrowthStageMeshReference =
+						PlantDefinition->SmallGrowthMesh;
+				}
+
+				if (UStaticMesh* GrowthStageMesh =
+						GrowthStageMeshReference.IsNull()
+							? nullptr
+							: GrowthStageMeshReference.LoadSynchronous())
+				{
+					LocalEquippedQuickBarItem->Mesh->SetStaticMesh(
+						GrowthStageMesh);
+					LocalEquippedQuickBarItem->Mesh->
+						EmptyOverrideMaterials();
+
+					const float MeshHeight = FMath::Max(
+						0.01f,
+						GrowthStageMesh->GetBoundingBox().GetSize().Z);
+					const float VisualGrowth = FMath::Clamp(
+						CarriedTransplantGrowth,
+						0.02f,
+						1.0f);
+					const float MinimumHeight = FMath::Max(
+						0.1f,
+						PlantDefinition->MinimumGrowthVisualHeight);
+					const float MatureHeight = FMath::Max(
+						MinimumHeight,
+						PlantDefinition->MatureGrowthVisualHeight);
+					const float UniformScale = FMath::Lerp(
+						MinimumHeight,
+						MatureHeight,
+						VisualGrowth) / MeshHeight;
+					LocalEquippedQuickBarItem->Mesh->
+						SetRelativeScale3D(FVector(UniformScale));
+				}
+			}
+		}
 		if (!HasCarriedTransplant())
 		{
 			ApplyCarriedItemState(
@@ -6298,11 +6628,6 @@ void ABotanicusPlayerController::UpdateEquippedQuickBarItem()
 		// representation.  Only this local inspection actor is scaled down; the
 		// placement preview and the replicated world actor keep their authored
 		// dimensions.
-		const UBotanicusPlantSubsystem* Plants =
-			GetGameInstance()
-				? GetGameInstance()->GetSubsystem<
-					UBotanicusPlantSubsystem>()
-				: nullptr;
 		if (Plants && Plants->FindPlantByHarvestItem(DisplayItemKey))
 		{
 			LocalEquippedQuickBarItem->SetActorScale3D(
@@ -6478,7 +6803,8 @@ void ABotanicusPlayerController::ThrowSelectedQuickBarItem(
 }
 
 void ABotanicusPlayerController::BeginWorldItemMove(
-	ABotanicusPlaceableItemActor* WorldItem)
+	ABotanicusPlaceableItemActor* WorldItem,
+	bool bServerReservationAlreadyHeld)
 {
 	UWorld* World = GetWorld();
 	if (!IsLocalPlayerController() || !World || !GetPawn() ||
@@ -6514,25 +6840,69 @@ void ABotanicusPlayerController::BeginWorldItemMove(
 		PreviewClass =
 			ABotanicusPlaceableItemActor::StaticClass();
 	}
+	const bool bPreparedPot = IsPreparedPotActor(WorldItem);
 
 	FActorSpawnParameters SpawnParameters;
 	SpawnParameters.SpawnCollisionHandlingOverride =
 		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	ABotanicusPlaceableItemActor* Preview =
-		World->SpawnActor<ABotanicusPlaceableItemActor>(
-			PreviewClass,
-			WorldItem->GetActorTransform(),
-			SpawnParameters);
-	if (!Preview)
+	ABotanicusPlaceableItemActor* PlacementPreview = nullptr;
+	ABotanicusPlaceableItemActor* HeldPreview = nullptr;
+	if (bPreparedPot)
 	{
-		ClientMessage(TEXT("Impossible de deplacer cet objet."));
-		return;
+		HeldPreview =
+			World->SpawnActor<ABotanicusPlaceableItemActor>(
+				PreviewClass,
+				GetPawn()->GetActorTransform(),
+				SpawnParameters);
+		if (!HeldPreview)
+		{
+			if (bServerReservationAlreadyHeld)
+			{
+				ServerCancelPlaceableItemMove(WorldItem);
+			}
+			ClientMessage(TEXT("Impossible de prendre ce pot."));
+			return;
+		}
+
+		HeldPreview->SetReplicates(false);
+		HeldPreview->Tags.AddUnique(
+			TEXT("BotanicusInspectionPreview"));
+		HeldPreview->InitializePlacedItem(ItemKey, 1);
+		CopyWorldItemStateToPreview(WorldItem, HeldPreview);
+		HeldPreview->ConfigureAsLocalPreview(true);
+		HeldPreview->ConfigureAsLocalInspection();
+		const float HeldScaleFactor =
+			Cast<ABotanicusSalePotActor>(WorldItem)
+				? 0.75f
+				: 0.45f;
+		HeldPreview->SetActorScale3D(
+			HeldPreview->GetActorScale3D() * HeldScaleFactor);
+	}
+	else
+	{
+		PlacementPreview =
+			World->SpawnActor<ABotanicusPlaceableItemActor>(
+				PreviewClass,
+				WorldItem->GetActorTransform(),
+				SpawnParameters);
+		if (!PlacementPreview)
+		{
+			ClientMessage(TEXT("Impossible de deplacer cet objet."));
+			return;
+		}
+
+		PlacementPreview->Tags.AddUnique(
+			TEXT("BotanicusPlacementPreview"));
+		PlacementPreview->InitializePlacedItem(
+			ItemKey,
+			WorldItem->GetQuantity());
+		CopyWorldItemStateToPreview(WorldItem, PlacementPreview);
+		PlacementPreview->ConfigureAsLocalPreview(false);
 	}
 
-	Preview->Tags.AddUnique(TEXT("BotanicusPlacementPreview"));
-	Preview->InitializePlacedItem(ItemKey, WorldItem->GetQuantity());
-	Preview->ConfigureAsLocalPreview(false);
-	LocalQuickBarItemPreview = Preview;
+	DestroyEquippedQuickBarItem();
+	LocalQuickBarItemPreview = PlacementPreview;
+	LocalInspectedQuickBarItem = HeldPreview;
 	LocalMovedPlaceableItem = WorldItem;
 	LocalQuickBarItemSlotIndex = INDEX_NONE;
 	LocalQuickBarItemInstanceId.Invalidate();
@@ -6542,10 +6912,198 @@ void ABotanicusPlayerController::BeginWorldItemMove(
 	QuickBarItemPlacementYaw = WorldItem->GetActorRotation().Yaw;
 	QuickBarItemPreviewUpdateAccumulator = 1.0f;
 	bLocalQuickBarItemPlacementValid = false;
-	ServerBeginPlaceableItemMove(WorldItem);
+
+	if (!bServerReservationAlreadyHeld)
+	{
+		ServerBeginPlaceableItemMove(WorldItem);
+	}
+	if (bPreparedPot)
+	{
+		ClientMessage(
+			TEXT(
+				"Pot en main : appuyez sur A pour le poser au sol."));
+	}
+	else
+	{
+		ClientMessage(
+			TEXT(
+				"Deplacement : le placement suit votre regard, clic gauche pour valider, clic droit pour annuler."));
+	}
+}
+
+void ABotanicusPlayerController::BeginHeldWorldItemPlacement()
+{
+	UWorld* World = GetWorld();
+	if (!IsLocalPlayerController() || !World || !GetPawn() ||
+		!IsValid(LocalMovedPlaceableItem) ||
+		IsValid(LocalQuickBarItemPreview))
+	{
+		return;
+	}
+
+	UClass* PreviewClass = LocalMovedPlaceableItem->GetClass();
+	if (!PreviewClass ||
+		!PreviewClass->IsChildOf(
+			ABotanicusPlaceableItemActor::StaticClass()))
+	{
+		PreviewClass =
+			ABotanicusPlaceableItemActor::StaticClass();
+	}
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	ABotanicusPlaceableItemActor* PlacementPreview =
+		World->SpawnActor<ABotanicusPlaceableItemActor>(
+			PreviewClass,
+			LocalMovedPlaceableItem->GetActorTransform(),
+			SpawnParameters);
+	if (!PlacementPreview)
+	{
+		ClientMessage(TEXT("Impossible de preparer le placement du pot."));
+		return;
+	}
+
+	PlacementPreview->Tags.AddUnique(
+		TEXT("BotanicusPlacementPreview"));
+	PlacementPreview->InitializePlacedItem(
+		LocalQuickBarItemKey,
+		LocalQuickBarPlacementQuantity);
+	CopyWorldItemStateToPreview(
+		LocalMovedPlaceableItem,
+		PlacementPreview);
+	PlacementPreview->ConfigureAsLocalPreview(false);
+	LocalQuickBarItemPreview = PlacementPreview;
+	QuickBarItemPreviewUpdateAccumulator = 1.0f;
+	bLocalQuickBarItemPlacementValid = false;
 	ClientMessage(
 		TEXT(
-			"Deplacement : le placement suit votre regard, clic gauche pour valider, clic droit pour annuler."));
+			"Placement du pot : clic gauche pour poser, clic droit pour le reprendre en main."));
+	}
+
+bool ABotanicusPlayerController::TryPlaceHeldSalePotOnWorkbench()
+{
+	ABotanicusSalePotActor* SalePot =
+		Cast<ABotanicusSalePotActor>(LocalMovedPlaceableItem);
+	APawn* ControlledPawn = GetPawn();
+	UWorld* World = GetWorld();
+	if (!IsLocalPlayerController() || !World || !ControlledPawn ||
+		!IsValid(SalePot) || IsValid(LocalQuickBarItemPreview))
+	{
+		return false;
+	}
+
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	GetPlayerViewPoint(ViewLocation, ViewRotation);
+	ABotanicusPreparationWorkbenchActor* TargetWorkbench = nullptr;
+	FTransform TargetTransform;
+	float BestDistanceSquared = FMath::Square(600.0f);
+	for (TActorIterator<ABotanicusPreparationWorkbenchActor>
+			 WorkbenchIt(World);
+		 WorkbenchIt;
+		 ++WorkbenchIt)
+	{
+		if (WorkbenchIt->GetCarrier() ||
+			WorkbenchIt->IsInPlacementMode() ||
+			FVector::DistSquared(
+				ControlledPawn->GetActorLocation(),
+				WorkbenchIt->GetActorLocation()) >
+				FMath::Square(500.0f))
+		{
+			continue;
+		}
+
+		FTransform CandidateTransform;
+		int32 CandidateSlotIndex = INDEX_NONE;
+		if (!WorkbenchIt->FindAimedAvailableSalePotSlot(
+				ViewLocation,
+				ViewRotation.Vector(),
+				CandidateTransform,
+				CandidateSlotIndex,
+				SalePot))
+		{
+			continue;
+		}
+
+		const float DistanceSquared = FVector::DistSquared(
+			ViewLocation,
+			CandidateTransform.GetLocation());
+		if (DistanceSquared < BestDistanceSquared)
+		{
+			BestDistanceSquared = DistanceSquared;
+			TargetWorkbench = *WorkbenchIt;
+			TargetTransform = CandidateTransform;
+		}
+	}
+
+	if (!IsValid(TargetWorkbench))
+	{
+		ClientMessage(TEXT("Visez un emplacement libre de l'atelier."));
+		return false;
+	}
+
+	ServerConfirmPlaceableItemMove(
+		SalePot,
+		TargetTransform.GetLocation(),
+		TargetTransform.Rotator().Yaw);
+	if (IsValid(LocalInspectedQuickBarItem))
+	{
+		LocalInspectedQuickBarItem->Destroy();
+	}
+	LocalInspectedQuickBarItem = nullptr;
+	LocalMovedPlaceableItem = nullptr;
+	LocalQuickBarItemSlotIndex = INDEX_NONE;
+	LocalQuickBarItemInstanceId.Invalidate();
+	LocalQuickBarItemKey = NAME_None;
+	LocalQuickBarPlacementQuantity = 1;
+	bLocalQuickBarItemPlacementValid = false;
+	return true;
+}
+
+void ABotanicusPlayerController::UpdateHeldWorldItemPreview()
+{
+	if (!IsLocalPlayerController() || !GetPawn() ||
+		bBuildingTopDownViewActive ||
+		!IsValid(LocalMovedPlaceableItem) ||
+		!IsValid(LocalInspectedQuickBarItem))
+	{
+		return;
+	}
+
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	GetPlayerViewPoint(ViewLocation, ViewRotation);
+	const FVector ViewForward = ViewRotation.Vector();
+	const FVector ViewRight =
+		FRotationMatrix(ViewRotation).GetUnitAxis(EAxis::Y);
+	const FVector ViewUp =
+		FRotationMatrix(ViewRotation).GetUnitAxis(EAxis::Z);
+	LocalInspectedQuickBarItem->SetActorLocationAndRotation(
+		ViewLocation +
+			ViewForward * 85.0f +
+			ViewRight * 52.0f -
+			ViewUp * 22.0f,
+		FRotator(0.0f, ViewRotation.Yaw + 180.0f, 0.0f),
+		false,
+		nullptr,
+		ETeleportType::TeleportPhysics);
+}
+
+void ABotanicusPlayerController::ReturnMovedWorldItemToHand()
+{
+	if (!IsValid(LocalMovedPlaceableItem) ||
+		!IsValid(LocalQuickBarItemPreview))
+	{
+		return;
+	}
+
+	LocalQuickBarItemPreview->Destroy();
+	LocalQuickBarItemPreview = nullptr;
+	bLocalQuickBarItemPlacementValid = false;
+	QuickBarItemPreviewUpdateAccumulator = 1.0f;
+	ClientMessage(
+		TEXT("Pot repris en main : appuyez sur A pour le poser."));
 }
 
 void ABotanicusPlayerController::UpdateQuickBarItemPlacement(
@@ -6566,29 +7124,6 @@ void ABotanicusPlayerController::UpdateQuickBarItemPlacement(
 	}
 	QuickBarItemPreviewUpdateAccumulator = 0.0f;
 
-	FVector ViewLocation;
-	FRotator ViewRotation;
-	GetPlayerViewPoint(ViewLocation, ViewRotation);
-	if (IsValid(LocalInspectedQuickBarItem))
-	{
-		const FVector ViewForward = ViewRotation.Vector();
-		const FVector ViewRight =
-			FRotationMatrix(ViewRotation).GetUnitAxis(EAxis::Y);
-		const FVector ViewUp =
-			FRotationMatrix(ViewRotation).GetUnitAxis(EAxis::Z);
-		LocalInspectedQuickBarItem->SetActorLocationAndRotation(
-			ViewLocation +
-				ViewForward * 85.0f +
-				ViewRight * 52.0f -
-				ViewUp * 22.0f,
-			FRotator(
-				0.0f,
-				ViewRotation.Yaw + 180.0f,
-				0.0f),
-			false,
-			nullptr,
-			ETeleportType::TeleportPhysics);
-	}
 	const FVector RequestedLocation =
 		GetViewDirectedGroundPlacementLocation(
 			MinimumQuickBarItemPlacementDistance,
@@ -6666,7 +7201,7 @@ void ABotanicusPlayerController::UpdateQuickBarItemPlacement(
 			PlacementTransform,
 			LocalMovedPlaceableItem,
 			LocalQuickBarPlacementQuantity,
-			true);
+			!IsValid(LocalMovedPlaceableItem));
 	LocalQuickBarItemPreview->SetActorTransform(
 		PlacementTransform,
 		false,
@@ -7161,19 +7696,50 @@ bool ABotanicusPlayerController::ResolveQuickBarItemPlacement(
 {
 	UWorld* World = GetWorld();
 	APawn* ControlledPawn = GetPawn();
-	const FVector BoxExtent = IsValid(LocalQuickBarItemPreview)
-		? LocalQuickBarItemPreview->GetPlacementBoxExtent().GetAbs()
-		: IsValid(IgnoredWorldItem)
-			? CastChecked<ABotanicusPlaceableItemActor>(
-				IgnoredWorldItem)->GetPlacementBoxExtent().GetAbs()
-		: FVector(20.0f);
 	const FBotanicusItemDefinition* Definition =
 		FindItemDefinition(this, ItemKey);
+	FVector BoxExtent(20.0f);
+	float PlacementBottomOffset = BoxExtent.Z;
+	if (IsValid(LocalQuickBarItemPreview))
+	{
+		BoxExtent =
+			LocalQuickBarItemPreview->GetPlacementBoxExtent().GetAbs();
+		PlacementBottomOffset =
+			LocalQuickBarItemPreview->GetPlacementPivotToBottomOffset();
+	}
+	else if (const ABotanicusPlaceableItemActor* IgnoredPlaceable =
+			Cast<ABotanicusPlaceableItemActor>(IgnoredWorldItem))
+	{
+		BoxExtent = IgnoredPlaceable->GetPlacementBoxExtent().GetAbs();
+		PlacementBottomOffset =
+			IgnoredPlaceable->GetPlacementPivotToBottomOffset();
+	}
+	else if (Definition)
+	{
+		if (const UStaticMesh* DefinitionMesh =
+				Definition->WorldMesh.LoadSynchronous())
+		{
+			const FBoxSphereBounds MeshBounds =
+				DefinitionMesh->GetBounds();
+			const FVector DefinitionScale = Definition->WorldScale;
+			BoxExtent =
+				MeshBounds.BoxExtent * DefinitionScale.GetAbs();
+			PlacementBottomOffset = FMath::Max(
+				0.0f,
+				BoxExtent.Z -
+					MeshBounds.Origin.Z * DefinitionScale.Z);
+		}
+	}
 	const FVector EffectiveBoxExtent =
 		Definition &&
 			!Definition->CollisionHalfExtentOverride.IsNearlyZero()
 			? Definition->CollisionHalfExtentOverride.GetAbs()
 			: BoxExtent;
+	if (Definition &&
+		!Definition->CollisionHalfExtentOverride.IsNearlyZero())
+	{
+		PlacementBottomOffset = EffectiveBoxExtent.Z;
+	}
 	const int32 PlacementQuantity =
 		IsValid(IgnoredWorldItem)
 			? FMath::Max(
@@ -7491,7 +8057,7 @@ bool ABotanicusPlayerController::ResolveQuickBarItemPlacement(
 		RequestedLocation.X,
 		RequestedLocation.Y,
 		bFoundFloor
-			? FloorHit.ImpactPoint.Z + EffectiveBoxExtent.Z + 3.0f
+			? FloorHit.ImpactPoint.Z + PlacementBottomOffset + 3.0f
 			: RequestedLocation.Z);
 	const FQuat PlacementRotation =
 		FRotator(0.0f, RequestedYaw, 0.0f).Quaternion();
@@ -7530,9 +8096,15 @@ bool ABotanicusPlayerController::ResolveQuickBarItemPlacement(
 		FMath::Max(4.0f, EffectiveBoxExtent.Y - 3.0f),
 		FMath::Max(4.0f, EffectiveBoxExtent.Z - 4.0f));
 	TArray<FOverlapResult> Overlaps;
+	const FVector OverlapLocation =
+		PlacementLocation +
+		FVector(
+			0.0f,
+			0.0f,
+			EffectiveBoxExtent.Z - PlacementBottomOffset);
 	return !World->OverlapMultiByObjectType(
 		Overlaps,
-		PlacementLocation,
+		OverlapLocation,
 		PlacementRotation,
 		ObjectQuery,
 		FCollisionShape::MakeBox(TestExtent),
@@ -8427,7 +8999,14 @@ void ABotanicusPlayerController::UpdatePlaceableItemMoveCharge(
 		CarryProgressWidget->SetCarryProgress(0.0f);
 	}
 
-	BeginStorageCollectionQuantitySelection(ItemToMove);
+	if (IsPreparedPotActor(ItemToMove))
+	{
+		BeginWorldItemMove(ItemToMove, true);
+	}
+	else
+	{
+		BeginStorageCollectionQuantitySelection(ItemToMove);
+	}
 }
 
 void ABotanicusPlayerController::CancelPlaceableItemMoveCharge()
@@ -10579,6 +11158,27 @@ void ABotanicusPlayerController::ServerPurchaseCatalogBuilding_Implementation(
 			*BuildingKey.ToString());
 		return;
 	}
+	if (BuildingKey == TEXT("Greenhouse"))
+	{
+		for (TActorIterator<ABotanicusGreenhouseActor> It(World);
+			 It;
+			 ++It)
+		{
+			bool bIsTemplate = false;
+			for (const FName Tag : It->Tags)
+			{
+				bIsTemplate |= Tag.ToString().StartsWith(
+					TEXT("BotanicusTemplate_"));
+			}
+			if (!bIsTemplate &&
+				!It->ActorHasTag(TEXT("BotanicusPlacementPreview")))
+			{
+				ClientMessage(
+					TEXT("La pepiniere possede deja sa serre principale."));
+				return;
+			}
+		}
+	}
 	const int32 RequiredLevel =
 		FMath::Max(1, Definition->RequiredDevelopmentLevel);
 	if (BuildingProgressionLevel < RequiredLevel)
@@ -10620,8 +11220,7 @@ void ABotanicusPlayerController::ServerPurchaseCatalogBuilding_Implementation(
 	// and therefore cannot carry saved actor tags. Keep those maps usable by
 	// resolving distinct complete groups in proximity order.
 	const bool bSupportsLegacyBuildingTemplate =
-		BuildingKey == TEXT("GreenhouseCompact") ||
-		BuildingKey == TEXT("GreenhouseWorkshop");
+		BuildingKey == TEXT("Greenhouse");
 	if (!TemplateSeed && bSupportsLegacyBuildingTemplate)
 	{
 		TSet<TWeakObjectPtr<AActor>> VisitedTemplateActors;
@@ -10678,10 +11277,7 @@ void ABotanicusPlayerController::ServerPurchaseCatalogBuilding_Implementation(
 		Definition->FallbackPrefabClass.LoadSynchronous();
 	if (!FallbackPrefabClass)
 	{
-		FallbackPrefabClass =
-			BuildingKey == TEXT("GreenhouseWorkshop")
-				? ABotanicusWorkshopGreenhouseActor::StaticClass()
-				: ABotanicusCompactGreenhouseActor::StaticClass();
+		FallbackPrefabClass = ABotanicusGreenhouseActor::StaticClass();
 	}
 	if (TemplateGroup.Num() == 0 && !FallbackPrefabClass)
 	{
@@ -10797,6 +11393,21 @@ void ABotanicusPlayerController::ServerPurchaseCatalogBuilding_Implementation(
 		RefundPendingBuildingPurchase();
 		ClientMessage(TEXT("Impossible de réserver ce bâtiment."));
 		return;
+	}
+
+	// The purchased actors are the live replicated preview. Ignore Pawns on
+	// every machine until placement is confirmed so moving walls and floors
+	// cannot depenetrate or teleport players while following the cursor.
+	SetPurchasedBuildingPawnCollisionForAllPlayers(
+		PurchasedGroup,
+		false);
+	for (AActor* PurchasedActor : PurchasedGroup)
+	{
+		if (IsValid(PurchasedActor))
+		{
+			PurchasedActor->Tags.AddUnique(
+				TEXT("BotanicusPlacementPreview"));
+		}
 	}
 
 	ServerBuildingGroup.Reset(PurchasedGroup.Num());
@@ -11679,11 +12290,22 @@ void ABotanicusPlayerController::
 		return;
 	}
 
-	IBotanicusInteractable::Execute_Interact(
-		Equipment,
-		ControlledPawn);
-	if (ABotanicusCharacter* BotanicusCharacter =
-			Cast<ABotanicusCharacter>(ControlledPawn);
+	ABotanicusCharacter* BotanicusCharacter =
+		Cast<ABotanicusCharacter>(ControlledPawn);
+	if (bServerFurnitureMoveModeActive &&
+		IsFurnitureActor(Equipment))
+	{
+		// Furniture mode moves the whole actor without invoking its normal use
+		// action (turning a climate device on/off, opening a computer, etc.).
+		Equipment->BeginFurnitureMove(BotanicusCharacter);
+	}
+	else
+	{
+		IBotanicusInteractable::Execute_Interact(
+			Equipment,
+			ControlledPawn);
+	}
+	if (BotanicusCharacter &&
 		Equipment->GetCarrier() == BotanicusCharacter)
 	{
 		Equipment->BeginPlacement(BotanicusCharacter);
@@ -11700,6 +12322,51 @@ void ABotanicusPlayerController::
 	else if (WorkSurface)
 	{
 		WorkSurface->SetMoveContentsWithFurniture(false);
+	}
+}
+
+void ABotanicusPlayerController::
+	ServerInteractClimateDevice_Implementation(
+		ABotanicusClimateDeviceActor* ClimateDevice)
+{
+	APawn* ControlledPawn = GetPawn();
+	if (bServerFurnitureMoveModeActive ||
+		!IsValid(ClimateDevice) ||
+		!IsValid(ControlledPawn) ||
+		!ClimateDevice->CanInteract_Implementation(ControlledPawn) ||
+		FVector::DistSquared2D(
+			ControlledPawn->GetActorLocation(),
+			ClimateDevice->GetActorLocation()) > FMath::Square(350.0f) ||
+		!IsLookingAtWorldItem(ClimateDevice, 350.0f))
+	{
+		return;
+	}
+
+	IBotanicusInteractable::Execute_Interact(
+		ClimateDevice,
+		ControlledPawn);
+}
+
+void ABotanicusPlayerController::
+	ServerSetClimateDevicePower_Implementation(
+		ABotanicusClimateDeviceActor* ClimateDevice,
+		float PowerLevel)
+{
+	APawn* ControlledPawn = GetPawn();
+	if (bServerFurnitureMoveModeActive ||
+		!IsValid(ClimateDevice) ||
+		!IsValid(ControlledPawn) ||
+		FVector::DistSquared2D(
+			ControlledPawn->GetActorLocation(),
+			ClimateDevice->GetActorLocation()) > FMath::Square(350.0f))
+	{
+		return;
+	}
+	ClimateDevice->SetClimateDevicePowerLevel(PowerLevel);
+	if (ABotanicusGameMode* GameMode =
+		GetWorld() ? GetWorld()->GetAuthGameMode<ABotanicusGameMode>() : nullptr)
+	{
+		GameMode->ScheduleInventoryAutosave();
 	}
 }
 
@@ -12551,6 +13218,14 @@ void ABotanicusPlayerController::
 		ServerMovedPlaceableItem = nullptr;
 		return;
 	}
+	if (IsPreparedPotActor(WorldItem))
+	{
+		ClientMessage(
+			TEXT(
+				"Ce pot contient du terreau ou une plante : deplacez-le directement sans le ranger dans la hotbar."));
+		ServerMovedPlaceableItem = nullptr;
+		return;
+	}
 
 	const FBotanicusItemDefinition* Definition =
 		FindItemDefinition(this, WorldItem->GetItemKey());
@@ -12687,10 +13362,10 @@ void ABotanicusPlayerController::
 			WorldItem->GetItemKey(),
 			FVector(RequestedLocation),
 			RequestedYaw,
-			PlacementTransform,
-			WorldItem,
-			1,
-			true))
+		PlacementTransform,
+		WorldItem,
+		1,
+		false))
 	{
 		ClientMessage(TEXT("Deplacement refuse : position invalide."));
 		ServerMovedPlaceableItem = nullptr;
@@ -13743,6 +14418,10 @@ void ABotanicusPlayerController::ServerConfirmBuildingGroupMove_Implementation()
 	{
 		if (IsValid(Actor))
 		{
+			if (bServerBuildingPurchasePlacement)
+			{
+				Actor->Tags.Remove(TEXT("BotanicusPlacementPreview"));
+			}
 			Actor->ForceNetUpdate();
 		}
 	}
@@ -13758,6 +14437,9 @@ void ABotanicusPlayerController::ServerConfirmBuildingGroupMove_Implementation()
 	if (bConfirmingBuildingPurchase)
 	{
 		BroadcastPurchasedBuildingSnapshot(true);
+		SetPurchasedBuildingPawnCollisionForAllPlayers(
+			ServerBuildingGroup,
+			true);
 		if (const FBotanicusBuildingDefinition* PurchasedDefinition =
 			FindBuildingDefinition(
 				this,
@@ -13810,6 +14492,7 @@ void ABotanicusPlayerController::ServerCancelBuildingGroupMove_Implementation()
 {
 	if (bServerBuildingPurchasePlacement)
 	{
+		const TArray<AActor*> PurchasedActors = ServerBuildingGroup;
 		for (TActorIterator<ABotanicusPlayerController> ControllerIt(
 				 GetWorld());
 			 ControllerIt;
@@ -13817,7 +14500,14 @@ void ABotanicusPlayerController::ServerCancelBuildingGroupMove_Implementation()
 		{
 			ControllerIt->ClientCancelPurchasedBuildingSnapshot();
 		}
-		for (AActor* Actor : ServerBuildingGroup)
+		// Forget cached responses without re-enabling collision on actors that
+		// are about to be destroyed. Send this while their replicated references
+		// are still valid so every client can identify the cached components.
+		SetPurchasedBuildingPawnCollisionForAllPlayers(
+			PurchasedActors,
+			true,
+			false);
+		for (AActor* Actor : PurchasedActors)
 		{
 			if (IsValid(Actor))
 			{
@@ -13917,6 +14607,18 @@ void ABotanicusPlayerController::
 {
 	bLocalBuildingPlacementValid = bPlacementValid;
 	UpdateBuildingGroupPlacementVisual(bPlacementValid);
+}
+
+void ABotanicusPlayerController::
+	ClientSetPurchasedBuildingPawnCollision_Implementation(
+		const TArray<AActor*>& GroupActors,
+		bool bEnabled,
+		bool bRestoreOriginalResponses)
+{
+	SetBuildingGroupPawnCollision(
+		GroupActors,
+		bEnabled,
+		bRestoreOriginalResponses);
 }
 
 void ABotanicusPlayerController::
@@ -15413,6 +16115,101 @@ void ABotanicusPlayerController::ApplyServerBuildingGroupTransform(
 	}
 }
 
+void ABotanicusPlayerController::SetBuildingGroupPawnCollision(
+	const TArray<AActor*>& GroupActors,
+	bool bEnabled,
+	bool bRestoreOriginalResponses)
+{
+	if (!bEnabled)
+	{
+		for (AActor* Actor : GroupActors)
+		{
+			if (!IsValid(Actor))
+			{
+				continue;
+			}
+			TInlineComponentArray<UPrimitiveComponent*> Components(Actor);
+			for (UPrimitiveComponent* Component : Components)
+			{
+				if (!IsValid(Component) ||
+					Component->GetCollisionEnabled() ==
+						ECollisionEnabled::NoCollision ||
+					BuildingPawnCollisionComponents.Contains(Component))
+				{
+					continue;
+				}
+				BuildingPawnCollisionComponents.Add(Component);
+				BuildingPawnCollisionOriginalResponses.Add(
+					Component->GetCollisionResponseToChannel(ECC_Pawn));
+				Component->SetCollisionResponseToChannel(
+					ECC_Pawn,
+					ECR_Ignore);
+			}
+		}
+		return;
+	}
+
+	TSet<UPrimitiveComponent*> GroupComponents;
+	for (AActor* Actor : GroupActors)
+	{
+		if (!IsValid(Actor))
+		{
+			continue;
+		}
+		TInlineComponentArray<UPrimitiveComponent*> Components(Actor);
+		for (UPrimitiveComponent* Component : Components)
+		{
+			GroupComponents.Add(Component);
+		}
+	}
+
+	for (int32 Index = BuildingPawnCollisionComponents.Num() - 1;
+		 Index >= 0;
+		 --Index)
+	{
+		UPrimitiveComponent* Component =
+			BuildingPawnCollisionComponents[Index].Get();
+		if (IsValid(Component) && !GroupComponents.Contains(Component))
+		{
+			continue;
+		}
+		if (bRestoreOriginalResponses &&
+			IsValid(Component) &&
+			BuildingPawnCollisionOriginalResponses.IsValidIndex(Index))
+		{
+			Component->SetCollisionResponseToChannel(
+				ECC_Pawn,
+				BuildingPawnCollisionOriginalResponses[Index]);
+		}
+		BuildingPawnCollisionComponents.RemoveAtSwap(Index);
+		BuildingPawnCollisionOriginalResponses.RemoveAtSwap(Index);
+	}
+}
+
+void ABotanicusPlayerController::
+	SetPurchasedBuildingPawnCollisionForAllPlayers(
+		const TArray<AActor*>& GroupActors,
+		bool bEnabled,
+		bool bRestoreOriginalResponses)
+{
+	check(HasAuthority());
+	SetBuildingGroupPawnCollision(
+		GroupActors,
+		bEnabled,
+		bRestoreOriginalResponses);
+
+	for (TActorIterator<ABotanicusPlayerController> ControllerIt(
+			 GetWorld());
+		 ControllerIt;
+		 ++ControllerIt)
+	{
+		ControllerIt->ClientSetPurchasedBuildingPawnCollision(
+			GroupActors,
+			bEnabled,
+			bRestoreOriginalResponses);
+	}
+}
+
 void ABotanicusPlayerController::BroadcastPurchasedBuildingSnapshot(
 	bool bReliable)
 {
@@ -15513,6 +16310,7 @@ void ABotanicusPlayerController::TryApplyPurchasedBuildingSnapshot()
 			false,
 			nullptr,
 			ETeleportType::TeleportPhysics);
+		(*FoundActor)->UpdateComponentTransforms();
 		(*FoundActor)->MarkComponentsRenderStateDirty();
 		++AppliedActorCount;
 	}
@@ -15544,14 +16342,12 @@ void ABotanicusPlayerController::TryApplyPurchasedBuildingSnapshot()
 	PendingPurchasedBuildingTransforms.Reset();
 	PurchasedBuildingSnapshotRetryCount = 0;
 
-	// Only refresh EBS once all replicated actors exist locally. This is the
-	// refresh that entering top-down previously happened to trigger.
-	AdvanceEbsViewMode();
-	AdvanceEbsViewMode();
-	AdvanceEbsViewMode();
-	if (!bBuildingTopDownViewActive)
+	// Applying another player's building snapshot must never cycle EBS view
+	// modes: those calls can move the local camera or Pawn. Component transforms
+	// are already refreshed above; only reapply the local roof presentation.
+	if (bBuildingTopDownViewActive)
 	{
-		ForceFirstPersonView();
+		RefreshTopDownRoofVisibility();
 	}
 
 	UE_LOG(
@@ -15581,7 +16377,6 @@ bool ABotanicusPlayerController::
 	FCollisionQueryParams QueryParams(
 		SCENE_QUERY_STAT(BotanicusWholeBuildingPlacement),
 		false);
-	QueryParams.AddIgnoredActor(GetPawn());
 	for (AActor* GroupMember : ServerBuildingGroup)
 	{
 		QueryParams.AddIgnoredActor(GroupMember);

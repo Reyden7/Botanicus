@@ -20,8 +20,7 @@ namespace
 	constexpr float DoorWidth = 260.0f;
 }
 
-ABotanicusElementalGreenhouseActor::
-	ABotanicusElementalGreenhouseActor()
+ABotanicusGreenhouseActor::ABotanicusGreenhouseActor()
 {
 	FloorPart = AddBuildingPart(
 		TEXT("ElementalFloor"),
@@ -69,31 +68,39 @@ ABotanicusElementalGreenhouseActor::
 	RefreshGeometry();
 }
 
-void ABotanicusElementalGreenhouseActor::BeginPlay()
+void ABotanicusGreenhouseActor::BeginPlay()
 {
 	Super::BeginPlay();
 	RefreshGeometry();
 }
 
-void ABotanicusElementalGreenhouseActor::
+void ABotanicusGreenhouseActor::
 	GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(
-		ABotanicusElementalGreenhouseActor,
+		ABotanicusGreenhouseActor,
 		GreenhouseLevel);
+	DOREPLIFETIME(
+		ABotanicusGreenhouseActor,
+		TemperatureCelsius);
+	DOREPLIFETIME(
+		ABotanicusGreenhouseActor,
+		AirHumidityPercent);
+	DOREPLIFETIME(
+		ABotanicusGreenhouseActor,
+		LuminosityPercent);
 }
 
 FBotanicusInteractionPrompt
-ABotanicusElementalGreenhouseActor::
+ABotanicusGreenhouseActor::
 	GetInteractionPrompt_Implementation(AActor* Interactor) const
 {
 	FBotanicusInteractionPrompt Prompt;
 	Prompt.TargetName = FText::FromString(
 		FString::Printf(
-			TEXT("Serre %s - niveau %d"),
-			*GetElementLabel(),
+			TEXT("Serre principale - niveau %d"),
 			GreenhouseLevel));
 	if (GreenhouseLevel >= 3)
 	{
@@ -113,13 +120,13 @@ ABotanicusElementalGreenhouseActor::
 	return Prompt;
 }
 
-bool ABotanicusElementalGreenhouseActor::
+bool ABotanicusGreenhouseActor::
 	CanInteract_Implementation(AActor* Interactor) const
 {
 	return IsValid(Interactor) && GreenhouseLevel < 3;
 }
 
-void ABotanicusElementalGreenhouseActor::
+void ABotanicusGreenhouseActor::
 	Interact_Implementation(AActor* Interactor)
 {
 	if (!HasAuthority() ||
@@ -155,8 +162,7 @@ void ABotanicusElementalGreenhouseActor::
 	{
 		Controller->ClientMessage(
 			*FString::Printf(
-				TEXT("Serre %s amelioree au niveau %d."),
-				*GetElementLabel(),
+				TEXT("Serre principale amelioree au niveau %d."),
 				GreenhouseLevel));
 	}
 	if (ABotanicusGameMode* GameMode =
@@ -166,7 +172,7 @@ void ABotanicusElementalGreenhouseActor::
 	}
 }
 
-bool ABotanicusElementalGreenhouseActor::ContainsWorldLocation(
+bool ABotanicusGreenhouseActor::ContainsWorldLocation(
 	const FVector& WorldLocation) const
 {
 	const FVector Local =
@@ -178,47 +184,131 @@ bool ABotanicusElementalGreenhouseActor::ContainsWorldLocation(
 		Local.Z <= Size.Z;
 }
 
-void ABotanicusElementalGreenhouseActor::RestoreGreenhouseLevel(
-	int32 InLevel)
+float ABotanicusGreenhouseActor::GetTemperatureCelsius() const
+{
+	float Temperature = TemperatureCelsius;
+	float Humidity = AirHumidityPercent;
+	float Luminosity = LuminosityPercent;
+	GetEnvironmentAtLocation(
+		GetActorLocation(), Temperature, Humidity, Luminosity);
+	return Temperature;
+}
+
+float ABotanicusGreenhouseActor::GetAirHumidityPercent() const
+{
+	float Temperature = TemperatureCelsius;
+	float Humidity = AirHumidityPercent;
+	float Luminosity = LuminosityPercent;
+	GetEnvironmentAtLocation(
+		GetActorLocation(), Temperature, Humidity, Luminosity);
+	return Humidity;
+}
+
+float ABotanicusGreenhouseActor::GetLuminosityPercent() const
+{
+	float Temperature = TemperatureCelsius;
+	float Humidity = AirHumidityPercent;
+	float Luminosity = LuminosityPercent;
+	GetEnvironmentAtLocation(
+		GetActorLocation(), Temperature, Humidity, Luminosity);
+	return Luminosity;
+}
+
+void ABotanicusGreenhouseActor::GetEnvironmentAtLocation(
+	const FVector& WorldLocation,
+	float& OutTemperatureCelsius,
+	float& OutAirHumidityPercent,
+	float& OutLuminosityPercent) const
+{
+	OutTemperatureCelsius = TemperatureCelsius;
+	OutAirHumidityPercent = AirHumidityPercent;
+	OutLuminosityPercent = LuminosityPercent;
+	const ABotanicusGameState* GameState =
+		GetWorld()
+			? GetWorld()->GetGameState<ABotanicusGameState>()
+			: nullptr;
+	if (GameState)
+	{
+		OutTemperatureCelsius =
+			GameState->GetOutdoorTemperatureCelsius();
+		OutAirHumidityPercent =
+			GameState->GetOutdoorAirHumidityPercent();
+		OutLuminosityPercent =
+			GameState->GetOutdoorLuminosityPercent();
+	}
+	// WorldLocation is intentionally part of the API: upcoming climate devices
+	// will add their distance-based influence to these seasonal base values.
+	(void)WorldLocation;
+}
+
+void ABotanicusGreenhouseActor::SetEnvironmentValues(
+	float InTemperatureCelsius,
+	float InAirHumidityPercent,
+	float InLuminosityPercent)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	TemperatureCelsius = FMath::Clamp(
+		InTemperatureCelsius, -50.0f, 100.0f);
+	AirHumidityPercent = FMath::Clamp(
+		InAirHumidityPercent, 0.0f, 100.0f);
+	LuminosityPercent = FMath::Clamp(
+		InLuminosityPercent, 0.0f, 100.0f);
+	RefreshGeometry();
+	ForceNetUpdate();
+}
+
+void ABotanicusGreenhouseActor::RestoreGreenhouseState(
+	int32 InLevel,
+	float InTemperatureCelsius,
+	float InAirHumidityPercent,
+	float InLuminosityPercent)
 {
 	if (!HasAuthority())
 	{
 		return;
 	}
 	GreenhouseLevel = FMath::Clamp(InLevel, 1, 3);
+	TemperatureCelsius = FMath::Clamp(
+		InTemperatureCelsius, -50.0f, 100.0f);
+	AirHumidityPercent = FMath::Clamp(
+		InAirHumidityPercent, 0.0f, 100.0f);
+	LuminosityPercent = FMath::Clamp(
+		InLuminosityPercent, 0.0f, 100.0f);
 	RefreshGeometry();
 	ForceNetUpdate();
 }
 
-EBotanicusPlantElement
-ABotanicusElementalGreenhouseActor::
-	FindGreenhouseElementAtLocation(
+ABotanicusGreenhouseActor*
+ABotanicusGreenhouseActor::FindGreenhouseAtLocation(
 		const UWorld* World,
 		const FVector& WorldLocation)
 {
 	if (!World)
 	{
-		return EBotanicusPlantElement::Normal;
+		return nullptr;
 	}
-	for (TActorIterator<ABotanicusElementalGreenhouseActor> It(
+	for (TActorIterator<ABotanicusGreenhouseActor> It(
 			 const_cast<UWorld*>(World));
 		 It;
 		 ++It)
 	{
 		if (It->ContainsWorldLocation(WorldLocation))
 		{
-			return It->GetElement();
+			return *It;
 		}
 	}
-	return EBotanicusPlantElement::Normal;
+	return nullptr;
 }
 
-void ABotanicusElementalGreenhouseActor::OnRep_GreenhouseLevel()
+void ABotanicusGreenhouseActor::OnRep_GreenhouseState()
 {
 	RefreshGeometry();
 }
 
-void ABotanicusElementalGreenhouseActor::RefreshGeometry()
+void ABotanicusGreenhouseActor::RefreshGeometry()
 {
 	const FVector Size = GetLevelSize();
 	const float Width = Size.X;
@@ -291,15 +381,17 @@ void ABotanicusElementalGreenhouseActor::RefreshGeometry()
 		StatusText->SetText(
 			FText::FromString(
 				FString::Printf(
-					TEXT("SERRE %s - NIVEAU %d\nZONE DE CROISSANCE : %.0f x %.0f m"),
-					*GetElementLabel().ToUpper(),
+					TEXT("SERRE PRINCIPALE - NIVEAU %d\nZONE : %.0f x %.0f m\nTEMPERATURE : %.1f C | HUMIDITE : %.0f%% | LUMINOSITE : %.0f%%"),
 					GreenhouseLevel,
 					Width / 100.0f,
-					Depth / 100.0f)));
+					Depth / 100.0f,
+					GetTemperatureCelsius(),
+					GetAirHumidityPercent(),
+					GetLuminosityPercent())));
 	}
 }
 
-FVector ABotanicusElementalGreenhouseActor::GetLevelSize() const
+FVector ABotanicusGreenhouseActor::GetLevelSize() const
 {
 	switch (GreenhouseLevel)
 	{
@@ -312,44 +404,7 @@ FVector ABotanicusElementalGreenhouseActor::GetLevelSize() const
 	}
 }
 
-int32 ABotanicusElementalGreenhouseActor::GetNextUpgradeCost() const
+int32 ABotanicusGreenhouseActor::GetNextUpgradeCost() const
 {
 	return GreenhouseLevel <= 1 ? 1200 : 2500;
-}
-
-FString ABotanicusElementalGreenhouseActor::GetElementLabel() const
-{
-	switch (Element)
-	{
-	case EBotanicusPlantElement::Fire:
-		return TEXT("Feu");
-	case EBotanicusPlantElement::Water:
-		return TEXT("Eau");
-	case EBotanicusPlantElement::Ice:
-		return TEXT("Glace");
-	case EBotanicusPlantElement::Shadow:
-		return TEXT("Tenebres");
-	default:
-		return TEXT("Normale");
-	}
-}
-
-ABotanicusFireGreenhouseActor::ABotanicusFireGreenhouseActor()
-{
-	Element = EBotanicusPlantElement::Fire;
-}
-
-ABotanicusWaterGreenhouseActor::ABotanicusWaterGreenhouseActor()
-{
-	Element = EBotanicusPlantElement::Water;
-}
-
-ABotanicusIceGreenhouseActor::ABotanicusIceGreenhouseActor()
-{
-	Element = EBotanicusPlantElement::Ice;
-}
-
-ABotanicusShadowGreenhouseActor::ABotanicusShadowGreenhouseActor()
-{
-	Element = EBotanicusPlantElement::Shadow;
 }

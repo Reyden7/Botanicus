@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Environment/BotanicusSeasonSettings.h"
 #include "GameFramework/GameStateBase.h"
 #include "BotanicusGameState.generated.h"
 
@@ -87,6 +88,45 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="Botanicus|Day")
 	float GetDayTimeMinutes() const { return DayTimeMinutes; }
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Season")
+	FBotanicusOutdoorEnvironmentState GetOutdoorEnvironment() const
+	{
+		return OutdoorEnvironment;
+	}
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Season")
+	EBotanicusSeason GetCurrentSeason() const
+	{
+		return OutdoorEnvironment.Season;
+	}
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Season")
+	int32 GetCurrentSeasonDay() const
+	{
+		return OutdoorEnvironment.DayInSeason;
+	}
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Season")
+	int32 GetCurrentYear() const { return OutdoorEnvironment.Year; }
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Season|Environment")
+	float GetOutdoorTemperatureCelsius() const
+	{
+		return OutdoorEnvironment.TemperatureCelsius;
+	}
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Season|Environment")
+	float GetOutdoorAirHumidityPercent() const
+	{
+		return OutdoorEnvironment.AirHumidityPercent;
+	}
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Season|Environment")
+	float GetOutdoorLuminosityPercent() const
+	{
+		return OutdoorEnvironment.LuminosityPercent;
+	}
 
 	UFUNCTION(BlueprintPure, Category="Botanicus|Shop")
 	int32 GetTotalPlantsSold() const { return TotalPlantsSold; }
@@ -198,6 +238,7 @@ private:
 	void BeginShopDay();
 	void FinishShopDay();
 	void ApplyDevelopmentTimeScale();
+	void RefreshOutdoorEnvironment();
 	bool DidClockCrossMinute(
 		float PreviousMinute,
 		float CurrentMinute,
@@ -265,6 +306,9 @@ private:
 
 	UPROPERTY(ReplicatedUsing=OnRep_SharedFunds)
 	float DayTimeMinutes = 420.0f;
+
+	UPROPERTY(Replicated)
+	FBotanicusOutdoorEnvironmentState OutdoorEnvironment;
 
 	UPROPERTY(ReplicatedUsing=OnRep_SharedFunds)
 	int32 TotalPlantsSold = 0;

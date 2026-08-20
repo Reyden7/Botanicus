@@ -40,7 +40,8 @@ TEXTURES = {
     "T_Command_OrderNormal": "@prepared/bt_commander_normal.png",
     "T_Command_OrderPressed": "@prepared/bt_commander_pressed.png",
     "T_Command_CloseNormal": "icons_botanicus_separes/bt_fermer_normal.png",
-    "T_Command_ClosePressed": "icons_botanicus_separes/bt_fermer_pressed.png",
+	"T_Command_ClosePressed": "icons_botanicus_separes/bt_fermer_pressed.png",
+	"T_Command_GeneralBackground": "icons_botanicus_separes/bg général.png",
     "T_Command_Parcel": "icons_botanicus_separes/icon carton.png",
 }
 

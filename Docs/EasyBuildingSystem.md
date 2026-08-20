@@ -51,22 +51,32 @@ The current prototype top-down system already:
 - locks character movement;
 - pans the camera with `W`, `A`, `S`, `D`;
 - zooms the camera with the mouse wheel when no building is selected;
-- zooms with `Shift + mouse wheel` while moving a selected building;
+- zooms vertically with `Ctrl + mouse wheel` while moving a selected building,
+  without changing the camera's horizontal position;
 - selects a complete connected building, never an isolated piece of furniture;
 - includes equipment and decoration inside the building volume;
 - follows Landscape height while moving on X/Y;
 - rotates in 15-degree steps with the mouse wheel while a building is selected;
 - shows valid/invalid placement;
 - validates collision and Landscape placement again on the server;
+- temporarily ignores Pawn collision while a purchased building follows the
+  cursor, then refuses confirmation over any player before restoring collision;
 - confirms with left click or `E`;
 - cancels with right click or `Escape`;
 - locks the building against concurrent editing by another player.
 
 The old free test-purchase button is replaced by `CATALOGUE BATIMENTS`.
-`DA_BotanicusBuildingCatalog` currently exposes:
+`DA_BotanicusBuildingCatalog` now exposes a single building:
 
-- `GreenhouseCompact` — Serre compacte — 900 credits;
-- `GreenhouseWorkshop` — Serre atelier — 1400 credits.
+- `Greenhouse` — Serre principale — 900 credits.
+
+The nursery can own only one greenhouse. It remains a complete-building actor,
+so the existing top-down selection, movement, rotation, placement validation,
+multiplayer replication and autosave flow applies without a special path.
+Levels 1-3 expand the same greenhouse instead of unlocking another greenhouse.
+Its replicated base environment starts at 20 C, 50% air humidity and 50%
+luminosity. These three saved values are the foundation for future local
+climate equipment and microclimates.
 
 Each entry carries a stable key, display text, price, unlock state and template
 reference. The server validates the definition and available credits, duplicates
@@ -74,14 +84,10 @@ the complete EBS group and immediately enters top-down placement for the buyer.
 Credits are refunded if spawning or locking fails, or if the player cancels the
 placement. Confirming makes the debit final.
 
-Building progression is owner-only and server-authoritative. Players begin at
-development level 1: the compact greenhouse is available and the workshop
-greenhouse displays `NIVEAU 2 REQUIS — VERROUILLÉ`. Confirming the compact
-greenhouse raises the player to level 2 and immediately unlocks the workshop.
-This first level-up also grants 500 credits, leaving enough funds to purchase
-the newly unlocked workshop with the default starting balance.
-Every catalogue purchase is revalidated against the required level on the
-server. Autosave version 5 persists the level with the player's economy.
+Building progression remains owner-only and server-authoritative. Players begin
+at development level 1 and can purchase the main greenhouse. Every catalogue
+purchase is revalidated against the required level and the one-greenhouse rule
+on the server. Autosave version 5 persists the player's development level.
 
 Modern maps identify their templates through persistent actor tags. The current
 legacy test map is also supported by a deterministic complete-group index at

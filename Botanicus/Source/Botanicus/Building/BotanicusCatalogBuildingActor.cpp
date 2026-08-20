@@ -91,13 +91,3 @@ void ABotanicusCatalogBuildingActor::BuildGeometry(
 		FVector(0.0f, 0.0f, Height + RoofThickness * 0.5f),
 		FVector(Width + 80.0f, Depth + 80.0f, RoofThickness));
 }
-
-ABotanicusCompactGreenhouseActor::ABotanicusCompactGreenhouseActor()
-{
-	BuildGeometry(1200.0f, 900.0f, 520.0f);
-}
-
-ABotanicusWorkshopGreenhouseActor::ABotanicusWorkshopGreenhouseActor()
-{
-	BuildGeometry(1800.0f, 1200.0f, 620.0f);
-}

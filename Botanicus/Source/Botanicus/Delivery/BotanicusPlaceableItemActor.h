@@ -30,6 +30,8 @@ public:
 	void ConfigureAsLocalInspection();
 	void LaunchItem(const FVector& InitialVelocity);
 	FVector GetPlacementBoxExtent() const;
+	/** Vertical distance from the actor pivot to the visual mesh bottom. */
+	float GetPlacementPivotToBottomOffset() const;
 
 	FName GetItemKey() const { return ItemKey; }
 	int32 GetQuantity() const { return Quantity; }

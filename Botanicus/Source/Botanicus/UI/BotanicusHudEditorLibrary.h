@@ -27,4 +27,8 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category="Botanicus|HUD|Editor")
 	static bool AddCrosshairToLayout(UObject* WidgetBlueprintAsset);
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|HUD|Editor")
+	static bool AddOutdoorEnvironmentToLayout(
+		UObject* WidgetBlueprintAsset);
 };

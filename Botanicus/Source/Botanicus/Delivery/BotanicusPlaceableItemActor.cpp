@@ -317,6 +317,21 @@ FVector ABotanicusPlaceableItemActor::GetPlacementBoxExtent() const
 		Mesh->GetComponentScale().GetAbs();
 }
 
+float ABotanicusPlaceableItemActor::
+	GetPlacementPivotToBottomOffset() const
+{
+	if (!Mesh || !Mesh->GetStaticMesh())
+	{
+		return GetPlacementBoxExtent().Z;
+	}
+
+	const FBoxSphereBounds WorldBounds = Mesh->CalcBounds(
+		Mesh->GetComponentTransform());
+	const float MeshBottom =
+		WorldBounds.Origin.Z - WorldBounds.BoxExtent.Z;
+	return FMath::Max(0.0f, GetActorLocation().Z - MeshBottom);
+}
+
 void ABotanicusPlaceableItemActor::OnRep_ItemKey()
 {
 	ApplyItemDefinition();

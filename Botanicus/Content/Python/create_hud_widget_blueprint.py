@@ -39,6 +39,7 @@ def create_hud_element(name, parent_class, element_type):
 def create_hud_blueprint():
     elements = (
         ("WBP_HUD_Clock", unreal.BotanicusClockWidget.static_class(), "Clock"),
+        ("WBP_HUD_OutdoorEnvironment", unreal.BotanicusOutdoorEnvironmentWidget.static_class(), "OutdoorEnvironment"),
         ("WBP_HUD_Credits", unreal.BotanicusSharedFundsWidget.static_class(), "Credits"),
         ("WBP_HUD_Reputation", unreal.BotanicusReputationWidget.static_class(), "Reputation"),
         ("WBP_HUD_Objectives", unreal.BotanicusShopObjectivesWidget.static_class(), "Objectives"),

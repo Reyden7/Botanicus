@@ -2,6 +2,77 @@
 
 #include "Growing/BotanicusPlantSubsystem.h"
 
+namespace
+{
+	FBotanicusPlantEnvironmentRequirements MakeEnvironmentProfile(
+		EBotanicusPlantElement Element)
+	{
+		FBotanicusPlantEnvironmentRequirements Profile;
+		switch (Element)
+		{
+		case EBotanicusPlantElement::Fire:
+			Profile.MinimumToleratedTemperatureCelsius = 18.0f;
+			Profile.MinimumIdealTemperatureCelsius = 28.0f;
+			Profile.MaximumIdealTemperatureCelsius = 38.0f;
+			Profile.MaximumToleratedTemperatureCelsius = 48.0f;
+			Profile.MinimumToleratedAirHumidityPercent = 5.0f;
+			Profile.MinimumIdealAirHumidityPercent = 20.0f;
+			Profile.MaximumIdealAirHumidityPercent = 40.0f;
+			Profile.MaximumToleratedAirHumidityPercent = 65.0f;
+			Profile.MinimumToleratedLuminosityPercent = 40.0f;
+			Profile.MinimumIdealLuminosityPercent = 70.0f;
+			Profile.MaximumIdealLuminosityPercent = 100.0f;
+			Profile.MaximumToleratedLuminosityPercent = 100.0f;
+			break;
+		case EBotanicusPlantElement::Water:
+			Profile.MinimumToleratedTemperatureCelsius = 12.0f;
+			Profile.MinimumIdealTemperatureCelsius = 20.0f;
+			Profile.MaximumIdealTemperatureCelsius = 27.0f;
+			Profile.MaximumToleratedTemperatureCelsius = 35.0f;
+			Profile.MinimumToleratedAirHumidityPercent = 40.0f;
+			Profile.MinimumIdealAirHumidityPercent = 65.0f;
+			Profile.MaximumIdealAirHumidityPercent = 90.0f;
+			Profile.MaximumToleratedAirHumidityPercent = 100.0f;
+			Profile.MinimumToleratedLuminosityPercent = 20.0f;
+			Profile.MinimumIdealLuminosityPercent = 45.0f;
+			Profile.MaximumIdealLuminosityPercent = 75.0f;
+			Profile.MaximumToleratedLuminosityPercent = 95.0f;
+			break;
+		case EBotanicusPlantElement::Ice:
+			Profile.MinimumToleratedTemperatureCelsius = -5.0f;
+			Profile.MinimumIdealTemperatureCelsius = 4.0f;
+			Profile.MaximumIdealTemperatureCelsius = 12.0f;
+			Profile.MaximumToleratedTemperatureCelsius = 22.0f;
+			Profile.MinimumToleratedAirHumidityPercent = 25.0f;
+			Profile.MinimumIdealAirHumidityPercent = 45.0f;
+			Profile.MaximumIdealAirHumidityPercent = 70.0f;
+			Profile.MaximumToleratedAirHumidityPercent = 90.0f;
+			Profile.MinimumToleratedLuminosityPercent = 10.0f;
+			Profile.MinimumIdealLuminosityPercent = 25.0f;
+			Profile.MaximumIdealLuminosityPercent = 55.0f;
+			Profile.MaximumToleratedLuminosityPercent = 80.0f;
+			break;
+		case EBotanicusPlantElement::Shadow:
+			Profile.MinimumToleratedTemperatureCelsius = 8.0f;
+			Profile.MinimumIdealTemperatureCelsius = 16.0f;
+			Profile.MaximumIdealTemperatureCelsius = 24.0f;
+			Profile.MaximumToleratedTemperatureCelsius = 32.0f;
+			Profile.MinimumToleratedAirHumidityPercent = 35.0f;
+			Profile.MinimumIdealAirHumidityPercent = 60.0f;
+			Profile.MaximumIdealAirHumidityPercent = 85.0f;
+			Profile.MaximumToleratedAirHumidityPercent = 100.0f;
+			Profile.MinimumToleratedLuminosityPercent = 0.0f;
+			Profile.MinimumIdealLuminosityPercent = 5.0f;
+			Profile.MaximumIdealLuminosityPercent = 30.0f;
+			Profile.MaximumToleratedLuminosityPercent = 55.0f;
+			break;
+		default:
+			break;
+		}
+		return Profile;
+	}
+}
+
 void UBotanicusPlantSubsystem::Initialize(
 	FSubsystemCollectionBase& Collection)
 {
@@ -37,6 +108,7 @@ void UBotanicusPlantSubsystem::Initialize(
 			Plant.WaterAddedPerUse = 0.30f;
 			Plant.WaterConsumptionPerSecond = 0.002f;
 			Plant.Element = Element;
+			Plant.Environment = MakeEnvironmentProfile(Element);
 			Plant.MatureColor =
 				Element == EBotanicusPlantElement::Fire
 					? FLinearColor(1.0f, 0.12f, 0.01f, 1.0f)
@@ -88,23 +160,41 @@ void UBotanicusPlantSubsystem::Initialize(
 const FBotanicusPlantDefinition*
 UBotanicusPlantSubsystem::FindPlant(FName PlantKey) const
 {
-	// The native list is the authoritative whitelist. This prevents seeds
-	// removed from the game from being resurrected by an older Data Asset.
-	return NativeFallbackPlants.FindByPredicate(
+	// Keep the native list as the authoritative whitelist, but let the
+	// designer-authored Data Asset provide the editable gameplay values.
+	const FBotanicusPlantDefinition* NativeDefinition =
+		NativeFallbackPlants.FindByPredicate(
 		[PlantKey](const FBotanicusPlantDefinition& Definition)
 		{
 			return Definition.PlantKey == PlantKey;
 		});
+	if (!NativeDefinition)
+	{
+		return nullptr;
+	}
+	if (LoadedCatalog)
+	{
+		if (const FBotanicusPlantDefinition* AuthoredDefinition =
+				LoadedCatalog->FindPlant(PlantKey))
+		{
+			return AuthoredDefinition;
+		}
+	}
+	return NativeDefinition;
 }
 
 const FBotanicusPlantDefinition*
 UBotanicusPlantSubsystem::FindPlantBySeed(FName SeedItemKey) const
 {
-	return NativeFallbackPlants.FindByPredicate(
+	const FBotanicusPlantDefinition* NativeDefinition =
+		NativeFallbackPlants.FindByPredicate(
 		[SeedItemKey](const FBotanicusPlantDefinition& Definition)
 		{
 			return Definition.SeedItemKey == SeedItemKey;
 		});
+	return NativeDefinition
+		? FindPlant(NativeDefinition->PlantKey)
+		: nullptr;
 }
 
 const FBotanicusPlantDefinition*
@@ -115,16 +205,31 @@ UBotanicusPlantSubsystem::FindPlantByHarvestItem(
 	NormalizedKey.RemoveFromEnd(TEXT("_Beautiful"));
 	NormalizedKey.RemoveFromEnd(TEXT("_Exceptional"));
 	const FName BaseHarvestItemKey(*NormalizedKey);
-	return NativeFallbackPlants.FindByPredicate(
+	const FBotanicusPlantDefinition* NativeDefinition =
+		NativeFallbackPlants.FindByPredicate(
 		[BaseHarvestItemKey](
 			const FBotanicusPlantDefinition& Definition)
 		{
 			return Definition.HarvestItemKey == BaseHarvestItemKey;
 		});
+	return NativeDefinition
+		? FindPlant(NativeDefinition->PlantKey)
+		: nullptr;
 }
 
 TArray<FBotanicusPlantDefinition>
 UBotanicusPlantSubsystem::GetAllPlants() const
 {
-	return NativeFallbackPlants;
+	TArray<FBotanicusPlantDefinition> Result;
+	Result.Reserve(NativeFallbackPlants.Num());
+	for (const FBotanicusPlantDefinition& NativeDefinition :
+		 NativeFallbackPlants)
+	{
+		if (const FBotanicusPlantDefinition* Definition =
+				FindPlant(NativeDefinition.PlantKey))
+		{
+			Result.Add(*Definition);
+		}
+	}
+	return Result;
 }

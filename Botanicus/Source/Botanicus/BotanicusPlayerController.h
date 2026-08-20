@@ -24,6 +24,7 @@ class UBotanicusDaySummaryWidget;
 class UBotanicusClockWidget;
 class UBotanicusStorageQuantityWidget;
 class UBotanicusInteractionTargetWidget;
+class UBotanicusClimateDeviceControlWidget;
 class UBotanicusHudMessageWidget;
 class UBotanicusHudLayoutWidget;
 class UTextRenderComponent;
@@ -37,6 +38,7 @@ class ABotanicusDeliveryParcelActor;
 class ABotanicusDeliveryZoneActor;
 class ABotanicusBrokenFlowerPotActor;
 class ABotanicusLargeEquipmentActor;
+class ABotanicusClimateDeviceActor;
 class ABotanicusPlaceableItemActor;
 class ABotanicusPlantPotActor;
 class ABotanicusSalesDisplayActor;
@@ -142,6 +144,38 @@ public:
 	{
 		return bFurnitureMoveModeActive;
 	}
+
+	/** Client state for UI, authoritative mirror for gameplay validation. */
+	bool IsFurnitureMoveModeActiveForGameplay() const
+	{
+		return HasAuthority()
+			? bServerFurnitureMoveModeActive
+			: bFurnitureMoveModeActive;
+	}
+
+	/** Exact actor currently under the local interaction trace. */
+	UFUNCTION(BlueprintPure, Category="Botanicus|Interaction")
+	AActor* GetLocalInteractionTarget() const
+	{
+		return LocalInteractionHighlightActor.Get();
+	}
+
+	/** Original world actor represented by the local placement preview. */
+	ABotanicusPlaceableItemActor* GetLocallyMovedPlaceableItem() const
+	{
+		return LocalMovedPlaceableItem.Get();
+	}
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Climate Device")
+	void CloseClimateDeviceControl();
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Climate Device")
+	void RequestToggleClimateDevice(ABotanicusClimateDeviceActor* ClimateDevice);
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Climate Device")
+	void RequestSetClimateDevicePower(
+		ABotanicusClimateDeviceActor* ClimateDevice,
+		float PowerLevel);
 
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Path")
 	void BeginPathPlacement();
@@ -360,6 +394,9 @@ public:
 	UFUNCTION(BlueprintPure, Category="Botanicus|Inventory")
 	bool IsQuickBarInputBlocked() const;
 
+	UFUNCTION(BlueprintPure, Category="Botanicus|Inventory")
+	bool IsMovingWorldItemOutsideInventory() const;
+
 protected:
 
 	/** Input Mapping Contexts */
@@ -543,6 +580,7 @@ protected:
 		bool bHighlighted) const;
 	void RefreshInteractionTargetHighlight();
 	void RefreshInteractionTargetName(AActor* TargetActor);
+	void OpenClimateDeviceControl(ABotanicusClimateDeviceActor* ClimateDevice);
 	void SetInteractionTargetHighlighted(
 		AActor* Actor,
 		bool bHighlighted) const;
@@ -571,6 +609,9 @@ protected:
 	void ApplyCarriedItemState(
 		const FBotanicusQuickBarSlot& Slot,
 		ABotanicusPlaceableItemActor* Item) const;
+	void CopyWorldItemStateToPreview(
+		const ABotanicusPlaceableItemActor* WorldItem,
+		ABotanicusPlaceableItemActor* Preview) const;
 	void UpdateEquippedQuickBarItem();
 	void DestroyEquippedQuickBarItem();
 
@@ -578,7 +619,12 @@ protected:
 	void HandleEquippedQuickBarChanged();
 
 	void BeginWorldItemMove(
-		ABotanicusPlaceableItemActor* WorldItem);
+		ABotanicusPlaceableItemActor* WorldItem,
+		bool bServerReservationAlreadyHeld = false);
+	void BeginHeldWorldItemPlacement();
+	bool TryPlaceHeldSalePotOnWorkbench();
+	void UpdateHeldWorldItemPreview();
+	void ReturnMovedWorldItemToHand();
 	void UpdateQuickBarItemPlacement(float DeltaTime);
 	void RotateQuickBarItemPlacement(float Direction);
 	void AdjustQuickBarPlacementQuantity(int32 Direction);
@@ -790,6 +836,15 @@ protected:
 		ABotanicusLargeEquipmentActor* Equipment);
 
 	UFUNCTION(Server, Reliable)
+	void ServerInteractClimateDevice(
+		ABotanicusClimateDeviceActor* ClimateDevice);
+
+	UFUNCTION(Server, Unreliable)
+	void ServerSetClimateDevicePower(
+		ABotanicusClimateDeviceActor* ClimateDevice,
+		float PowerLevel);
+
+	UFUNCTION(Server, Reliable)
 	void ServerSetFurnitureMoveMode(bool bEnabled);
 
 	UFUNCTION(Server, Reliable)
@@ -912,6 +967,12 @@ protected:
 	void ClientUpdateBuildingPlacementValidity(bool bPlacementValid);
 
 	UFUNCTION(Client, Reliable)
+	void ClientSetPurchasedBuildingPawnCollision(
+		const TArray<AActor*>& GroupActors,
+		bool bEnabled,
+		bool bRestoreOriginalResponses);
+
+	UFUNCTION(Client, Reliable)
 	void ClientApplyPurchasedBuildingSnapshot(
 		const TArray<FName>& ActorNames,
 		const TArray<FTransform>& ActorTransforms);
@@ -959,6 +1020,14 @@ protected:
 	void ReleaseBuildingGroupLock();
 	FVector CalculateBuildingGroupPivot(const TArray<AActor*>& GroupActors) const;
 	void ApplyServerBuildingGroupTransform(const FVector& NewPivot, float NewYaw);
+	void SetBuildingGroupPawnCollision(
+		const TArray<AActor*>& GroupActors,
+		bool bEnabled,
+		bool bRestoreOriginalResponses = true);
+	void SetPurchasedBuildingPawnCollisionForAllPlayers(
+		const TArray<AActor*>& GroupActors,
+		bool bEnabled,
+		bool bRestoreOriginalResponses = true);
 	void BroadcastPurchasedBuildingSnapshot(bool bReliable);
 	void QueuePurchasedBuildingSnapshot(
 		const TArray<FName>& ActorNames,
@@ -1223,6 +1292,10 @@ protected:
 		InteractionTargetWidget;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UBotanicusClimateDeviceControlWidget>
+		ClimateDeviceControlWidget;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusHudMessageWidget>
 		HudMessageWidget;
 
@@ -1334,6 +1407,10 @@ protected:
 
 	TArray<FTransform> LocalBuildingOriginalTransforms;
 	TArray<FTransform> ServerBuildingOriginalTransforms;
+	TArray<TWeakObjectPtr<UPrimitiveComponent>>
+		BuildingPawnCollisionComponents;
+	TArray<TEnumAsByte<ECollisionResponse>>
+		BuildingPawnCollisionOriginalResponses;
 	TObjectPtr<AActor> ServerSnappedMovingWall;
 	TObjectPtr<AActor> ServerSnappedExistingWall;
 	TObjectPtr<ABotanicusCommunicationDoorActor>

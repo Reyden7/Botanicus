@@ -4,7 +4,6 @@
 
 #include "CoreMinimal.h"
 #include "Building/BotanicusCatalogBuildingActor.h"
-#include "Growing/BotanicusPlantCatalog.h"
 #include "Interaction/BotanicusInteractable.h"
 #include "BotanicusElementalGreenhouseActor.generated.h"
 
@@ -13,18 +12,19 @@ class UStaticMeshComponent;
 class UTextRenderComponent;
 
 /**
- * Upgradeable greenhouse whose interior enables growth for one plant element.
- * Levels 1-3 expand the usable footprint and the physical shell.
+ * The nursery's single upgradeable greenhouse. Its base temperature, air
+ * humidity and luminosity are replicated so future climate equipment can
+ * build local microclimates on top of them.
  */
 UCLASS()
-class BOTANICUS_API ABotanicusElementalGreenhouseActor
+class BOTANICUS_API ABotanicusGreenhouseActor
 	: public ABotanicusCatalogBuildingActor,
 	  public IBotanicusInteractable
 {
 	GENERATED_BODY()
 
 public:
-	ABotanicusElementalGreenhouseActor();
+	ABotanicusGreenhouseActor();
 
 	virtual void BeginPlay() override;
 	virtual void GetLifetimeReplicatedProps(
@@ -37,28 +37,52 @@ public:
 		AActor* Interactor) const override;
 	virtual void Interact_Implementation(AActor* Interactor) override;
 
-	EBotanicusPlantElement GetElement() const { return Element; }
+	UFUNCTION(BlueprintPure, Category="Botanicus|Greenhouse")
 	int32 GetGreenhouseLevel() const { return GreenhouseLevel; }
-	bool ContainsWorldLocation(const FVector& WorldLocation) const;
-	void RestoreGreenhouseLevel(int32 InLevel);
 
-	static EBotanicusPlantElement FindGreenhouseElementAtLocation(
+	UFUNCTION(BlueprintPure, Category="Botanicus|Greenhouse|Environment")
+	float GetTemperatureCelsius() const;
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Greenhouse|Environment")
+	float GetAirHumidityPercent() const;
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Greenhouse|Environment")
+	float GetLuminosityPercent() const;
+
+	/** Resolves the seasonal base at this location. Equipment modifiers plug in here next. */
+	UFUNCTION(BlueprintPure, Category="Botanicus|Greenhouse|Environment")
+	void GetEnvironmentAtLocation(
+		const FVector& WorldLocation,
+		float& OutTemperatureCelsius,
+		float& OutAirHumidityPercent,
+		float& OutLuminosityPercent) const;
+
+	/** Legacy/manual fallback values used only when no shared season state exists. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+		Category="Botanicus|Greenhouse|Environment")
+	void SetEnvironmentValues(
+		float InTemperatureCelsius,
+		float InAirHumidityPercent,
+		float InLuminosityPercent);
+
+	bool ContainsWorldLocation(const FVector& WorldLocation) const;
+	void RestoreGreenhouseState(
+		int32 InLevel,
+		float InTemperatureCelsius,
+		float InAirHumidityPercent,
+		float InLuminosityPercent);
+
+	static ABotanicusGreenhouseActor* FindGreenhouseAtLocation(
 		const UWorld* World,
 		const FVector& WorldLocation);
 
-protected:
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Element")
-	EBotanicusPlantElement Element =
-		EBotanicusPlantElement::Fire;
-
 private:
 	UFUNCTION()
-	void OnRep_GreenhouseLevel();
+	void OnRep_GreenhouseState();
 
 	void RefreshGeometry();
 	FVector GetLevelSize() const;
 	int32 GetNextUpgradeCost() const;
-	FString GetElementLabel() const;
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UBoxComponent> GrowingVolume;
@@ -87,8 +111,37 @@ private:
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UTextRenderComponent> StatusText;
 
-	UPROPERTY(ReplicatedUsing=OnRep_GreenhouseLevel)
+	UPROPERTY(ReplicatedUsing=OnRep_GreenhouseState)
 	int32 GreenhouseLevel = 1;
+
+	UPROPERTY(
+		EditAnywhere,
+		ReplicatedUsing=OnRep_GreenhouseState,
+		Category="Botanicus|Greenhouse|Environment",
+		meta=(ClampMin="-50.0", ClampMax="100.0", Units="Celsius"))
+	float TemperatureCelsius = 20.0f;
+
+	UPROPERTY(
+		EditAnywhere,
+		ReplicatedUsing=OnRep_GreenhouseState,
+		Category="Botanicus|Greenhouse|Environment",
+		meta=(ClampMin="0.0", ClampMax="100.0", Units="Percent"))
+	float AirHumidityPercent = 50.0f;
+
+	UPROPERTY(
+		EditAnywhere,
+		ReplicatedUsing=OnRep_GreenhouseState,
+		Category="Botanicus|Greenhouse|Environment",
+		meta=(ClampMin="0.0", ClampMax="100.0", Units="Percent"))
+	float LuminosityPercent = 50.0f;
+};
+
+/** Legacy class paths kept only so old maps and saves migrate safely. */
+UCLASS()
+class BOTANICUS_API ABotanicusElementalGreenhouseActor
+	: public ABotanicusGreenhouseActor
+{
+	GENERATED_BODY()
 };
 
 UCLASS()
@@ -96,9 +149,6 @@ class BOTANICUS_API ABotanicusFireGreenhouseActor
 	: public ABotanicusElementalGreenhouseActor
 {
 	GENERATED_BODY()
-
-public:
-	ABotanicusFireGreenhouseActor();
 };
 
 UCLASS()
@@ -106,9 +156,6 @@ class BOTANICUS_API ABotanicusWaterGreenhouseActor
 	: public ABotanicusElementalGreenhouseActor
 {
 	GENERATED_BODY()
-
-public:
-	ABotanicusWaterGreenhouseActor();
 };
 
 UCLASS()
@@ -116,9 +163,6 @@ class BOTANICUS_API ABotanicusIceGreenhouseActor
 	: public ABotanicusElementalGreenhouseActor
 {
 	GENERATED_BODY()
-
-public:
-	ABotanicusIceGreenhouseActor();
 };
 
 UCLASS()
@@ -126,7 +170,18 @@ class BOTANICUS_API ABotanicusShadowGreenhouseActor
 	: public ABotanicusElementalGreenhouseActor
 {
 	GENERATED_BODY()
+};
 
-public:
-	ABotanicusShadowGreenhouseActor();
+UCLASS()
+class BOTANICUS_API ABotanicusCompactGreenhouseActor
+	: public ABotanicusGreenhouseActor
+{
+	GENERATED_BODY()
+};
+
+UCLASS()
+class BOTANICUS_API ABotanicusWorkshopGreenhouseActor
+	: public ABotanicusGreenhouseActor
+{
+	GENERATED_BODY()
 };

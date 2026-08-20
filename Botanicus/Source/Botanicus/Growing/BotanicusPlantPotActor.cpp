@@ -4,6 +4,7 @@
 
 #include "Botanicus.h"
 #include "BotanicusCharacter.h"
+#include "BotanicusPlayerController.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Building/BotanicusElementalGreenhouseActor.h"
 #include "Components/StaticMeshComponent.h"
@@ -15,8 +16,10 @@
 #include "Engine/GameInstance.h"
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
+#include "Environment/BotanicusEnvironmentSubsystem.h"
 #include "GameFramework/PlayerController.h"
 #include "Growing/BotanicusPlantSubsystem.h"
+#include "Growing/BotanicusPlantCompatibility.h"
 #include "Growing/BotanicusMultiPlantPotActor.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
@@ -26,6 +29,8 @@
 #include "Visuals/BotanicusPotSoilVisualActor.h"
 #include "UI/BotanicusPlantGrowthWidget.h"
 #include "UI/BotanicusPlantInspectionWidget.h"
+#include "UI/BotanicusPlantEnvironmentAlertWidget.h"
+#include "UI/BotanicusPlantEnvironmentDebugWidget.h"
 #include "Blueprint/UserWidget.h"
 
 namespace
@@ -35,10 +40,18 @@ float ReadBlueprintFloatSetting(
 	const FName PropertyName,
 	const float Fallback)
 {
-	if (const FFloatProperty* Property =
-		FindFProperty<FFloatProperty>(Object->GetClass(), PropertyName))
+	const FProperty* Property =
+		FindFProperty<FProperty>(Object->GetClass(), PropertyName);
+	if (const FFloatProperty* FloatProperty =
+			CastField<FFloatProperty>(Property))
 	{
-		return Property->GetPropertyValue_InContainer(Object);
+		return FloatProperty->GetPropertyValue_InContainer(Object);
+	}
+	if (const FDoubleProperty* DoubleProperty =
+			CastField<FDoubleProperty>(Property))
+	{
+		return static_cast<float>(
+			DoubleProperty->GetPropertyValue_InContainer(Object));
 	}
 	return Fallback;
 }
@@ -71,6 +84,21 @@ bool ReadBlueprintBoolSetting(
 	}
 	return bFallback;
 }
+
+void AddEnvironmentConditionDiagnostic(
+	TArray<FString>& Diagnostics,
+	const TCHAR* Label,
+	EBotanicusPlantEnvironmentCondition Condition)
+{
+	if (Condition == EBotanicusPlantEnvironmentCondition::TooLow)
+	{
+		Diagnostics.Add(FString::Printf(TEXT("%s trop basse"), Label));
+	}
+	else if (Condition == EBotanicusPlantEnvironmentCondition::TooHigh)
+	{
+		Diagnostics.Add(FString::Printf(TEXT("%s trop haute"), Label));
+	}
+}
 }
 
 ABotanicusPlantPotActor::ABotanicusPlantPotActor()
@@ -91,6 +119,30 @@ ABotanicusPlantPotActor::ABotanicusPlantPotActor()
 		TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereFinder(
 		TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(
+		TEXT("/Engine/BasicShapes/Cube.Cube"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface>
+		NeutralRingMaterialFinder(
+			TEXT("/Game/Botanicus/Materials/Silhouette/M_Silhouette_Hologram_Blue.M_Silhouette_Hologram_Blue"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface>
+		CompatibleRingMaterialFinder(
+			TEXT("/Game/EasyBuildingSystem/Materials/Instances/Dummy/MI_Can_Build.MI_Can_Build"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface>
+		IncompatibleRingMaterialFinder(
+			TEXT("/Game/EasyBuildingSystem/Materials/Instances/Dummy/MI_CanNot_Build.MI_CanNot_Build"));
+	if (NeutralRingMaterialFinder.Succeeded())
+	{
+		SeedInteractionNeutralMaterial = NeutralRingMaterialFinder.Object;
+	}
+	if (CompatibleRingMaterialFinder.Succeeded())
+	{
+		SeedInteractionCompatibleMaterial = CompatibleRingMaterialFinder.Object;
+	}
+	if (IncompatibleRingMaterialFinder.Succeeded())
+	{
+		SeedInteractionIncompatibleMaterial =
+			IncompatibleRingMaterialFinder.Object;
+	}
 	if (CylinderFinder.Succeeded())
 	{
 		Mesh->SetStaticMesh(CylinderFinder.Object);
@@ -123,6 +175,22 @@ ABotanicusPlantPotActor::ABotanicusPlantPotActor()
 	FoliageMesh->SetStaticMesh(
 		SphereFinder.Succeeded() ? SphereFinder.Object : nullptr);
 	FoliageMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	for (int32 Index = 0; Index < 32; ++Index)
+	{
+		UStaticMeshComponent* ZonePart =
+			CreateDefaultSubobject<UStaticMeshComponent>(
+				FName(*FString::Printf(
+					TEXT("SeedInteractionZonePart%02d"), Index)));
+		ZonePart->SetupAttachment(SceneRoot);
+		ZonePart->SetStaticMesh(
+			CubeFinder.Succeeded() ? CubeFinder.Object : nullptr);
+		ZonePart->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		ZonePart->SetCastShadow(false);
+		ZonePart->SetCanEverAffectNavigation(false);
+		ZonePart->SetVisibility(false);
+		SeedInteractionZoneParts.Add(ZonePart);
+	}
 
 	StatusText = CreateDefaultSubobject<UTextRenderComponent>(
 		TEXT("GrowingStatus"));
@@ -163,6 +231,38 @@ ABotanicusPlantPotActor::ABotanicusPlantPotActor()
 	PlantGrowthWidget->SetWidgetClass(
 		UBotanicusPlantGrowthWidget::StaticClass());
 	PlantGrowthWidget->SetVisibility(false);
+
+	EnvironmentAlertWidget = CreateDefaultSubobject<UWidgetComponent>(
+		TEXT("PlantEnvironmentAlerts"));
+	EnvironmentAlertWidget->SetupAttachment(SceneRoot);
+	EnvironmentAlertWidget->SetWidgetSpace(EWidgetSpace::World);
+	EnvironmentAlertWidget->SetDrawSize(FVector2D(240.0f, 72.0f));
+	EnvironmentAlertWidget->SetPivot(FVector2D(0.5f, 0.5f));
+	EnvironmentAlertWidget->SetRelativeLocation(FVector(0.0f, 0.0f, 165.0f));
+	EnvironmentAlertWidget->SetRelativeScale3D(
+		FVector(EnvironmentAlertWidgetScale));
+	EnvironmentAlertWidget->SetTwoSided(true);
+	EnvironmentAlertWidget->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	EnvironmentAlertWidget->SetWidgetClass(
+		UBotanicusPlantEnvironmentAlertWidget::StaticClass());
+	EnvironmentAlertWidget->SetVisibility(false);
+
+	EnvironmentDebugWidget = CreateDefaultSubobject<UWidgetComponent>(
+		TEXT("PlantEnvironmentDebug"));
+	EnvironmentDebugWidget->SetupAttachment(SceneRoot);
+	EnvironmentDebugWidget->SetWidgetSpace(EWidgetSpace::World);
+	EnvironmentDebugWidget->SetDrawSize(FVector2D(260.0f, 108.0f));
+	EnvironmentDebugWidget->SetPivot(FVector2D(0.5f, 0.5f));
+	EnvironmentDebugWidget->SetRelativeLocation(
+		FVector(0.0f, EnvironmentDebugWidgetSideOffset,
+			EnvironmentDebugWidgetHeight));
+	EnvironmentDebugWidget->SetRelativeScale3D(
+		FVector(EnvironmentDebugWidgetScale));
+	EnvironmentDebugWidget->SetTwoSided(true);
+	EnvironmentDebugWidget->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	EnvironmentDebugWidget->SetWidgetClass(
+		UBotanicusPlantEnvironmentDebugWidget::StaticClass());
+	EnvironmentDebugWidget->SetVisibility(false);
 
 	PlantInspectionWidget = CreateDefaultSubobject<UWidgetComponent>(
 		TEXT("PlantInspectionWidget"));
@@ -244,6 +344,62 @@ void ABotanicusPlantPotActor::OnConstruction(const FTransform& Transform)
 			PlantGrowthWidgetBrightness, PlantGrowthWidgetBrightness,
 			PlantGrowthWidgetBrightness, 1.0f));
 	}
+	if (EnvironmentAlertWidget)
+	{
+		EnvironmentAlertWidget->SetRelativeScale3D(
+			FVector(EnvironmentAlertWidgetScale));
+	}
+	if (EnvironmentDebugWidget)
+	{
+		EnvironmentDebugWidget->SetRelativeScale3D(
+			FVector(EnvironmentDebugWidgetScale));
+	}
+}
+
+void ABotanicusPlantPotActor::ApplyItemDefinition()
+{
+	// The original preparation pots keep their Blueprint-authored appearance.
+	// Elemental variants are native catalogue items and must load the mesh
+	// assigned to their individual item definition.
+	if (GetClass() == ABotanicusPlantPotActor::StaticClass() &&
+		GetPotElement() != EBotanicusPlantElement::Normal)
+	{
+		bUseBlueprintAppearance = false;
+	}
+	Super::ApplyItemDefinition();
+}
+
+EBotanicusPlantElement ABotanicusPlantPotActor::GetPotElement() const
+{
+	const FName CurrentItemKey = GetItemKey();
+	if (CurrentItemKey == TEXT("PlantPotFire"))
+	{
+		return EBotanicusPlantElement::Fire;
+	}
+	if (CurrentItemKey == TEXT("PlantPotWater"))
+	{
+		return EBotanicusPlantElement::Water;
+	}
+	if (CurrentItemKey == TEXT("PlantPotIce"))
+	{
+		return EBotanicusPlantElement::Ice;
+	}
+	if (CurrentItemKey == TEXT("PlantPotShadow"))
+	{
+		return EBotanicusPlantElement::Shadow;
+	}
+	return EBotanicusPlantElement::Normal;
+}
+
+bool ABotanicusPlantPotActor::IsPlantElementCompatible() const
+{
+	const EBotanicusPlantElement PotElement = GetPotElement();
+	if (PotElement == EBotanicusPlantElement::Normal || PlantKey.IsNone())
+	{
+		return true;
+	}
+	const FBotanicusPlantDefinition* Definition = GetPlantDefinition();
+	return Definition && Definition->Element == PotElement;
 }
 
 void ABotanicusPlantPotActor::BeginPlay()
@@ -269,11 +425,34 @@ void ABotanicusPlantPotActor::BeginPlay()
 		PlantInspectionWidget->InitWidget();
 		RefreshInspectionWidget();
 	}
+	if (EnvironmentAlertWidget)
+	{
+		if (UClass* WidgetClass = LoadClass<UUserWidget>(
+			nullptr,
+			TEXT("/Game/Botanicus/UI/Plant/Environment/WBP_PlantEnvironmentAlerts.WBP_PlantEnvironmentAlerts_C")))
+		{
+			EnvironmentAlertWidget->SetWidgetClass(WidgetClass);
+		}
+		EnvironmentAlertWidget->InitWidget();
+		RefreshVisuals();
+	}
+	if (EnvironmentDebugWidget)
+	{
+		if (UClass* WidgetClass = LoadClass<UUserWidget>(
+			nullptr,
+			TEXT("/Game/Botanicus/UI/Plant/Environment/WBP_PlantEnvironmentDebug.WBP_PlantEnvironmentDebug_C")))
+		{
+			EnvironmentDebugWidget->SetWidgetClass(WidgetClass);
+		}
+		EnvironmentDebugWidget->InitWidget();
+		RefreshVisuals();
+	}
 }
 
 void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	RefreshSeedInteractionPreview();
 	if (StatusText)
 	{
 		const UWorld* World = GetWorld();
@@ -301,6 +480,26 @@ void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 				PlantGrowthWidget->SetWorldRotation(
 					(CameraLocation -
 					 PlantGrowthWidget->GetComponentLocation()).Rotation());
+			}
+			if (EnvironmentAlertWidget)
+			{
+				EnvironmentAlertWidget->SetWorldRotation(
+					(CameraLocation -
+					 EnvironmentAlertWidget->GetComponentLocation()).Rotation());
+			}
+			if (EnvironmentDebugWidget)
+			{
+				FVector CameraRight = CameraManager->GetCameraRotation().
+					RotateVector(FVector::RightVector);
+				CameraRight.Z = 0.0f;
+				CameraRight = CameraRight.GetSafeNormal();
+				EnvironmentDebugWidget->SetWorldLocation(
+					GetActorLocation() +
+					FVector::UpVector * EnvironmentDebugWidgetHeight +
+					CameraRight * EnvironmentDebugWidgetSideOffset);
+				EnvironmentDebugWidget->SetWorldRotation(
+					(CameraLocation -
+					 EnvironmentDebugWidget->GetComponentLocation()).Rotation());
 			}
 			if (PlantInspectionWidget)
 			{
@@ -353,7 +552,14 @@ void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 	const bool bPrimaryUseChanged = UpdatePrimaryUse(DeltaSeconds);
 	if (PlantKey.IsNone())
 	{
-		if (bPrimaryUseChanged)
+		const FBotanicusPlantEnvironmentState EmptyEnvironment;
+		const bool bEnvironmentChanged =
+			!EnvironmentState.IsNearlyEqual(EmptyEnvironment);
+		if (bEnvironmentChanged)
+		{
+			EnvironmentState = EmptyEnvironment;
+		}
+		if (bPrimaryUseChanged || bEnvironmentChanged)
 		{
 			RefreshVisuals();
 			ForceNetUpdate();
@@ -372,12 +578,13 @@ void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 	{
 		return;
 	}
+	const bool bEnvironmentChanged = UpdateEnvironmentState(*Definition);
 
 	const bool bElementalChanged =
 		ProcessElementalInteractions(*Definition);
 	if (bElementalDead)
 	{
-		if (bElementalChanged || bPrimaryUseChanged)
+		if (bElementalChanged || bPrimaryUseChanged || bEnvironmentChanged)
 		{
 			RefreshVisuals();
 			ForceNetUpdate();
@@ -394,18 +601,27 @@ void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 				DeltaSeconds,
 		0.0f,
 		1.0f);
-	if (IsInCompatibleGreenhouse(*Definition) &&
+	if (EnvironmentState.bEnvironmentAvailable &&
 		WaterLevel >= Definition->MinimumHealthyWater &&
 		WaterLevel <= Definition->MaximumHealthyWater &&
 		GrowthProgress < 1.0f)
 	{
 		const float PreviousGrowthForCare = GrowthProgress;
+		const float GrowthAdded =
+			DeltaSeconds /
+				FMath::Max(1.0f, Definition->GrowthDurationSeconds) *
+			EnvironmentState.GrowthRateMultiplier *
+			EvaluateBotanicusPlantCompatibility(
+				GetWorld(),
+				GetActorLocation(),
+				this,
+				INDEX_NONE,
+				*Definition).GrowthMultiplier *
+			(IsPlantElementCompatible()
+				? 1.0f
+				: IncompatiblePotElementGrowthMultiplier);
 		GrowthProgress = FMath::Clamp(
-			GrowthProgress +
-				DeltaSeconds /
-					FMath::Max(
-						1.0f,
-						Definition->GrowthDurationSeconds),
+			GrowthProgress + GrowthAdded,
 			0.0f,
 			1.0f);
 		const float WaterMidpoint =
@@ -427,7 +643,8 @@ void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 				1.0f);
 		CareScore = FMath::Clamp(
 			CareScore +
-				(GrowthProgress - PreviousGrowthForCare) * WaterCare,
+				(GrowthProgress - PreviousGrowthForCare) *
+					WaterCare * EnvironmentState.OverallComfort,
 			0.0f,
 			1.0f);
 	}
@@ -436,7 +653,8 @@ void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 		!FMath::IsNearlyEqual(PreviousGrowth, GrowthProgress, 0.0001f) ||
 		!FMath::IsNearlyEqual(PreviousCareScore, CareScore, 0.0001f) ||
 		bPrimaryUseChanged ||
-		bElementalChanged)
+		bElementalChanged ||
+		bEnvironmentChanged)
 	{
 		RefreshVisuals();
 		ForceNetUpdate();
@@ -452,6 +670,7 @@ void ABotanicusPlantPotActor::GetLifetimeReplicatedProps(
 	DOREPLIFETIME(ABotanicusPlantPotActor, WaterLevel);
 	DOREPLIFETIME(ABotanicusPlantPotActor, GrowthProgress);
 	DOREPLIFETIME(ABotanicusPlantPotActor, CareScore);
+	DOREPLIFETIME(ABotanicusPlantPotActor, EnvironmentState);
 	DOREPLIFETIME(ABotanicusPlantPotActor, WateringCount);
 	DOREPLIFETIME(ABotanicusPlantPotActor, PlantingStartServerTime);
 	DOREPLIFETIME(ABotanicusPlantPotActor, bElementalDead);
@@ -585,6 +804,22 @@ void ABotanicusPlantPotActor::Interact_Implementation(AActor* Interactor)
 void ABotanicusPlantPotActor::ConfigureAsLocalPreview(bool bIsValid)
 {
 	Super::ConfigureAsLocalPreview(bIsValid);
+	if (ActorHasTag(TEXT("BotanicusPlacementPreview")) &&
+		!PlantKey.IsNone())
+	{
+		// The generic placement silhouette paints every mesh blue/red. The ring
+		// has its own explicit neutral/compatible/incompatible materials and is
+		// refreshed independently below.
+		for (UStaticMeshComponent* ZonePart : SeedInteractionZoneParts)
+		{
+			if (!ZonePart)
+			{
+				continue;
+			}
+			ZonePart->SetRenderCustomDepth(false);
+		}
+		RefreshSeedInteractionPreview();
+	}
 	if (StatusText)
 	{
 		StatusText->SetVisibility(false);
@@ -1113,6 +1348,160 @@ void ABotanicusPlantPotActor::SetInspectionVisible(const bool bVisible)
 	RefreshInspectionWidget();
 }
 
+bool ABotanicusPlantPotActor::CanPreviewSeedInteractionZone(
+	AActor* Interactor) const
+{
+	return PlantKey.IsNone() && IsSoilFull();
+}
+
+void ABotanicusPlantPotActor::RefreshSeedInteractionPreview()
+{
+	bool bShowZone = false;
+	float InteractionRadius = 0.0f;
+	EBotanicusPlantElement PreviewElement =
+		EBotanicusPlantElement::Normal;
+	int32 CompatibleNeighbourCount = 0;
+	int32 IncompatibleNeighbourCount = 0;
+
+	const UWorld* World = GetWorld();
+	const ABotanicusPlayerController* Controller = World
+		? Cast<ABotanicusPlayerController>(
+			World->GetFirstPlayerController())
+		: nullptr;
+	ABotanicusCharacter* Character = Controller
+		? Cast<ABotanicusCharacter>(Controller->GetPawn())
+		: nullptr;
+	const UBotanicusQuickBarComponent* QuickBar = Character
+		? Character->GetQuickBarComponent()
+		: nullptr;
+	const UBotanicusPlantSubsystem* Plants = GetGameInstance()
+		? GetGameInstance()->GetSubsystem<UBotanicusPlantSubsystem>()
+		: nullptr;
+
+	const bool bMovedPlantPlacementPreview =
+		ActorHasTag(TEXT("BotanicusPlacementPreview")) &&
+		!PlantKey.IsNone() &&
+		!bElementalDead;
+	if (bMovedPlantPlacementPreview && Plants)
+	{
+		if (const FBotanicusPlantDefinition* Definition =
+				Plants->FindPlant(PlantKey))
+		{
+			InteractionRadius = FMath::Max(
+				0.0f,
+				Definition->ElementalInteractionRadius);
+			PreviewElement = Definition->Element;
+			const FBotanicusPlantCompatibilityResult Compatibility =
+				EvaluateBotanicusPlantCompatibility(
+					GetWorld(),
+					GetActorLocation(),
+					Controller
+						? Controller->GetLocallyMovedPlaceableItem()
+						: nullptr,
+					INDEX_NONE,
+					*Definition);
+			CompatibleNeighbourCount =
+				Compatibility.CompatibleNeighbourCount;
+			IncompatibleNeighbourCount =
+				Compatibility.IncompatibleNeighbourCount;
+			bShowZone = InteractionRadius > KINDA_SMALL_NUMBER;
+		}
+	}
+	else if (Controller && Character && QuickBar && Plants &&
+		Controller->GetLocalInteractionTarget() == this &&
+		!ActorHasTag(TEXT("BotanicusPlacementPreview")) &&
+		CanPreviewSeedInteractionZone(Character))
+	{
+		if (const FBotanicusPlantDefinition* Definition =
+				Plants->FindPlantBySeed(
+					QuickBar->GetSelectedSlot().ItemKey))
+		{
+			InteractionRadius = FMath::Max(
+				0.0f, Definition->ElementalInteractionRadius);
+			PreviewElement = Definition->Element;
+			const FBotanicusPlantCompatibilityResult Compatibility =
+				EvaluateBotanicusPlantCompatibility(
+					GetWorld(),
+					GetActorLocation(),
+					this,
+					INDEX_NONE,
+					*Definition);
+			CompatibleNeighbourCount =
+				Compatibility.CompatibleNeighbourCount;
+			IncompatibleNeighbourCount =
+				Compatibility.IncompatibleNeighbourCount;
+			bShowZone = InteractionRadius > KINDA_SMALL_NUMBER;
+		}
+	}
+
+	if (bShowZone)
+	{
+		RefreshSeedInteractionZoneGeometry(
+			InteractionRadius,
+			PreviewElement,
+			CompatibleNeighbourCount,
+			IncompatibleNeighbourCount);
+	}
+	for (UStaticMeshComponent* ZonePart : SeedInteractionZoneParts)
+	{
+		if (ZonePart)
+		{
+			ZonePart->SetVisibility(bShowZone);
+		}
+	}
+}
+
+void ABotanicusPlantPotActor::RefreshSeedInteractionZoneGeometry(
+	float Radius,
+	EBotanicusPlantElement Element,
+	int32 CompatibleNeighbourCount,
+	int32 IncompatibleNeighbourCount)
+{
+	const int32 SegmentCount = SeedInteractionZoneParts.Num();
+	if (SegmentCount <= 0)
+	{
+		return;
+	}
+
+	UMaterialInterface* ZoneMaterial = SeedInteractionNeutralMaterial;
+	if (IncompatibleNeighbourCount > 0)
+	{
+		ZoneMaterial = SeedInteractionIncompatibleMaterial;
+	}
+	else if (CompatibleNeighbourCount > 0)
+	{
+		ZoneMaterial = SeedInteractionCompatibleMaterial;
+	}
+
+	const float SafeRadius = FMath::Max(10.0f, Radius);
+	const float SegmentLength =
+		2.0f * PI * SafeRadius / static_cast<float>(SegmentCount) * 0.84f;
+	for (int32 Index = 0; Index < SegmentCount; ++Index)
+	{
+		UStaticMeshComponent* ZonePart = SeedInteractionZoneParts[Index];
+		if (!ZonePart)
+		{
+			continue;
+		}
+		const float Angle =
+			2.0f * PI * static_cast<float>(Index) /
+			static_cast<float>(SegmentCount);
+		ZonePart->SetRelativeLocation(FVector(
+			FMath::Cos(Angle) * SafeRadius,
+			FMath::Sin(Angle) * SafeRadius,
+			GetSoilMaximumHeight() + 3.0f));
+		ZonePart->SetRelativeRotation(FRotator(
+			0.0f, FMath::RadiansToDegrees(Angle) + 90.0f, 0.0f));
+		ZonePart->SetRelativeScale3D(FVector(
+			SegmentLength / 100.0f, 0.065f, 0.025f));
+		if (ZoneMaterial)
+		{
+			ZonePart->SetMaterial(0, ZoneMaterial);
+		}
+		ZonePart->SetRenderCustomDepth(false);
+	}
+}
+
 void ABotanicusPlantPotActor::RefreshInspectionWidget()
 {
 	UBotanicusPlantInspectionWidget* Widget = PlantInspectionWidget
@@ -1201,17 +1590,73 @@ void ABotanicusPlantPotActor::ApplyElementalInfluence(
 	}
 }
 
-bool ABotanicusPlantPotActor::IsInCompatibleGreenhouse(
-	const FBotanicusPlantDefinition& Definition) const
+bool ABotanicusPlantPotActor::UpdateEnvironmentState(
+	const FBotanicusPlantDefinition& Definition)
 {
-	if (Definition.Element == EBotanicusPlantElement::Normal)
+	const UBotanicusEnvironmentSubsystem* EnvironmentSubsystem =
+		GetWorld()
+			? GetWorld()->GetSubsystem<UBotanicusEnvironmentSubsystem>()
+			: nullptr;
+	float Temperature = 0.0f;
+	float Humidity = 0.0f;
+	float Luminosity = 0.0f;
+	bool bInsideGreenhouse = false;
+	const bool bEnvironmentAvailable = EnvironmentSubsystem &&
+		EnvironmentSubsystem->GetEnvironmentAtLocation(
+			GetActorLocation(),
+			Temperature,
+			Humidity,
+			Luminosity,
+			bInsideGreenhouse);
+	const FBotanicusPlantEnvironmentState NewState =
+		EvaluateBotanicusPlantEnvironment(
+			Definition.Environment,
+			bEnvironmentAvailable,
+			bInsideGreenhouse,
+			Temperature,
+			Humidity,
+			Luminosity);
+	if (EnvironmentState.IsNearlyEqual(NewState))
 	{
-		return true;
+		return false;
 	}
-	return ABotanicusElementalGreenhouseActor::
-		FindGreenhouseElementAtLocation(
-			GetWorld(),
-			GetActorLocation()) == Definition.Element;
+	EnvironmentState = NewState;
+	return true;
+}
+
+FText ABotanicusPlantPotActor::GetEnvironmentDiagnostic() const
+{
+	if (!EnvironmentState.bEnvironmentAvailable)
+	{
+		return NSLOCTEXT(
+			"BotanicusGrowing",
+			"PlantEnvironmentUnavailable",
+			"Mesure environnementale indisponible");
+	}
+
+	TArray<FString> Diagnostics;
+	if (!IsPlantElementCompatible())
+	{
+		Diagnostics.Add(TEXT("Element du pot incompatible"));
+	}
+	AddEnvironmentConditionDiagnostic(
+		Diagnostics,
+		TEXT("Temperature"),
+		EnvironmentState.TemperatureCondition);
+	AddEnvironmentConditionDiagnostic(
+		Diagnostics,
+		TEXT("Humidite"),
+		EnvironmentState.AirHumidityCondition);
+	AddEnvironmentConditionDiagnostic(
+		Diagnostics,
+		TEXT("Luminosite"),
+		EnvironmentState.LuminosityCondition);
+	return Diagnostics.IsEmpty()
+		? NSLOCTEXT(
+			"BotanicusGrowing",
+			"PlantIdealEnvironment",
+			"Conditions ideales")
+		: FText::FromString(FString::Join(Diagnostics, TEXT(" | ")));
 }
 
 bool ABotanicusPlantPotActor::ProcessElementalInteractions(
@@ -1562,16 +2007,66 @@ void ABotanicusPlantPotActor::RefreshVisuals()
 			0.0f, 0.0f,
 			FMath::Max(PlantGrowthWidgetHeight, AdaptiveHeight)));
 	}
+	if (EnvironmentAlertWidget)
+	{
+		const float AlertHalfHeight =
+			EnvironmentAlertWidget->GetDrawSize().Y *
+			EnvironmentAlertWidgetScale * 0.5f;
+		float AlertHeight = FoliageTop +
+			PlantGrowthWidgetClearance + AlertHalfHeight;
+		if (PlantGrowthWidget)
+		{
+			const float GrowthHalfHeight =
+				PlantGrowthWidget->GetDrawSize().Y *
+				PlantGrowthWidgetScale * 0.5f;
+			AlertHeight = FMath::Max(
+				AlertHeight,
+				PlantGrowthWidget->GetRelativeLocation().Z +
+					GrowthHalfHeight + AlertHalfHeight + 6.0f);
+		}
+		EnvironmentAlertWidget->SetRelativeLocation(FVector(
+			0.0f,
+			0.0f,
+			FMath::Max(PlantGrowthWidgetHeight, AlertHeight)));
+		UBotanicusPlantEnvironmentAlertWidget* AlertWidget =
+			Cast<UBotanicusPlantEnvironmentAlertWidget>(
+				EnvironmentAlertWidget->GetWidget());
+		if (AlertWidget)
+		{
+			AlertWidget->SetEnvironmentState(EnvironmentState);
+		}
+		EnvironmentAlertWidget->SetVisibility(
+			bHasPlant && AlertWidget && AlertWidget->HasAnyAlert() &&
+			!ActorHasTag(TEXT("BotanicusPlacementPreview")));
+	}
+	if (EnvironmentDebugWidget)
+	{
+		UBotanicusPlantEnvironmentDebugWidget* DebugWidget =
+			Cast<UBotanicusPlantEnvironmentDebugWidget>(
+				EnvironmentDebugWidget->GetWidget());
+		if (DebugWidget)
+		{
+			DebugWidget->SetEnvironmentState(EnvironmentState);
+		}
+		EnvironmentDebugWidget->SetVisibility(
+			bHasPlant && DebugWidget &&
+			!ActorHasTag(TEXT("BotanicusPlacementPreview")));
+	}
 	if (StatusText)
 	{
 		FString EnvironmentStatus = TEXT("-");
-		if (Definition &&
-			Definition->Element != EBotanicusPlantElement::Normal)
+		if (Definition)
 		{
-			EnvironmentStatus =
-				IsInCompatibleGreenhouse(*Definition)
-					? TEXT("SERRE COMPATIBLE")
-					: TEXT("MAUVAISE SERRE - CROISSANCE BLOQUEE");
+			EnvironmentStatus = EnvironmentState.bEnvironmentAvailable
+				? FString::Printf(
+					TEXT("%s | CONFORT %d%% | %.1f C | H %.0f%% | L %.0f%%"),
+					EnvironmentState.bInsideGreenhouse ? TEXT("SERRE") : TEXT("EXTERIEUR"),
+					FMath::RoundToInt(EnvironmentState.OverallComfort * 100.0f),
+					EnvironmentState.TemperatureCelsius,
+					EnvironmentState.AirHumidityPercent,
+					EnvironmentState.LuminosityPercent) +
+					TEXT("\n") + GetEnvironmentDiagnostic().ToString()
+				: TEXT("MESURE INDISPONIBLE");
 		}
 		if (bElementalDead)
 		{

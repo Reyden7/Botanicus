@@ -19,6 +19,138 @@ enum class EBotanicusPlantElement : uint8
 	Shadow
 };
 
+/** Ideal and survivable greenhouse ranges authored independently per species. */
+USTRUCT(BlueprintType)
+struct BOTANICUS_API FBotanicusPlantEnvironmentRequirements
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Temperature",
+		meta=(Units="Celsius"))
+	float MinimumToleratedTemperatureCelsius = 10.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Temperature",
+		meta=(Units="Celsius"))
+	float MinimumIdealTemperatureCelsius = 18.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Temperature",
+		meta=(Units="Celsius"))
+	float MaximumIdealTemperatureCelsius = 24.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Temperature",
+		meta=(Units="Celsius"))
+	float MaximumToleratedTemperatureCelsius = 32.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Air Humidity",
+		meta=(ClampMin="0.0", ClampMax="100.0", Units="Percent"))
+	float MinimumToleratedAirHumidityPercent = 25.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Air Humidity",
+		meta=(ClampMin="0.0", ClampMax="100.0", Units="Percent"))
+	float MinimumIdealAirHumidityPercent = 40.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Air Humidity",
+		meta=(ClampMin="0.0", ClampMax="100.0", Units="Percent"))
+	float MaximumIdealAirHumidityPercent = 65.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Air Humidity",
+		meta=(ClampMin="0.0", ClampMax="100.0", Units="Percent"))
+	float MaximumToleratedAirHumidityPercent = 85.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Luminosity",
+		meta=(ClampMin="0.0", ClampMax="100.0", Units="Percent"))
+	float MinimumToleratedLuminosityPercent = 20.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Luminosity",
+		meta=(ClampMin="0.0", ClampMax="100.0", Units="Percent"))
+	float MinimumIdealLuminosityPercent = 40.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Luminosity",
+		meta=(ClampMin="0.0", ClampMax="100.0", Units="Percent"))
+	float MaximumIdealLuminosityPercent = 70.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Luminosity",
+		meta=(ClampMin="0.0", ClampMax="100.0", Units="Percent"))
+	float MaximumToleratedLuminosityPercent = 90.0f;
+};
+
+UENUM(BlueprintType)
+enum class EBotanicusPlantEnvironmentCondition : uint8
+{
+	Unavailable,
+	TooLow,
+	Ideal,
+	TooHigh
+};
+
+/** Replicated snapshot of the environment currently experienced by one plant. */
+USTRUCT(BlueprintType)
+struct BOTANICUS_API FBotanicusPlantEnvironmentState
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category="Environment")
+	bool bEnvironmentAvailable = false;
+
+	UPROPERTY(BlueprintReadOnly, Category="Environment")
+	bool bInsideGreenhouse = false;
+
+	UPROPERTY(BlueprintReadOnly, Category="Environment", meta=(Units="Celsius"))
+	float TemperatureCelsius = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category="Environment", meta=(Units="Percent"))
+	float AirHumidityPercent = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category="Environment", meta=(Units="Percent"))
+	float LuminosityPercent = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category="Environment",
+		meta=(ClampMin="0.0", ClampMax="1.0"))
+	float TemperatureComfort = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category="Environment")
+	EBotanicusPlantEnvironmentCondition TemperatureCondition =
+		EBotanicusPlantEnvironmentCondition::Unavailable;
+
+	UPROPERTY(BlueprintReadOnly, Category="Environment",
+		meta=(ClampMin="0.0", ClampMax="1.0"))
+	float AirHumidityComfort = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category="Environment")
+	EBotanicusPlantEnvironmentCondition AirHumidityCondition =
+		EBotanicusPlantEnvironmentCondition::Unavailable;
+
+	UPROPERTY(BlueprintReadOnly, Category="Environment",
+		meta=(ClampMin="0.0", ClampMax="1.0"))
+	float LuminosityComfort = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category="Environment")
+	EBotanicusPlantEnvironmentCondition LuminosityCondition =
+		EBotanicusPlantEnvironmentCondition::Unavailable;
+
+	UPROPERTY(BlueprintReadOnly, Category="Environment",
+		meta=(ClampMin="0.0", ClampMax="1.0"))
+	float OverallComfort = 0.0f;
+
+	/** Applied to growth in the current environment; never causes plant death. */
+	UPROPERTY(BlueprintReadOnly, Category="Environment",
+		meta=(ClampMin="0.0", ClampMax="1.0"))
+	float GrowthRateMultiplier = 0.0f;
+
+	bool IsNearlyEqual(
+		const FBotanicusPlantEnvironmentState& Other,
+		float Tolerance = 0.001f) const;
+};
+
+BOTANICUS_API FBotanicusPlantEnvironmentState
+EvaluateBotanicusPlantEnvironment(
+	const FBotanicusPlantEnvironmentRequirements& Requirements,
+	bool bEnvironmentAvailable,
+	bool bInsideGreenhouse,
+	float TemperatureCelsius,
+	float AirHumidityPercent,
+	float LuminosityPercent);
+
 USTRUCT(BlueprintType)
 struct BOTANICUS_API FBotanicusPlantDefinition
 {
@@ -33,7 +165,7 @@ struct BOTANICUS_API FBotanicusPlantDefinition
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Identity")
 	FText DisplayName;
 
-	/** Elemental plants only grow inside a greenhouse of the same element. */
+	/** Botanical family; it no longer selects or restricts a greenhouse type. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Element")
 	EBotanicusPlantElement Element = EBotanicusPlantElement::Normal;
 
@@ -44,6 +176,66 @@ struct BOTANICUS_API FBotanicusPlantDefinition
 		Category="Element",
 		meta=(ClampMin="0.0", Units="cm"))
 	float ElementalInteractionRadius = 500.0f;
+
+	/** Species that accelerate this plant while growing inside its interaction radius. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Plant Neighbours")
+	TArray<FName> CompatibleNeighbourPlantKeys;
+
+	/** Species that slow this plant while growing inside its interaction radius. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Plant Neighbours")
+	TArray<FName> IncompatibleNeighbourPlantKeys;
+
+	/** Growth-speed bonus contributed by each compatible neighbouring plant. */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category="Plant Neighbours",
+		meta=(ClampMin="0.0", ClampMax="1.0", Units="Percent"))
+	float CompatibleNeighbourGrowthBonus = 0.10f;
+
+	/** Growth-speed penalty contributed by each incompatible neighbouring plant. */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category="Plant Neighbours",
+		meta=(ClampMin="0.0", ClampMax="1.0", Units="Percent"))
+	float IncompatibleNeighbourGrowthPenalty = 0.20f;
+
+	/** Whether this species gently modifies the climate around living plants. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Environment Influence")
+	bool bInfluencesEnvironment = true;
+
+	/** Radius of the plant-created microclimate. Influence fades to zero at its edge. */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category="Environment Influence",
+		meta=(ClampMin="0.0", Units="cm"))
+	float EnvironmentInfluenceRadius = 300.0f;
+
+	/** Temperature variation in Celsius at the plant centre. */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category="Environment Influence",
+		meta=(Units="Celsius"))
+	float EnvironmentTemperatureDelta = 0.0f;
+
+	/** Air-humidity variation in percent at the plant centre. */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category="Environment Influence",
+		meta=(ClampMin="-100.0", ClampMax="100.0", Units="Percent"))
+	float EnvironmentAirHumidityDelta = 0.0f;
+
+	/** Luminosity variation in percent at the plant centre. */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category="Environment Influence",
+		meta=(ClampMin="-100.0", ClampMax="100.0", Units="Percent"))
+	float EnvironmentLuminosityDelta = 0.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Harvest")
 	FName HarvestToolItemKey = TEXT("GardenTrowel");
@@ -75,6 +267,10 @@ struct BOTANICUS_API FBotanicusPlantDefinition
 		Category="Growth",
 		meta=(ClampMin="1.0", Units="s"))
 	float GrowthDurationSeconds = 120.0f;
+
+	/** Climate ranges used to evaluate this species in the greenhouse. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Environment")
+	FBotanicusPlantEnvironmentRequirements Environment;
 
 	/** Mesh displayed from 0% up to (but excluding) 30% growth. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Growth|Visual Stages",

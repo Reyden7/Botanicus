@@ -8,31 +8,35 @@
 
 class UStaticMeshComponent;
 class UTextRenderComponent;
+class UWidgetComponent;
 class ABotanicusCharacter;
 struct FBotanicusPlantDefinition;
 
-USTRUCT()
+USTRUCT(BlueprintType)
 struct BOTANICUS_API FBotanicusMultiPlantSlotState
 {
 	GENERATED_BODY()
 
-	UPROPERTY()
+	UPROPERTY(BlueprintReadOnly, Category="Plant")
 	FName PlantKey = NAME_None;
 
-	UPROPERTY()
+	UPROPERTY(BlueprintReadOnly, Category="Plant")
 	float WaterLevel = 0.0f;
 
-	UPROPERTY()
+	UPROPERTY(BlueprintReadOnly, Category="Plant")
 	float GrowthProgress = 0.0f;
 
-	UPROPERTY()
+	UPROPERTY(BlueprintReadOnly, Category="Plant")
 	float CareScore = 0.0f;
 
-	UPROPERTY()
+	UPROPERTY(BlueprintReadOnly, Category="Plant")
 	int32 WateringCount = 0;
 
-	UPROPERTY()
+	UPROPERTY(BlueprintReadOnly, Category="Plant")
 	bool bElementalDead = false;
+
+	UPROPERTY(BlueprintReadOnly, Category="Environment")
+	FBotanicusPlantEnvironmentState EnvironmentState;
 };
 
 /** Rectangular preparation planter containing two to four independent plants. */
@@ -44,6 +48,7 @@ class BOTANICUS_API ABotanicusMultiPlantPotActor
 
 public:
 	ABotanicusMultiPlantPotActor();
+	virtual void BeginPlay() override;
 
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(
@@ -61,12 +66,18 @@ public:
 	int32 GetSoilUnits() const { return SoilUnits; }
 	const TArray<FBotanicusMultiPlantSlotState>&
 		GetPlantSlots() const { return PlantSlots; }
+	UFUNCTION(BlueprintPure, Category="Botanicus|Growing|Environment")
+	FBotanicusPlantEnvironmentState GetSlotEnvironmentState(
+		int32 SlotIndex) const;
 	void RestoreMultiPlantState(
 		int32 InSoilUnits,
 		const TArray<FBotanicusMultiPlantSlotState>& InSlots);
 	void ApplyElementalInfluence(
 		EBotanicusPlantElement SourceElement,
 		const FVector& SourceLocation);
+
+protected:
+	virtual bool CanPreviewSeedInteractionZone(AActor* Interactor) const override;
 
 private:
 	enum class EUseMode : uint8
@@ -94,7 +105,7 @@ private:
 		int32 SlotIndex) const;
 	bool UpdateActiveUse(float DeltaSeconds);
 	bool ProcessElementalInteractions();
-	bool IsInCompatibleGreenhouse(
+	FBotanicusPlantEnvironmentState EvaluateEnvironmentState(
 		const FBotanicusPlantDefinition& Definition) const;
 	void RefreshVisuals();
 	void SendMessage(
@@ -112,6 +123,12 @@ private:
 
 	UPROPERTY(VisibleAnywhere)
 	TArray<TObjectPtr<UStaticMeshComponent>> MultiFlowerMeshes;
+
+	UPROPERTY(VisibleAnywhere)
+	TArray<TObjectPtr<UWidgetComponent>> EnvironmentAlertWidgets;
+
+	UPROPERTY(VisibleAnywhere)
+	TArray<TObjectPtr<UWidgetComponent>> EnvironmentDebugWidgets;
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UTextRenderComponent> MultiStatusText;

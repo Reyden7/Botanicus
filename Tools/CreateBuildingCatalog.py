@@ -19,26 +19,16 @@ STRUCTURAL_TOKENS = (
 )
 BUILDINGS = (
     {
-        "key": "GreenhouseCompact",
-        "name": "Serre compacte",
+        "key": "Greenhouse",
+        "name": "Serre principale",
         "description": (
-            "Une serre fonctionnelle pour démarrer une petite production."
+            "La serre évolutive de la pépinière. Sa température, son humidité "
+            "et sa luminosité peuvent être aménagées."
         ),
         "price": 900,
         "label_prefix": "Botanicus_TestBuilding_A_",
         "target_xy": (4950.0, -350.0),
-        "template_tag": "BotanicusTemplate_GreenhouseCompact",
-    },
-    {
-        "key": "GreenhouseWorkshop",
-        "name": "Serre atelier",
-        "description": (
-            "Un bâtiment plus vaste adapté aux installations avancées."
-        ),
-        "price": 1400,
-        "label_prefix": "Botanicus_TestBuilding_B_",
-        "target_xy": (-3700.0, -2850.0),
-        "template_tag": "BotanicusTemplate_GreenhouseWorkshop",
+        "template_tag": "BotanicusTemplate_Greenhouse",
     },
 )
 
@@ -51,13 +41,9 @@ def create_definition(building):
     definition.set_editor_property("template_tag", building["template_tag"])
     definition.set_editor_property(
         "legacy_template_group_index",
-        0 if building["key"] == "GreenhouseCompact" else 1,
+        0,
     )
-    prefab_class_name = (
-        "BotanicusCompactGreenhouseActor"
-        if building["key"] == "GreenhouseCompact"
-        else "BotanicusWorkshopGreenhouseActor"
-    )
+    prefab_class_name = "BotanicusGreenhouseActor"
     prefab_class = unreal.load_class(
         None,
         f"/Script/Botanicus.{prefab_class_name}",
@@ -72,7 +58,7 @@ def create_definition(building):
     definition.set_editor_property("unlocked_by_default", True)
     definition.set_editor_property(
         "required_development_level",
-        1 if building["key"] == "GreenhouseCompact" else 2,
+        1,
     )
     definition.set_editor_property(
         "preview_offset",

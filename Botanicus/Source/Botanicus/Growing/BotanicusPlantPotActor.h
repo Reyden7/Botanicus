@@ -4,15 +4,17 @@
 
 #include "CoreMinimal.h"
 #include "Delivery/BotanicusPlaceableItemActor.h"
+#include "Growing/BotanicusPlantCatalog.h"
 #include "BotanicusPlantPotActor.generated.h"
 
 class UStaticMeshComponent;
 class UTextRenderComponent;
 class UWidgetComponent;
 class UMaterialInstanceDynamic;
+class UMaterialInterface;
 class UChildActorComponent;
-struct FBotanicusPlantDefinition;
-enum class EBotanicusPlantElement : uint8;
+class UBotanicusPlantEnvironmentAlertWidget;
+class UBotanicusPlantEnvironmentDebugWidget;
 
 UCLASS()
 class BOTANICUS_API ABotanicusPlantPotActor
@@ -35,6 +37,7 @@ public:
 		AActor* Interactor) const override;
 	virtual void Interact_Implementation(AActor* Interactor) override;
 	virtual void ConfigureAsLocalPreview(bool bIsValid) override;
+	virtual void ApplyItemDefinition() override;
 
 	/** Starts the left-mouse action selected by the player's quickbar item. */
 	virtual void BeginPrimaryUse(AActor* Interactor);
@@ -56,9 +59,25 @@ public:
 	float GetWaterLevel() const { return WaterLevel; }
 	float GetGrowthProgress() const { return GrowthProgress; }
 	float GetCareScore() const { return CareScore; }
+	UFUNCTION(BlueprintPure, Category="Botanicus|Growing|Environment")
+	FBotanicusPlantEnvironmentState GetEnvironmentState() const
+	{
+		return EnvironmentState;
+	}
+	UFUNCTION(BlueprintPure, Category="Botanicus|Growing|Environment")
+	float GetEnvironmentalComfort() const
+	{
+		return EnvironmentState.OverallComfort;
+	}
+	UFUNCTION(BlueprintPure, Category="Botanicus|Growing|Environment")
+	FText GetEnvironmentDiagnostic() const;
 	float GetSoilMaximumHeight() const;
 	int32 GetWateringCount() const { return WateringCount; }
 	bool IsElementalDead() const { return bElementalDead; }
+	UFUNCTION(BlueprintPure, Category="Botanicus|Growing|Element")
+	EBotanicusPlantElement GetPotElement() const;
+	UFUNCTION(BlueprintPure, Category="Botanicus|Growing|Element")
+	bool IsPlantElementCompatible() const;
 	bool IsMature() const { return !PlantKey.IsNone() && GrowthProgress >= 0.999f; }
 	void SetInspectionVisible(bool bVisible);
 	bool IsInspectionVisible() const { return bInspectionVisible; }
@@ -69,6 +88,11 @@ public:
 	void ApplyElementalInfluence(
 		EBotanicusPlantElement SourceElement,
 		const FVector& SourceLocation);
+
+protected:
+	/** Whether this aimed location can currently receive the selected seed. */
+	virtual bool CanPreviewSeedInteractionZone(AActor* Interactor) const;
+	void RefreshSeedInteractionPreview();
 
 private:
 	FName GetSelectedItemKey(AActor* Interactor) const;
@@ -83,8 +107,8 @@ private:
 	bool IsSoilFull() const;
 	bool IsInteractorStillTargeting(AActor* Interactor) const;
 	bool UpdatePrimaryUse(float DeltaSeconds);
-	bool IsInCompatibleGreenhouse(
-		const FBotanicusPlantDefinition& Definition) const;
+	bool UpdateEnvironmentState(
+		const FBotanicusPlantDefinition& Definition);
 	bool ProcessElementalInteractions(
 		const FBotanicusPlantDefinition& Definition);
 	void RefreshLocalContextAction();
@@ -96,6 +120,11 @@ private:
 	bool GetConfiguredSquareSoilProfile() const;
 	float GetConfiguredPlantBaseHeight() const;
 	void RefreshSoilVisual();
+	void RefreshSeedInteractionZoneGeometry(
+		float Radius,
+		EBotanicusPlantElement Element,
+		int32 CompatibleNeighbourCount,
+		int32 IncompatibleNeighbourCount);
 	void RefreshVisuals();
 	void RefreshInspectionWidget();
 	void SendInteractorMessage(
@@ -145,11 +174,33 @@ private:
 		meta=(DisplayName="Plant Base Height", Units="cm"))
 	float PlantBaseHeight = 18.0f;
 
+	/** Growth retained when a plant is planted in another elemental pot. */
+	UPROPERTY(
+		EditDefaultsOnly,
+		BlueprintReadOnly,
+		Category="Botanicus|Growing|Element",
+		meta=(AllowPrivateAccess="true", ClampMin="0.0", ClampMax="1.0"))
+	float IncompatiblePotElementGrowthMultiplier = 0.05f;
+
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UStaticMeshComponent> StemMesh;
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UStaticMeshComponent> FoliageMesh;
+
+	/** Local-only ring shown before planting the selected seed. */
+	UPROPERTY(VisibleAnywhere)
+	TArray<TObjectPtr<UStaticMeshComponent>> SeedInteractionZoneParts;
+
+	/** Explicit ring materials: blue neutral, green compatible, red incompatible. */
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> SeedInteractionNeutralMaterial;
+
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> SeedInteractionCompatibleMaterial;
+
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> SeedInteractionIncompatibleMaterial;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> FoliageMaterial;
@@ -165,6 +216,12 @@ private:
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UWidgetComponent> PlantInspectionWidget;
+
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UWidgetComponent> EnvironmentAlertWidget;
+
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UWidgetComponent> EnvironmentDebugWidget;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Botanicus|Plant UI",
 		meta=(DisplayName="Hauteur minimale UI croissance", Units="cm",
@@ -186,6 +243,26 @@ private:
 		meta=(DisplayName="Luminosite UI croissance", ClampMin="0.1",
 			ClampMax="5.0", AllowPrivateAccess="true"))
 	float PlantGrowthWidgetBrightness = 1.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Botanicus|Plant UI",
+		meta=(DisplayName="Echelle icones environnement", ClampMin="0.05",
+			ClampMax="1.0", AllowPrivateAccess="true"))
+	float EnvironmentAlertWidgetScale = 0.24f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Botanicus|Plant UI",
+		meta=(DisplayName="Echelle debug environnement", ClampMin="0.05",
+			ClampMax="1.0", AllowPrivateAccess="true"))
+	float EnvironmentDebugWidgetScale = 0.18f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Botanicus|Plant UI",
+		meta=(DisplayName="Distance debug a droite", Units="cm",
+			ClampMin="0.0", ClampMax="250.0", AllowPrivateAccess="true"))
+	float EnvironmentDebugWidgetSideOffset = 95.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Botanicus|Plant UI",
+		meta=(DisplayName="Hauteur debug environnement", Units="cm",
+			ClampMin="0.0", ClampMax="300.0", AllowPrivateAccess="true"))
+	float EnvironmentDebugWidgetHeight = 95.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Botanicus|Plant UI",
 		meta=(DisplayName="Distance panneau devant le pot", Units="cm",
@@ -216,6 +293,9 @@ private:
 
 	UPROPERTY(ReplicatedUsing=OnRep_GrowingState)
 	float CareScore = 0.0f;
+
+	UPROPERTY(ReplicatedUsing=OnRep_GrowingState)
+	FBotanicusPlantEnvironmentState EnvironmentState;
 
 	UPROPERTY(ReplicatedUsing=OnRep_GrowingState)
 	int32 WateringCount = 0;

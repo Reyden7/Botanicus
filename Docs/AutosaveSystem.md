@@ -67,6 +67,13 @@ immediately during logout, before the pawn is destroyed. Non-hotbar tools from
 older saves are rejected during quickbar restoration.
 Version 7 adds the complete plant stored on each sales display.
 Version 6 adds placed-pot soil, species, water and growth state.
+Version 27 replaces elemental greenhouse state with one greenhouse level plus
+temperature, air humidity and luminosity. Older elemental greenhouse classes
+remain loadable as compatibility aliases and receive the neutral defaults of
+20 C, 50% humidity and 50% luminosity.
+Version 28 persists whether each local climate device is enabled, together
+with its influence radius and maximum effect strength. Older saves restore
+heaters, coolers, grow lights and misters with their class defaults.
 Version 5 adds the owner-only building development level. Version 4
 saves retain their balance and pending catalogue orders and migrate at
 development level 1. If a version-4 world already contains a confirmed compact
