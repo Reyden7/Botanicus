@@ -3,6 +3,7 @@
 #include "Visuals/BotanicusPotSoilVisualActor.h"
 
 #include "Components/SceneComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "ProceduralMeshComponent.h"
 #include "UObject/ConstructorHelpers.h"
@@ -22,7 +23,7 @@ ABotanicusPotSoilVisualActor::ABotanicusPotSoilVisualActor()
 	SoilMesh->SetCastShadow(true);
 
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> MaterialFinder(
-		TEXT("/Game/Botanicus/Items/itemsMesh/TerreauDansPot/material_001.material_001"));
+		TEXT("/Game/Botanicus/Materials/Soil/M_BotanicusSoilWetPatchesV2.M_BotanicusSoilWetPatchesV2"));
 	if (MaterialFinder.Succeeded())
 	{
 		SoilMaterial = MaterialFinder.Object;
@@ -43,7 +44,8 @@ void ABotanicusPotSoilVisualActor::ConfigureSoilShape(
 	float FullHeight,
 	float FillAlpha,
 	bool bVisible,
-	bool bSquareProfile)
+	bool bSquareProfile,
+	float Wetness)
 {
 	CurrentBottomRadii = FVector2D(
 		FMath::Max(0.5f, BottomRadii.X),
@@ -55,7 +57,31 @@ void ABotanicusPotSoilVisualActor::ConfigureSoilShape(
 	CurrentFillAlpha = FMath::Clamp(FillAlpha, 0.0f, 1.0f);
 	bCurrentVisible = bVisible;
 	bCurrentSquareProfile = bSquareProfile;
+	CurrentWetness = FMath::Clamp(Wetness, 0.0f, 1.0f);
 	RebuildSoilMesh();
+}
+
+void ABotanicusPotSoilVisualActor::RefreshSoilMaterial()
+{
+	if (!SoilMesh || !SoilMaterial)
+	{
+		return;
+	}
+	if (!SoilDynamicMaterial)
+	{
+		SoilDynamicMaterial =
+			UMaterialInstanceDynamic::Create(SoilMaterial, this);
+	}
+	if (SoilDynamicMaterial)
+	{
+		const float VisualWetness = FMath::Pow(
+			CurrentWetness,
+			FMath::Clamp(WetnessResponseExponent, 0.1f, 2.0f));
+		SoilDynamicMaterial->SetScalarParameterValue(
+			TEXT("Wetness"),
+			VisualWetness);
+		SoilMesh->SetMaterial(0, SoilDynamicMaterial);
+	}
 }
 
 void ABotanicusPotSoilVisualActor::RebuildSoilMesh()
@@ -198,5 +224,5 @@ void ABotanicusPotSoilVisualActor::RebuildSoilMesh()
 		Colors,
 		Tangents,
 		false);
-	SoilMesh->SetMaterial(0, SoilMaterial);
+	RefreshSoilMaterial();
 }

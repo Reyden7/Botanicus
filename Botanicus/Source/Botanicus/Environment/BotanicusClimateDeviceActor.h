@@ -88,6 +88,9 @@ public:
 		float InMaximumEffectStrength,
 		float InPowerLevel = 1.0f);
 
+	/** Local-only furniture-mode preview controlled by the viewing player. */
+	void SetFurnitureModeInfluenceZoneVisible(bool bVisible);
+
 protected:
 	virtual void OnEquipmentDefinitionApplied() override;
 	void ConfigureDevice(
@@ -149,6 +152,8 @@ private:
 
 	UPROPERTY(Transient)
 	FLinearColor DeviceColor = FLinearColor(1.0f, 0.35f, 0.05f, 1.0f);
+
+	bool bFurnitureModeInfluenceZoneVisible = false;
 };
 
 UCLASS()

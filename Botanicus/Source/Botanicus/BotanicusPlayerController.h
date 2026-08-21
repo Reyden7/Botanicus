@@ -17,6 +17,7 @@ class UBotanicusCarryProgressWidget;
 class UBotanicusOrderCatalogWidget;
 class UBotanicusWorkbenchUpgradeWidget;
 class UBotanicusDevelopmentPanelWidget;
+class UBotanicusBotanistNotebookWidget;
 class UBotanicusBuildingCatalogWidget;
 class UBotanicusSharedFundsWidget;
 class UBotanicusShopObjectivesWidget;
@@ -228,6 +229,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Development")
 	void ToggleDevelopmentPanel();
+
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Botanist Notebook")
+	void ToggleBotanistNotebook();
 
 	UFUNCTION(Client, Reliable)
 	void ClientOpenOrderCatalogFromComputer(
@@ -473,6 +477,7 @@ protected:
 	void FinishCloseOrderCatalogFromComputer();
 	void InitializeWorkbenchUpgradeWidget();
 	void InitializeDevelopmentPanelWidget();
+	void InitializeBotanistNotebookWidget();
 	void InitializeBuildingCatalogWidget();
 	void BeginPathPlacementInternal(EBotanicusPathType PathType);
 	void BeginVisitorZonePlacement(int32 ZoneType);
@@ -542,6 +547,8 @@ protected:
 	bool TryRefillHeldWateringCan();
 	void UpdateWateringCanRefill(float DeltaTime);
 	void EndWateringCanRefill(bool bNotifyServer);
+	bool TryBeginWateringCanSpray();
+	void EndWateringCanSpray();
 	bool TryOpenNearbyWorkbenchUpgrade();
 	bool TryUseNearbyComputer();
 	bool TryMoveNearbyPlaceableItem();
@@ -580,6 +587,7 @@ protected:
 		bool bHighlighted) const;
 	void RefreshInteractionTargetHighlight();
 	void RefreshInteractionTargetName(AActor* TargetActor);
+	void DismissInteractionPromptAfterConfirmation();
 	void OpenClimateDeviceControl(ABotanicusClimateDeviceActor* ClimateDevice);
 	void SetInteractionTargetHighlighted(
 		AActor* Actor,
@@ -614,6 +622,7 @@ protected:
 		ABotanicusPlaceableItemActor* Preview) const;
 	void UpdateEquippedQuickBarItem();
 	void DestroyEquippedQuickBarItem();
+	void UpdateLocalWateringEffect(float DeltaTime);
 
 	UFUNCTION()
 	void HandleEquippedQuickBarChanged();
@@ -751,6 +760,9 @@ protected:
 	UFUNCTION(Server, Reliable)
 	void ServerEndWateringCanRefill(
 		ABotanicusWaterReserveActor* WaterReserve);
+
+	UFUNCTION(Server, Unreliable)
+	void ServerPulseWateringCanSpray();
 
 	UFUNCTION(Server, Reliable)
 	void ServerBeginPlantPotAction(
@@ -1068,6 +1080,10 @@ protected:
 	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusDevelopmentPanelWidget>
 		DevelopmentPanelWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBotanicusBotanistNotebookWidget>
+		BotanistNotebookWidget;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusBuildingCatalogWidget> BuildingCatalogWidget;
@@ -1452,7 +1468,9 @@ protected:
 	float GardenTrowelTransplantHoldDuration = 1.0f;
 	float ParcelMoveChargeElapsed = 0.0f;
 	float WaterRefillRequestAccumulator = 0.0f;
+	float WateringCanSprayRequestAccumulator = 0.0f;
 	double LastServerWaterRefillPulseTime = -1000.0;
+	double LastServerWateringCanSprayPulseTime = -1000.0;
 	float ParcelPlacementYaw = 0.0f;
 	float ParcelPreviewUpdateAccumulator = 0.0f;
 	float TopDownRoofRefreshAccumulator = 0.0f;
@@ -1465,6 +1483,7 @@ protected:
 	bool bPlantPotActionHeld = false;
 	bool bTrowelTransplantActionHeld = false;
 	bool bWaterRefillActionHeld = false;
+	bool bWateringCanSprayHeld = false;
 	bool bServerWaterRefillChanged = false;
 	bool bParcelCutActionHeld = false;
 	bool bCatalogOrderStateRestored = false;

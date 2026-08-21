@@ -601,6 +601,27 @@ void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 				DeltaSeconds,
 		0.0f,
 		1.0f);
+	if (Definition->Element == EBotanicusPlantElement::Fire &&
+		WaterLevel > Definition->MaximumHealthyWater)
+	{
+		const float ExcessRange = FMath::Max(
+			0.01f,
+			1.0f - Definition->MaximumHealthyWater);
+		const float ExcessSeverity = FMath::Clamp(
+			(WaterLevel - Definition->MaximumHealthyWater) /
+				ExcessRange,
+			0.0f,
+			1.0f);
+		CareScore = FMath::Clamp(
+			CareScore -
+				FMath::Max(
+					0.0f,
+					Definition->FireOverwateringCareLossPerSecond) *
+				DeltaSeconds *
+				FMath::Lerp(0.25f, 1.0f, ExcessSeverity),
+			0.0f,
+			1.0f);
+	}
 	if (EnvironmentState.bEnvironmentAvailable &&
 		WaterLevel >= Definition->MinimumHealthyWater &&
 		WaterLevel <= Definition->MaximumHealthyWater &&
@@ -1635,6 +1656,7 @@ FText ABotanicusPlantPotActor::GetEnvironmentDiagnostic() const
 	}
 
 	TArray<FString> Diagnostics;
+	const FBotanicusPlantDefinition* Definition = GetPlantDefinition();
 	if (!IsPlantElementCompatible())
 	{
 		Diagnostics.Add(TEXT("Element du pot incompatible"));
@@ -1651,6 +1673,19 @@ FText ABotanicusPlantPotActor::GetEnvironmentDiagnostic() const
 		Diagnostics,
 		TEXT("Luminosite"),
 		EnvironmentState.LuminosityCondition);
+	if (Definition &&
+		Definition->Element == EBotanicusPlantElement::Fire &&
+		WaterLevel > Definition->MaximumHealthyWater)
+	{
+		Diagnostics.Add(TEXT("Plante Feu sur-arrosee"));
+	}
+	if (Definition &&
+		Definition->Element == EBotanicusPlantElement::Shadow &&
+		EnvironmentState.LuminosityCondition ==
+			EBotanicusPlantEnvironmentCondition::TooHigh)
+	{
+		Diagnostics.Add(TEXT("Plante refermee : trop de lumiere"));
+	}
 	return Diagnostics.IsEmpty()
 		? NSLOCTEXT(
 			"BotanicusGrowing",
@@ -1870,6 +1905,20 @@ void ABotanicusPlantPotActor::RefreshVisuals()
 		GetConfiguredPlantBaseHeight();
 	const float LegacyFoliageScale =
 		FMath::Lerp(0.06f, 0.32f, VisualGrowth);
+	const bool bShadowClosed =
+		Definition &&
+		Definition->Element == EBotanicusPlantElement::Shadow &&
+		EnvironmentState.bEnvironmentAvailable &&
+		EnvironmentState.LuminosityCondition ==
+			EBotanicusPlantEnvironmentCondition::TooHigh;
+	const float BehaviourHorizontalScale = bShadowClosed
+		? FMath::Clamp(
+			Definition->ShadowClosedHorizontalScale, 0.1f, 1.0f)
+		: 1.0f;
+	const float BehaviourVerticalScale = bShadowClosed
+		? FMath::Clamp(
+			Definition->ShadowClosedVerticalScale, 0.1f, 1.0f)
+		: 1.0f;
 
 	TSoftObjectPtr<UStaticMesh> GrowthStageMeshReference;
 	if (Definition)
@@ -1940,13 +1989,18 @@ void ABotanicusPlantPotActor::RefreshVisuals()
 				MinimumHeight, MatureHeight, VisualGrowth);
 			const float UniformScale = DesiredHeight / MeshHeight;
 			const FVector MeshCentre = MeshBounds.GetCenter();
-			FoliageMesh->SetRelativeScale3D(FVector(UniformScale));
+			const FVector BehaviourScale(
+				UniformScale * BehaviourHorizontalScale,
+				UniformScale * BehaviourHorizontalScale,
+				UniformScale * BehaviourVerticalScale);
+			FoliageMesh->SetRelativeScale3D(BehaviourScale);
 			FoliageMesh->SetRelativeLocation(FVector(
-				-MeshCentre.X * UniformScale,
-				-MeshCentre.Y * UniformScale,
+				-MeshCentre.X * BehaviourScale.X,
+				-MeshCentre.Y * BehaviourScale.Y,
 				ConfiguredPlantBaseHeight -
-					MeshBounds.Min.Z * UniformScale));
-			FoliageTop = ConfiguredPlantBaseHeight + DesiredHeight;
+					MeshBounds.Min.Z * BehaviourScale.Z));
+			FoliageTop = ConfiguredPlantBaseHeight +
+				DesiredHeight * BehaviourVerticalScale;
 			if (bElementalDead)
 			{
 				FoliageMesh->SetVectorParameterValueOnMaterials(
@@ -1972,10 +2026,15 @@ void ABotanicusPlantPotActor::RefreshVisuals()
 				0.0f,
 				ConfiguredPlantBaseHeight + LegacyStemHeight));
 			FoliageMesh->SetRelativeScale3D(
-				FoliageShape * LegacyFoliageScale);
+				FoliageShape * LegacyFoliageScale *
+				FVector(
+					BehaviourHorizontalScale,
+					BehaviourHorizontalScale,
+					BehaviourVerticalScale));
 			FoliageTop = bHasPlant
 				? ConfiguredPlantBaseHeight + LegacyStemHeight +
-					50.0f * FoliageShape.Z * LegacyFoliageScale
+					50.0f * FoliageShape.Z * LegacyFoliageScale *
+						BehaviourVerticalScale
 				: 0.0f;
 			if (Definition)
 			{
@@ -2168,7 +2227,8 @@ void ABotanicusPlantPotActor::RefreshSoilVisual()
 			ConfiguredVolumeHeight,
 			FillAlpha,
 			FillAlpha > KINDA_SMALL_NUMBER || bIsFilling,
-			GetConfiguredSquareSoilProfile());
+			GetConfiguredSquareSoilProfile(),
+			WaterLevel);
 	}
 }
 

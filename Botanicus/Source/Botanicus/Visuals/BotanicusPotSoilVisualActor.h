@@ -7,6 +7,7 @@
 #include "BotanicusPotSoilVisualActor.generated.h"
 
 class UMaterialInterface;
+class UMaterialInstanceDynamic;
 class UProceduralMeshComponent;
 class USceneComponent;
 
@@ -28,7 +29,8 @@ public:
 		float FullHeight,
 		float FillAlpha,
 		bool bVisible,
-		bool bSquareProfile = false);
+		bool bSquareProfile = false,
+		float Wetness = 0.0f);
 
 protected:
 	virtual void OnConstruction(const FTransform& Transform) override;
@@ -64,8 +66,20 @@ protected:
 		meta=(ClampMin="0.0", ClampMax="5.0", Units="cm"))
 	float SurfaceThickness = 0.75f;
 
+	/** Values below 1 make the soil darken earlier as soon as it is watered. */
+	UPROPERTY(
+		EditDefaultsOnly,
+		BlueprintReadOnly,
+		Category="Botanicus|Soil|Wetness",
+		meta=(ClampMin="0.1", ClampMax="2.0"))
+	float WetnessResponseExponent = 0.5f;
+
 private:
 	void RebuildSoilMesh();
+	void RefreshSoilMaterial();
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> SoilDynamicMaterial;
 
 	FVector2D CurrentBottomRadii = FVector2D(20.0f, 20.0f);
 	FVector2D CurrentTopRadii = FVector2D(30.0f, 30.0f);
@@ -73,4 +87,5 @@ private:
 	float CurrentFillAlpha = 1.0f;
 	bool bCurrentVisible = true;
 	bool bCurrentSquareProfile = false;
+	float CurrentWetness = 0.0f;
 };

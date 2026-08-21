@@ -54,13 +54,22 @@ void ABotanicusClimateDeviceActor::BeginPlay()
 void ABotanicusClimateDeviceActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-	const ABotanicusPlayerController* LocalController =
-		GetWorld()
-			? Cast<ABotanicusPlayerController>(
-				GetWorld()->GetFirstPlayerController())
-			: nullptr;
 	const bool bShowZone = IsInPlacementMode() ||
-		(LocalController && LocalController->IsFurnitureMoveModeActive());
+		bFurnitureModeInfluenceZoneVisible;
+	for (UStaticMeshComponent* ZonePart : InfluenceZoneParts)
+	{
+		if (ZonePart)
+		{
+			ZonePart->SetVisibility(bShowZone);
+		}
+	}
+}
+
+void ABotanicusClimateDeviceActor::
+	SetFurnitureModeInfluenceZoneVisible(bool bVisible)
+{
+	bFurnitureModeInfluenceZoneVisible = bVisible;
+	const bool bShowZone = IsInPlacementMode() || bVisible;
 	for (UStaticMeshComponent* ZonePart : InfluenceZoneParts)
 	{
 		if (ZonePart)

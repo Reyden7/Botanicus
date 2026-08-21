@@ -7,8 +7,10 @@
 #include "Blueprint/WidgetBlueprintGeneratedClass.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Button.h"
+#include "Components/Border.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Components/ComboBoxString.h"
 #include "Components/Image.h"
 #include "Components/ScrollBox.h"
 #include "Components/Slider.h"
@@ -16,8 +18,12 @@
 #include "Components/VerticalBox.h"
 #include "Engine/Texture2D.h"
 #include "Kismet2/KismetEditorUtilities.h"
+#include "NiagaraEmitter.h"
+#include "NiagaraEmitterHandle.h"
+#include "NiagaraSystem.h"
 #include "UObject/SavePackage.h"
 #include "UI/BotanicusOrderCatalogWidget.h"
+#include "UI/BotanicusBotanistNotebookWidget.h"
 #include "WidgetBlueprint.h"
 
 namespace
@@ -149,6 +155,166 @@ bool UBotanicusCommandWidgetBuilder::RebuildCommandComputerWidget()
 	FAssetRegistryModule::AssetCreated(Blueprint);
 	return UPackage::SavePackage(Blueprint->GetOutermost(), Blueprint, *FPackageName::LongPackageNameToFilename(
 		TEXT("/Game/Botanicus/UI/Command/WBP_CommandComputer"), FPackageName::GetAssetPackageExtension()), FSavePackageArgs());
+#else
+	return false;
+#endif
+}
+
+bool UBotanicusCommandWidgetBuilder::RebuildBotanistNotebookWidget()
+{
+#if WITH_EDITOR
+	const TCHAR* ObjectPath =
+		TEXT("/Game/Botanicus/UI/Botanist/WBP_BotanistNotebook.WBP_BotanistNotebook");
+	const TCHAR* PackagePath =
+		TEXT("/Game/Botanicus/UI/Botanist/WBP_BotanistNotebook");
+	UWidgetBlueprint* Blueprint = LoadObject<UWidgetBlueprint>(nullptr, ObjectPath);
+	if (!Blueprint)
+	{
+		UPackage* Package = CreatePackage(PackagePath);
+		Blueprint = Cast<UWidgetBlueprint>(FKismetEditorUtilities::CreateBlueprint(
+			UBotanicusBotanistNotebookWidget::StaticClass(),
+			Package,
+			TEXT("WBP_BotanistNotebook"),
+			BPTYPE_Normal,
+			UWidgetBlueprint::StaticClass(),
+			UWidgetBlueprintGeneratedClass::StaticClass()));
+	}
+	if (!Blueprint || !Blueprint->WidgetTree)
+	{
+		return false;
+	}
+
+	Blueprint->Modify();
+	UWidgetTree* Tree = Blueprint->WidgetTree;
+	Tree->Modify();
+	UCanvasPanel* Root = Tree->ConstructWidget<UCanvasPanel>(
+		UCanvasPanel::StaticClass(), TEXT("BotanistNotebookDesignerRoot"));
+	Tree->RootWidget = Root;
+
+	UBorder* Backdrop = AddCanvasWidget<UBorder>(
+		Tree, Root, TEXT("Backdrop"), FVector2D::ZeroVector,
+		FVector2D(1920.0f, 1080.0f), 0);
+	Backdrop->SetBrushColor(FLinearColor(0.01f, 0.018f, 0.012f, 0.82f));
+
+	UBorder* NotebookPanel = AddCanvasWidget<UBorder>(
+		Tree, Root, TEXT("NotebookPanel"), FVector2D(185.0f, 80.0f),
+		FVector2D(1550.0f, 920.0f), 1);
+	NotebookPanel->SetBrushColor(FLinearColor(0.055f, 0.12f, 0.075f, 0.98f));
+
+	UTextBlock* Title = AddText(
+		Tree, Root, TEXT("NotebookTitle"), TEXT("CARNET DE BOTANISTE"),
+		FVector2D(255.0f, 125.0f), FVector2D(800.0f, 70.0f), 42);
+	Title->SetColorAndOpacity(FSlateColor(FLinearColor(0.95f, 0.84f, 0.48f)));
+	AddText(Tree, Root, TEXT("NotebookSubtitle"),
+		TEXT("Les espèces observées apparaissent progressivement dans le carnet."),
+		FVector2D(258.0f, 190.0f), FVector2D(950.0f, 38.0f), 19);
+
+	UButton* CloseButton = AddCanvasWidget<UButton>(
+		Tree, Root, TEXT("CloseButton"), FVector2D(1450.0f, 125.0f),
+		FVector2D(205.0f, 62.0f), 3);
+	UTextBlock* CloseLabel = Tree->ConstructWidget<UTextBlock>(
+		UTextBlock::StaticClass(), TEXT("CloseButtonLabel"));
+	CloseLabel->SetText(FText::FromString(TEXT("FERMER  [I]")));
+	CloseLabel->SetJustification(ETextJustify::Center);
+	FSlateFontInfo CloseFont = CloseLabel->GetFont();
+	CloseFont.Size = 22;
+	CloseLabel->SetFont(CloseFont);
+	CloseLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+	CloseButton->AddChild(CloseLabel);
+
+	AddText(Tree, Root, TEXT("SpeciesListTitle"), TEXT("ESPÈCES"),
+		FVector2D(265.0f, 280.0f), FVector2D(480.0f, 45.0f), 25);
+	UComboBoxString* Selector = AddCanvasWidget<UComboBoxString>(
+		Tree, Root, TEXT("PlantSelector"), FVector2D(260.0f, 335.0f),
+		FVector2D(520.0f, 58.0f), 3);
+	Selector->AddOption(TEXT("??? [01]"));
+	Selector->SetSelectedIndex(0);
+
+	UBorder* DetailPanel = AddCanvasWidget<UBorder>(
+		Tree, Root, TEXT("DetailPanel"), FVector2D(825.0f, 270.0f),
+		FVector2D(815.0f, 620.0f), 2);
+	DetailPanel->SetBrushColor(FLinearColor(0.025f, 0.055f, 0.037f, 0.95f));
+
+	UTextBlock* PlantName = AddText(Tree, Root, TEXT("PlantNameLabel"),
+		TEXT("ESPÈCE INCONNUE"), FVector2D(885.0f, 315.0f),
+		FVector2D(680.0f, 62.0f), 32);
+	PlantName->SetColorAndOpacity(FSlateColor(FLinearColor(0.78f, 0.95f, 0.56f)));
+	AddText(Tree, Root, TEXT("PlantElementLabel"), TEXT("Élément : ???"),
+		FVector2D(890.0f, 395.0f), FVector2D(650.0f, 42.0f), 21);
+	AddText(Tree, Root, TEXT("TemperatureLabel"), TEXT("Température idéale : ???"),
+		FVector2D(890.0f, 470.0f), FVector2D(650.0f, 42.0f), 21);
+	AddText(Tree, Root, TEXT("AirHumidityLabel"), TEXT("Humidité idéale : ???"),
+		FVector2D(890.0f, 535.0f), FVector2D(650.0f, 42.0f), 21);
+	AddText(Tree, Root, TEXT("LuminosityLabel"), TEXT("Luminosité idéale : ???"),
+		FVector2D(890.0f, 600.0f), FVector2D(650.0f, 42.0f), 21);
+	AddText(Tree, Root, TEXT("WaterLabel"), TEXT("Humidité du terreau : ???"),
+		FVector2D(890.0f, 665.0f), FVector2D(650.0f, 42.0f), 21);
+	AddText(Tree, Root, TEXT("GrowthLabel"), TEXT("Temps de croissance : ???"),
+		FVector2D(890.0f, 730.0f), FVector2D(650.0f, 42.0f), 21);
+	AddText(Tree, Root, TEXT("NotebookHint"),
+		TEXT("Placez une plante dans un pot pour découvrir sa fiche."),
+		FVector2D(265.0f, 870.0f), FVector2D(1120.0f, 42.0f), 18);
+
+	FKismetEditorUtilities::CompileBlueprint(Blueprint);
+	Blueprint->MarkPackageDirty();
+	FAssetRegistryModule::AssetCreated(Blueprint);
+	return UPackage::SavePackage(
+		Blueprint->GetOutermost(), Blueprint,
+		*FPackageName::LongPackageNameToFilename(
+			PackagePath, FPackageName::GetAssetPackageExtension()),
+		FSavePackageArgs());
+#else
+	return false;
+#endif
+}
+
+bool UBotanicusCommandWidgetBuilder::MakeAnimeWaterLocalSpace()
+{
+#if WITH_EDITOR
+	const TCHAR* AssetPath =
+		TEXT("/Game/Botanicus/VFX/Watering/NS_AnimeWater.NS_AnimeWater");
+	UNiagaraSystem* System = LoadObject<UNiagaraSystem>(nullptr, AssetPath);
+	if (!System)
+	{
+		return false;
+	}
+
+	System->Modify();
+	bool bFoundEmitter = false;
+	for (FNiagaraEmitterHandle& Handle : System->GetEmitterHandles())
+	{
+		FVersionedNiagaraEmitterData* EmitterData = Handle.GetEmitterData();
+		if (!EmitterData)
+		{
+			continue;
+		}
+
+		bFoundEmitter = true;
+		if (UNiagaraEmitter* Emitter =
+				Cast<UNiagaraEmitter>(Handle.GetEmitterBase()))
+		{
+			Emitter->Modify();
+		}
+		EmitterData->bLocalSpace = true;
+	}
+
+	if (!bFoundEmitter)
+	{
+		return false;
+	}
+
+	System->RequestCompile(true);
+	System->WaitForCompilationComplete(true, false);
+	System->MarkPackageDirty();
+	const FString PackageName = System->GetOutermost()->GetName();
+	const FString PackageFilename = FPackageName::LongPackageNameToFilename(
+		PackageName,
+		FPackageName::GetAssetPackageExtension());
+	return UPackage::SavePackage(
+		System->GetOutermost(),
+		System,
+		*PackageFilename,
+		FSavePackageArgs());
 #else
 	return false;
 #endif

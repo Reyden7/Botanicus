@@ -9,6 +9,8 @@
 class UStaticMeshComponent;
 class UTextRenderComponent;
 class UWidgetComponent;
+class UMaterialInstanceDynamic;
+class UMaterialInterface;
 class ABotanicusCharacter;
 struct FBotanicusPlantDefinition;
 
@@ -117,6 +119,12 @@ private:
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UStaticMeshComponent> MultiSoilMesh;
+
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> MultiSoilMaterial;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> MultiSoilDynamicMaterial;
 
 	UPROPERTY(VisibleAnywhere)
 	TArray<TObjectPtr<UStaticMeshComponent>> MultiStemMeshes;

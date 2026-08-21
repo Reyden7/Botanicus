@@ -332,6 +332,31 @@ struct BOTANICUS_API FBotanicusPlantDefinition
 		meta=(ClampMin="0.0"))
 	float WaterConsumptionPerSecond = 0.003f;
 
+	/** Quality lost per second by a Fire plant while its soil is overwatered.
+	 *  Set to zero on an individual Fire species to disable the reaction. */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category="Species Behaviour|Fire",
+		meta=(ClampMin="0.0", ClampMax="1.0", Units="Percent"))
+	float FireOverwateringCareLossPerSecond = 0.005f;
+
+	/** Horizontal size retained when a Shadow plant closes under excessive light. */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category="Species Behaviour|Shadow",
+		meta=(ClampMin="0.1", ClampMax="1.0"))
+	float ShadowClosedHorizontalScale = 0.82f;
+
+	/** Vertical size retained when a Shadow plant closes under excessive light. */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadOnly,
+		Category="Species Behaviour|Shadow",
+		meta=(ClampMin="0.1", ClampMax="1.0"))
+	float ShadowClosedVerticalScale = 0.55f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Presentation")
 	FLinearColor MatureColor =
 		FLinearColor(0.12f, 0.55f, 0.08f, 1.0f);

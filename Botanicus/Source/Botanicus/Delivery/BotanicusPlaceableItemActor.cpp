@@ -329,7 +329,10 @@ float ABotanicusPlaceableItemActor::
 		Mesh->GetComponentTransform());
 	const float MeshBottom =
 		WorldBounds.Origin.Z - WorldBounds.BoxExtent.Z;
-	return FMath::Max(0.0f, GetActorLocation().Z - MeshBottom);
+	// Keep this value signed. A Blueprint may intentionally move its visual
+	// mesh above or below the actor pivot; clamping negative values discarded
+	// that designer-authored offset and made the object float after moving it.
+	return GetActorLocation().Z - MeshBottom;
 }
 
 void ABotanicusPlaceableItemActor::OnRep_ItemKey()

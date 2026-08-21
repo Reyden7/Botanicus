@@ -15,6 +15,8 @@
 #include "GameFramework/PlayerController.h"
 #include "Growing/BotanicusPlantSubsystem.h"
 #include "Growing/BotanicusPlantCompatibility.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
 #include "Net/UnrealNetwork.h"
 #include "QuickBar/BotanicusQuickBarComponent.h"
 #include "UObject/ConstructorHelpers.h"
@@ -37,6 +39,13 @@ ABotanicusMultiPlantPotActor::ABotanicusMultiPlantPotActor()
 		TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereFinder(
 		TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface>
+		SoilMaterialFinder(
+			TEXT("/Game/Botanicus/Materials/Soil/M_BotanicusSoilWetPatchesV2.M_BotanicusSoilWetPatchesV2"));
+	if (SoilMaterialFinder.Succeeded())
+	{
+		MultiSoilMaterial = SoilMaterialFinder.Object;
+	}
 
 	TArray<UTextRenderComponent*> InheritedTexts;
 	GetComponents(InheritedTexts);
@@ -71,6 +80,10 @@ ABotanicusMultiPlantPotActor::ABotanicusMultiPlantPotActor()
 		CubeFinder.Succeeded() ? CubeFinder.Object : nullptr);
 	MultiSoilMesh->SetCollisionEnabled(
 		ECollisionEnabled::NoCollision);
+	if (MultiSoilMaterial)
+	{
+		MultiSoilMesh->SetMaterial(0, MultiSoilMaterial);
+	}
 
 	for (int32 Index = 0; Index < 4; ++Index)
 	{
@@ -144,6 +157,16 @@ ABotanicusMultiPlantPotActor::ABotanicusMultiPlantPotActor()
 void ABotanicusMultiPlantPotActor::BeginPlay()
 {
 	Super::BeginPlay();
+	if (MultiSoilMesh && MultiSoilMaterial)
+	{
+		MultiSoilDynamicMaterial = UMaterialInstanceDynamic::Create(
+			MultiSoilMaterial,
+			this);
+		if (MultiSoilDynamicMaterial)
+		{
+			MultiSoilMesh->SetMaterial(0, MultiSoilDynamicMaterial);
+		}
+	}
 	UClass* WidgetClass = LoadClass<UUserWidget>(
 		nullptr,
 		TEXT("/Game/Botanicus/UI/Plant/Environment/WBP_PlantEnvironmentAlerts.WBP_PlantEnvironmentAlerts_C"));
@@ -294,6 +317,27 @@ void ABotanicusMultiPlantPotActor::Tick(float DeltaSeconds)
 					DeltaSeconds,
 			0.0f,
 			1.0f);
+		if (Definition->Element == EBotanicusPlantElement::Fire &&
+			Slot.WaterLevel > Definition->MaximumHealthyWater)
+		{
+			const float ExcessRange = FMath::Max(
+				0.01f,
+				1.0f - Definition->MaximumHealthyWater);
+			const float ExcessSeverity = FMath::Clamp(
+				(Slot.WaterLevel - Definition->MaximumHealthyWater) /
+					ExcessRange,
+				0.0f,
+				1.0f);
+			Slot.CareScore = FMath::Clamp(
+				Slot.CareScore -
+					FMath::Max(
+						0.0f,
+						Definition->FireOverwateringCareLossPerSecond) *
+					DeltaSeconds *
+					FMath::Lerp(0.25f, 1.0f, ExcessSeverity),
+				0.0f,
+				1.0f);
+		}
 		if (Slot.EnvironmentState.bEnvironmentAvailable &&
 			Slot.WaterLevel >= Definition->MinimumHealthyWater &&
 			Slot.WaterLevel <= Definition->MaximumHealthyWater &&
@@ -857,6 +901,7 @@ void ABotanicusMultiPlantPotActor::RefreshVisuals()
 
 	int32 PlantedCount = 0;
 	int32 DeadCount = 0;
+	float TotalSoilWetness = 0.0f;
 	bool bOutsideGreenhouse = false;
 	float TotalEnvironmentalComfort = 0.0f;
 	int32 EnvironmentPlantCount = 0;
@@ -872,6 +917,9 @@ void ABotanicusMultiPlantPotActor::RefreshVisuals()
 		const FBotanicusPlantDefinition* Definition =
 			bPlanted ? FindPlant(Slot.PlantKey) : nullptr;
 		PlantedCount += bPlanted ? 1 : 0;
+		TotalSoilWetness += bPlanted
+			? FMath::Clamp(Slot.WaterLevel, 0.0f, 1.0f)
+			: 0.0f;
 		DeadCount += Slot.bElementalDead ? 1 : 0;
 		if (bPlanted && !Slot.bElementalDead)
 		{
@@ -908,6 +956,20 @@ void ABotanicusMultiPlantPotActor::RefreshVisuals()
 			? nullptr
 			: StageMeshReference.LoadSynchronous();
 		const bool bUsesStageMesh = StageMesh != nullptr;
+		const bool bShadowClosed =
+			Definition &&
+			Definition->Element == EBotanicusPlantElement::Shadow &&
+			Slot.EnvironmentState.bEnvironmentAvailable &&
+			Slot.EnvironmentState.LuminosityCondition ==
+				EBotanicusPlantEnvironmentCondition::TooHigh;
+		const float BehaviourHorizontalScale = bShadowClosed
+			? FMath::Clamp(
+				Definition->ShadowClosedHorizontalScale, 0.1f, 1.0f)
+			: 1.0f;
+		const float BehaviourVerticalScale = bShadowClosed
+			? FMath::Clamp(
+				Definition->ShadowClosedVerticalScale, 0.1f, 1.0f)
+			: 1.0f;
 		MultiStemMeshes[Index]->SetVisibility(
 			bPlanted && !bUsesStageMesh);
 		MultiFlowerMeshes[Index]->SetVisibility(bPlanted);
@@ -929,13 +991,17 @@ void ABotanicusMultiPlantPotActor::RefreshVisuals()
 				MinimumHeight, MatureHeight, Growth);
 			const float UniformScale = DesiredHeight / MeshHeight;
 			const FVector Centre = Bounds.GetCenter();
+			const FVector BehaviourScale(
+				UniformScale * BehaviourHorizontalScale,
+				UniformScale * BehaviourHorizontalScale,
+				UniformScale * BehaviourVerticalScale);
 			MultiFlowerMeshes[Index]->SetRelativeScale3D(
-				FVector(UniformScale));
+				BehaviourScale);
 			MultiFlowerMeshes[Index]->SetRelativeLocation(
 				BaseLocation + FVector(
-					-Centre.X * UniformScale,
-					-Centre.Y * UniformScale,
-					-Bounds.Min.Z * UniformScale));
+					-Centre.X * BehaviourScale.X,
+					-Centre.Y * BehaviourScale.Y,
+					-Bounds.Min.Z * BehaviourScale.Z));
 		}
 		else
 		{
@@ -959,7 +1025,10 @@ void ABotanicusMultiPlantPotActor::RefreshVisuals()
 				BaseLocation +
 					FVector(0.0f, 0.0f, 18.0f * Growth + 8.0f));
 			MultiFlowerMeshes[Index]->SetRelativeScale3D(
-				FVector(0.16f * Growth));
+				FVector(
+					0.16f * Growth * BehaviourHorizontalScale,
+					0.16f * Growth * BehaviourHorizontalScale,
+					0.16f * Growth * BehaviourVerticalScale));
 		}
 		if (EnvironmentAlertWidgets.IsValidIndex(Index) &&
 			EnvironmentAlertWidgets[Index])
@@ -1003,6 +1072,15 @@ void ABotanicusMultiPlantPotActor::RefreshVisuals()
 				bPlanted && DebugWidget &&
 				!ActorHasTag(TEXT("BotanicusPlacementPreview")));
 		}
+	}
+	if (MultiSoilDynamicMaterial)
+	{
+		const float AverageWetness = PlantedCount > 0
+			? TotalSoilWetness / static_cast<float>(PlantedCount)
+			: 0.0f;
+		MultiSoilDynamicMaterial->SetScalarParameterValue(
+			TEXT("Wetness"),
+			FMath::Sqrt(AverageWetness));
 	}
 	if (MultiStatusText)
 	{

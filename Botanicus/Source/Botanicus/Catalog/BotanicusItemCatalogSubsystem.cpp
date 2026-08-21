@@ -495,8 +495,11 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	WateringCan.WorldMesh = TSoftObjectPtr<UStaticMesh>(
 		FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube.Cube")));
 	WateringCan.WorldScale = FVector(0.38f, 0.2f, 0.28f);
-	WateringCan.WorldActorClass =
-		ABotanicusWateringCanActor::StaticClass();
+	// Spawn the editable Blueprint so its Niagara component transform is used
+	// by the held item, placement preview and replicated world actor.
+	WateringCan.WorldActorClass = TSoftClassPtr<AActor>(
+		FSoftObjectPath(TEXT(
+			"/Game/Botanicus/blueprints/BP_Item_WateringCan.BP_Item_WateringCan_C")));
 	WateringCan.Icon = TSoftObjectPtr<UTexture2D>(
 		FSoftObjectPath(TEXT(
 			"/Game/Botanicus/UI/Tools/T_WateringCan_Hotbar.T_WateringCan_Hotbar")));
