@@ -8,6 +8,7 @@
 #include "Catalog/BotanicusItemCatalogSubsystem.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
+#include "Components/ButtonSlot.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/HorizontalBox.h"
@@ -914,6 +915,11 @@ bool UBotanicusOrderCatalogWidget::BindDesignerLayout()
 		Button->OnClicked.AddUniqueDynamic(this, &UBotanicusOrderCatalogWidget::HandleToolsTabClicked);
 		TabButtons.Add(Button);
 	}
+	if (UButton* Button = Cast<UButton>(FindDesignerWidget(TEXT("CareTab"))))
+	{
+		Button->OnClicked.AddUniqueDynamic(this, &UBotanicusOrderCatalogWidget::HandleCareAndMaintenanceTabClicked);
+		TabButtons.Add(Button);
+	}
 	if (UButton* Button = Cast<UButton>(FindDesignerWidget(TEXT("PreparationTab"))))
 	{
 		Button->OnClicked.AddUniqueDynamic(this, &UBotanicusOrderCatalogWidget::HandlePreparationTabClicked);
@@ -1197,6 +1203,7 @@ void UBotanicusOrderCatalogWidget::BuildLayout()
 	{
 		UButton* Button = WidgetTree->ConstructWidget<UButton>();
 		MakeButtonChromeInvisible(Button);
+		Button->SetToolTipText(Label);
 		ApplyLayoutOffset(Button, Layout->Tab.Offset);
 		UOverlay* TabOverlay = WidgetTree->ConstructWidget<UOverlay>();
 		UImage* TabBackground = MakeCommandImage(
@@ -1205,27 +1212,15 @@ void UBotanicusOrderCatalogWidget::BuildLayout()
 			Layout->Tab.Size);
 		TabBackground->SetColorAndOpacity(FLinearColor::White);
 		TabOverlay->AddChildToOverlay(TabBackground);
-		UHorizontalBox* TabContent = WidgetTree->ConstructWidget<UHorizontalBox>();
-		TabContent->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 		UImage* TabIcon = MakeCommandImage(
 			WidgetTree,
 			IconAsset,
 			FVector2D(Layout->TabIconSize, Layout->TabIconSize));
-		UHorizontalBoxSlot* TabIconSlot =
-			TabContent->AddChildToHorizontalBox(
-				WrapAtSize(
-					WidgetTree,
-					TabIcon,
-					Layout->TabIconSize,
-					Layout->TabIconSize));
-		TabIconSlot->SetVerticalAlignment(VAlign_Center);
-		TabIconSlot->SetPadding(FMargin(0.0f, 0.0f, 8.0f, 0.0f));
-		UTextBlock* TabText = WidgetTree->ConstructWidget<UTextBlock>();
-		TabText->SetText(Label);
-		TabText->SetColorAndOpacity(FSlateColor(CommandCream));
-		SetTextSize(TabText, 12);
-		TabContent->AddChildToHorizontalBox(TabText)->SetVerticalAlignment(VAlign_Center);
-		UOverlaySlot* TabContentSlot = TabOverlay->AddChildToOverlay(TabContent);
+		TabIcon->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		UOverlaySlot* TabContentSlot = TabOverlay->AddChildToOverlay(
+			WrapAtSize(
+				WidgetTree, TabIcon, Layout->TabIconSize,
+				Layout->TabIconSize));
 		TabContentSlot->SetHorizontalAlignment(HAlign_Center);
 		TabContentSlot->SetVerticalAlignment(VAlign_Center);
 		Button->AddChild(WrapAtSize(
@@ -1242,27 +1237,32 @@ void UBotanicusOrderCatalogWidget::BuildLayout()
 	};
 
 	UButton* StyledSeedsButton = AddStyledTab(
-		TEXT("T_Command_Seeds"),
+		TEXT("T_Command_TabSeeds"),
 		NSLOCTEXT("BotanicusOrders", "SeedsTab", "GRAINES"));
 	StyledSeedsButton->OnClicked.AddDynamic(
 		this, &UBotanicusOrderCatalogWidget::HandleSeedsTabClicked);
 	UButton* StyledToolsButton = AddStyledTab(
-		TEXT("T_Command_WateringCan"),
+		TEXT("T_Command_TabTools"),
 		NSLOCTEXT("BotanicusOrders", "ToolsTab", "OUTILS DE JARDINAGE"));
 	StyledToolsButton->OnClicked.AddDynamic(
 		this, &UBotanicusOrderCatalogWidget::HandleToolsTabClicked);
+	UButton* StyledCareButton = AddStyledTab(
+		TEXT("T_Command_TabCare"),
+		NSLOCTEXT("BotanicusOrders", "CareTab", "SOIN ET ENTRETIEN"));
+	StyledCareButton->OnClicked.AddDynamic(
+		this, &UBotanicusOrderCatalogWidget::HandleCareAndMaintenanceTabClicked);
 	UButton* StyledPreparationButton = AddStyledTab(
 		TEXT("T_Command_Preparation"),
 		NSLOCTEXT("BotanicusOrders", "PreparationTab", "PREPARATION"));
 	StyledPreparationButton->OnClicked.AddDynamic(
 		this, &UBotanicusOrderCatalogWidget::HandlePreparationTabClicked);
 	UButton* StyledSalesButton = AddStyledTab(
-		TEXT("T_Command_Sales"),
+		TEXT("T_Command_TabSales"),
 		NSLOCTEXT("BotanicusOrders", "SalesTab", "VENTE"));
 	StyledSalesButton->OnClicked.AddDynamic(
 		this, &UBotanicusOrderCatalogWidget::HandleSalesTabClicked);
 	UButton* StyledBuildingsButton = AddStyledTab(
-		TEXT("T_Command_Buildings"),
+		TEXT("T_Command_TabBuildings"),
 		NSLOCTEXT("BotanicusOrders", "BuildingsTab", "BATIMENTS"));
 	StyledBuildingsButton->OnClicked.AddDynamic(
 		this, &UBotanicusOrderCatalogWidget::HandleBuildingsTabClicked);
@@ -1514,19 +1514,20 @@ void UBotanicusOrderCatalogWidget::BuildLayout()
 	TabsSlot->SetPadding(FMargin(0.0f, 16.0f, 0.0f, 4.0f));
 
 	auto AddTabButton =
-		[this, Tabs](const FText& Label) -> UButton*
+		[this, Tabs](const TCHAR* IconAsset, const FText& Tooltip) -> UButton*
 		{
 			UButton* Button =
 				WidgetTree->ConstructWidget<UButton>();
-			UTextBlock* Text =
-				WidgetTree->ConstructWidget<UTextBlock>();
-			Text->SetText(Label);
-			Text->SetColorAndOpacity(
-				FSlateColor(FLinearColor::White));
-			Text->SetMargin(FMargin(13.0f, 9.0f));
-			Text->SetJustification(ETextJustify::Center);
-			SetTextSize(Text, 13);
-			Button->AddChild(Text);
+			Button->SetToolTipText(Tooltip);
+			UImage* Icon = MakeCommandImage(
+				WidgetTree, IconAsset, FVector2D(44.0f, 44.0f));
+			if (UButtonSlot* ButtonSlot = Cast<UButtonSlot>(
+				Button->AddChild(WrapAtSize(
+					WidgetTree, Icon, 44.0f, 44.0f))))
+			{
+				ButtonSlot->SetHorizontalAlignment(HAlign_Center);
+				ButtonSlot->SetVerticalAlignment(VAlign_Center);
+			}
 			UHorizontalBoxSlot* Slot =
 				Tabs->AddChildToHorizontalBox(Button);
 			Slot->SetSize(
@@ -1537,11 +1538,13 @@ void UBotanicusOrderCatalogWidget::BuildLayout()
 		};
 
 	UButton* SeedsButton = AddTabButton(
+		TEXT("T_Command_TabSeeds"),
 		NSLOCTEXT("BotanicusOrders", "SeedsTab", "GRAINES"));
 	SeedsButton->OnClicked.AddDynamic(
 		this,
 		&UBotanicusOrderCatalogWidget::HandleSeedsTabClicked);
 	UButton* ToolsButton = AddTabButton(
+		TEXT("T_Command_TabTools"),
 		NSLOCTEXT(
 			"BotanicusOrders",
 			"ToolsTab",
@@ -1549,7 +1552,17 @@ void UBotanicusOrderCatalogWidget::BuildLayout()
 	ToolsButton->OnClicked.AddDynamic(
 		this,
 		&UBotanicusOrderCatalogWidget::HandleToolsTabClicked);
+	UButton* CareButton = AddTabButton(
+		TEXT("T_Command_TabCare"),
+		NSLOCTEXT(
+			"BotanicusOrders",
+			"CareTab",
+			"SOIN ET ENTRETIEN"));
+	CareButton->OnClicked.AddDynamic(
+		this,
+		&UBotanicusOrderCatalogWidget::HandleCareAndMaintenanceTabClicked);
 	UButton* PreparationButton = AddTabButton(
+		TEXT("T_Command_Preparation"),
 		NSLOCTEXT(
 			"BotanicusOrders",
 			"PreparationTab",
@@ -1558,11 +1571,13 @@ void UBotanicusOrderCatalogWidget::BuildLayout()
 		this,
 		&UBotanicusOrderCatalogWidget::HandlePreparationTabClicked);
 	UButton* SalesButton = AddTabButton(
+		TEXT("T_Command_TabSales"),
 		NSLOCTEXT("BotanicusOrders", "SalesTab", "VENTE"));
 	SalesButton->OnClicked.AddDynamic(
 		this,
 		&UBotanicusOrderCatalogWidget::HandleSalesTabClicked);
 	UButton* BuildingsButton = AddTabButton(
+		TEXT("T_Command_TabBuildings"),
 		NSLOCTEXT(
 			"BotanicusOrders",
 			"BuildingsTab",
@@ -1694,16 +1709,24 @@ void UBotanicusOrderCatalogWidget::RebuildItemRows()
 
 	for (const FBotanicusItemDefinition& Definition : Definitions)
 	{
-		const EBotanicusCatalogTab CatalogTab =
-			ActiveTab == EBotanicusCommandPanelTab::Seeds
-				? EBotanicusCatalogTab::Seeds
-				: ActiveTab ==
-						EBotanicusCommandPanelTab::GardeningTools
-					? EBotanicusCatalogTab::GardeningTools
-					: ActiveTab ==
-							EBotanicusCommandPanelTab::Preparation
-						? EBotanicusCatalogTab::Preparation
-						: EBotanicusCatalogTab::Sales;
+		EBotanicusCatalogTab CatalogTab = EBotanicusCatalogTab::Sales;
+		switch (ActiveTab)
+		{
+		case EBotanicusCommandPanelTab::Seeds:
+			CatalogTab = EBotanicusCatalogTab::Seeds;
+			break;
+		case EBotanicusCommandPanelTab::GardeningTools:
+			CatalogTab = EBotanicusCatalogTab::GardeningTools;
+			break;
+		case EBotanicusCommandPanelTab::CareAndMaintenance:
+			CatalogTab = EBotanicusCatalogTab::CareAndMaintenance;
+			break;
+		case EBotanicusCommandPanelTab::Preparation:
+			CatalogTab = EBotanicusCatalogTab::Preparation;
+			break;
+		default:
+			break;
+		}
 		if (Definition.ItemKey.IsNone() ||
 			!Definition.bPurchasable ||
 			(Definition.CatalogTabs &
@@ -2110,6 +2133,11 @@ void UBotanicusOrderCatalogWidget::HandleSeedsTabClicked()
 void UBotanicusOrderCatalogWidget::HandleToolsTabClicked()
 {
 	SelectTab(EBotanicusCommandPanelTab::GardeningTools);
+}
+
+void UBotanicusOrderCatalogWidget::HandleCareAndMaintenanceTabClicked()
+{
+	SelectTab(EBotanicusCommandPanelTab::CareAndMaintenance);
 }
 
 void UBotanicusOrderCatalogWidget::

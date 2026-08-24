@@ -25,6 +25,26 @@ bool IsDeprecatedStorageShelfType(FName ItemKey)
 		ItemKey == TEXT("StorageShelfWallSmall");
 }
 
+bool IsCareAndMaintenanceItem(FName ItemKey)
+{
+	const FString Key = ItemKey.ToString();
+	return Key.StartsWith(TEXT("Climate")) ||
+		Key.StartsWith(TEXT("Treatment")) ||
+		ItemKey == TEXT("WaterReserve");
+}
+
+void MigrateCareAndMaintenanceTab(FBotanicusItemDefinition& Definition)
+{
+	if (!IsCareAndMaintenanceItem(Definition.ItemKey))
+	{
+		return;
+	}
+	Definition.CatalogTabs &=
+		~static_cast<int32>(EBotanicusCatalogTab::GardeningTools);
+	Definition.CatalogTabs |=
+		static_cast<int32>(EBotanicusCatalogTab::CareAndMaintenance);
+}
+
 struct FNativePlantItemEntry
 {
 	const TCHAR* Key;
@@ -78,6 +98,7 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	{
 		for (FBotanicusItemDefinition& Definition : LoadedCatalog->Items)
 		{
+			MigrateCareAndMaintenanceTab(Definition);
 			if (IsDeprecatedStorageShelfType(Definition.ItemKey))
 			{
 				Definition.bPurchasable = false;
@@ -207,7 +228,7 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 			Device.DisplayName = DisplayName;
 			Device.Category = EBotanicusItemCategory::Equipment;
 			Device.CatalogTabs = static_cast<int32>(
-				EBotanicusCatalogTab::GardeningTools);
+				EBotanicusCatalogTab::CareAndMaintenance);
 			Device.WorldMesh = TSoftObjectPtr<UStaticMesh>(
 				FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube.Cube")));
 			Device.WorldScale = ProxyScale;
@@ -459,7 +480,7 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 			Treatment.DisplayName = DisplayName;
 			Treatment.Category = EBotanicusItemCategory::Supply;
 			Treatment.CatalogTabs = static_cast<int32>(
-				EBotanicusCatalogTab::GardeningTools);
+				EBotanicusCatalogTab::CareAndMaintenance);
 			Treatment.WorldMesh = TSoftObjectPtr<UStaticMesh>(
 				FSoftObjectPath(TEXT("/Engine/BasicShapes/Cylinder.Cylinder")));
 			Treatment.WorldScale = FVector(0.10f, 0.10f, 0.16f);
@@ -563,7 +584,7 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 		NSLOCTEXT("BotanicusCatalog", "WaterReserve", "Reserve d'eau");
 	WaterReserve.Category = EBotanicusItemCategory::Equipment;
 	WaterReserve.CatalogTabs =
-		static_cast<int32>(EBotanicusCatalogTab::GardeningTools);
+		static_cast<int32>(EBotanicusCatalogTab::CareAndMaintenance);
 	WaterReserve.WorldMesh = TSoftObjectPtr<UStaticMesh>(
 		FSoftObjectPath(TEXT("/Engine/BasicShapes/Cylinder.Cylinder")));
 	WaterReserve.WorldScale = FVector(0.55f, 0.55f, 0.8f);
@@ -1108,7 +1129,9 @@ UBotanicusItemCatalogSubsystem::GetAllItems() const
 				!Definition.ItemKey.ToString().StartsWith(
 					TEXT("SeedPacket_")))
 			{
-				Result.Add(Definition);
+				FBotanicusItemDefinition MigratedDefinition = Definition;
+				MigrateCareAndMaintenanceTab(MigratedDefinition);
+				Result.Add(MoveTemp(MigratedDefinition));
 			}
 		}
 	}
@@ -1121,7 +1144,9 @@ UBotanicusItemCatalogSubsystem::GetAllItems() const
 					return Existing.ItemKey == Fallback.ItemKey;
 				}))
 		{
-			Result.Add(Fallback);
+			FBotanicusItemDefinition MigratedFallback = Fallback;
+			MigrateCareAndMaintenanceTab(MigratedFallback);
+			Result.Add(MoveTemp(MigratedFallback));
 		}
 	}
 	return Result;

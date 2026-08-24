@@ -164,6 +164,45 @@ UButton* AddVisualButton(UWidgetTree* Tree, UCanvasPanel* Canvas, const FName Na
 	return Button;
 }
 
+UButton* AddVisualIconButton(
+	UWidgetTree* Tree,
+	UCanvasPanel* Canvas,
+	const FName Name,
+	const TCHAR* BackgroundTexture,
+	const TCHAR* IconTexture,
+	const FText& Tooltip,
+	const FVector2D Position,
+	const FVector2D Size)
+{
+	UButton* Button = AddCanvasWidget<UButton>(
+		Tree, Canvas, Name, Position, Size, 2);
+	FButtonStyle Style = Button->GetStyle();
+	FSlateBrush BackgroundBrush;
+	BackgroundBrush.SetResourceObject(CommandTexture(BackgroundTexture));
+	BackgroundBrush.ImageSize = Size;
+	BackgroundBrush.DrawAs = ESlateBrushDrawType::Image;
+	Style.SetNormal(BackgroundBrush);
+	Style.SetHovered(BackgroundBrush);
+	Style.SetPressed(BackgroundBrush);
+	Button->SetStyle(Style);
+	Button->SetToolTipText(Tooltip);
+
+	UImage* Icon = Tree->ConstructWidget<UImage>(
+		UImage::StaticClass(),
+		FName(*FString::Printf(TEXT("%sIcon"), *Name.ToString())));
+	if (UTexture2D* IconAsset = CommandTexture(IconTexture))
+	{
+		Icon->SetBrushFromTexture(IconAsset, true);
+	}
+	Icon->SetDesiredSizeOverride(FVector2D(48.0f, 48.0f));
+	if (UButtonSlot* IconSlot = Cast<UButtonSlot>(Button->AddChild(Icon)))
+	{
+		IconSlot->SetHorizontalAlignment(HAlign_Center);
+		IconSlot->SetVerticalAlignment(VAlign_Center);
+	}
+	return Button;
+}
+
 UImage* AddNotebookImage(UWidgetTree* Tree, UCanvasPanel* Canvas,
 	const FName Name, const TCHAR* Texture, const FVector2D Position,
 	const FVector2D Size, int32 ZOrder = 1)
@@ -254,11 +293,15 @@ bool UBotanicusCommandWidgetBuilder::RebuildCommandComputerWidget()
 	AddText(Tree, Root, TEXT("Designer_ShopOpenButtonLabel"), TEXT("MAGASIN FERME"), FVector2D(1498, 88), FVector2D(130, 30), 13)->SetVisibility(ESlateVisibility::Collapsed);
 	AddVisualButton(Tree, Root, TEXT("CloseButton"), TEXT("T_Command_CloseNormal"), TEXT("FERMER"), FVector2D(1655, 73), FVector2D(125, 60));
 
-	const TCHAR* TabNames[] = {TEXT("SeedsTab"), TEXT("ToolsTab"), TEXT("PreparationTab"), TEXT("SalesTab"), TEXT("BuildingsTab")};
-	const TCHAR* TabLabels[] = {TEXT("GRAINES"), TEXT("OUTILS DE JARDINAGE"), TEXT("PREPARATION"), TEXT("VENTE"), TEXT("BATIMENTS")};
-	for (int32 Index = 0; Index < 5; ++Index)
+	const TCHAR* TabNames[] = {TEXT("SeedsTab"), TEXT("ToolsTab"), TEXT("CareTab"), TEXT("PreparationTab"), TEXT("SalesTab"), TEXT("BuildingsTab")};
+	const TCHAR* TabIcons[] = {TEXT("T_Command_TabSeeds"), TEXT("T_Command_TabTools"), TEXT("T_Command_TabCare"), TEXT("T_Command_Preparation"), TEXT("T_Command_TabSales"), TEXT("T_Command_TabBuildings")};
+	const TCHAR* TabLabels[] = {TEXT("Graines"), TEXT("Outils"), TEXT("Soin et entretien"), TEXT("Préparation"), TEXT("Vente"), TEXT("Bâtiments")};
+	for (int32 Index = 0; Index < 6; ++Index)
 	{
-		AddVisualButton(Tree, Root, TabNames[Index], TEXT("T_Command_TabBackground"), TabLabels[Index], FVector2D(104 + Index * 336, 154), FVector2D(310, 58));
+		AddVisualIconButton(
+			Tree, Root, TabNames[Index], TEXT("T_Command_TabBackground"),
+			TabIcons[Index], FText::FromString(TabLabels[Index]),
+			FVector2D(104 + Index * 280, 154), FVector2D(260, 58));
 	}
 
 	UScrollBox* ItemsScroll = AddCanvasWidget<UScrollBox>(Tree, Root, TEXT("Designer_ItemsScroll"), FVector2D(100, 230), FVector2D(1380, 775), 2);
@@ -280,6 +323,158 @@ bool UBotanicusCommandWidgetBuilder::RebuildCommandComputerWidget()
 	FAssetRegistryModule::AssetCreated(Blueprint);
 	return UPackage::SavePackage(Blueprint->GetOutermost(), Blueprint, *FPackageName::LongPackageNameToFilename(
 		TEXT("/Game/Botanicus/UI/Command/WBP_CommandComputer"), FPackageName::GetAssetPackageExtension()), FSavePackageArgs());
+#else
+	return false;
+#endif
+}
+
+bool UBotanicusCommandWidgetBuilder::UpgradeCommandComputerCareTab()
+{
+#if WITH_EDITOR
+	const TCHAR* ObjectPath =
+		TEXT("/Game/Botanicus/UI/Command/WBP_CommandComputer.WBP_CommandComputer");
+	const TCHAR* PackagePath =
+		TEXT("/Game/Botanicus/UI/Command/WBP_CommandComputer");
+	UWidgetBlueprint* Blueprint = LoadObject<UWidgetBlueprint>(nullptr, ObjectPath);
+	if (!Blueprint || !Blueprint->WidgetTree)
+	{
+		return false;
+	}
+	UCanvasPanel* Root = Cast<UCanvasPanel>(Blueprint->WidgetTree->RootWidget);
+	if (!Root)
+	{
+		return false;
+	}
+
+	Blueprint->Modify();
+	Blueprint->WidgetTree->Modify();
+	Root->Modify();
+	UButton* CareTab = Cast<UButton>(
+		Blueprint->WidgetTree->FindWidget(TEXT("CareTab")));
+	if (!CareTab)
+	{
+		CareTab = AddVisualButton(
+			Blueprint->WidgetTree, Root, TEXT("CareTab"),
+			TEXT("T_Command_TabBackground"), TEXT("SOIN ET ENTRETIEN"),
+			FVector2D::ZeroVector, FVector2D(260.0f, 58.0f));
+	}
+
+	const TCHAR* TabNames[] = {
+		TEXT("SeedsTab"), TEXT("ToolsTab"), TEXT("CareTab"),
+		TEXT("PreparationTab"), TEXT("SalesTab"), TEXT("BuildingsTab")};
+	for (int32 Index = 0; Index < UE_ARRAY_COUNT(TabNames); ++Index)
+	{
+		if (UWidget* Tab = Blueprint->WidgetTree->FindWidget(TabNames[Index]))
+		{
+			if (UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(Tab->Slot))
+			{
+				Slot->SetPosition(FVector2D(104.0f + Index * 280.0f, 154.0f));
+				Slot->SetSize(FVector2D(260.0f, 58.0f));
+			}
+		}
+	}
+
+	// The editor compiler requires a GUID for every newly constructed widget.
+	// Resetting the stale map lets it rebuild the tree safely, then persist only
+	// the widgets that are still reachable from the current designer root.
+	Blueprint->WidgetVariableNameToGuidMap.Reset();
+	FKismetEditorUtilities::CompileBlueprint(Blueprint);
+	Blueprint->WidgetVariableNameToGuidMap.Reset();
+	Blueprint->WidgetTree->ForEachWidget([Blueprint](UWidget* Widget)
+	{
+		if (Widget)
+		{
+			Blueprint->WidgetVariableNameToGuidMap.Emplace(
+				Widget->GetFName(),
+				FGuid::NewDeterministicGuid(Widget->GetPathName()));
+		}
+	});
+	Blueprint->MarkPackageDirty();
+	const bool bSaved = UPackage::SavePackage(
+		Blueprint->GetOutermost(), Blueprint,
+		*FPackageName::LongPackageNameToFilename(
+			PackagePath, FPackageName::GetAssetPackageExtension()),
+		FSavePackageArgs());
+	UE_LOG(LogTemp, Display,
+		TEXT("BOTANICUS_COMMAND_CARE_TAB_UPGRADE saved=%d"), bSaved);
+	return bSaved;
+#else
+	return false;
+#endif
+}
+
+bool UBotanicusCommandWidgetBuilder::UpgradeCommandComputerTabIcons()
+{
+#if WITH_EDITOR
+	const TCHAR* ObjectPath =
+		TEXT("/Game/Botanicus/UI/Command/WBP_CommandComputer.WBP_CommandComputer");
+	const TCHAR* PackagePath =
+		TEXT("/Game/Botanicus/UI/Command/WBP_CommandComputer");
+	UWidgetBlueprint* Blueprint = LoadObject<UWidgetBlueprint>(nullptr, ObjectPath);
+	if (!Blueprint || !Blueprint->WidgetTree)
+	{
+		return false;
+	}
+
+	Blueprint->Modify();
+	UWidgetTree* Tree = Blueprint->WidgetTree;
+	Tree->Modify();
+	const TCHAR* TabNames[] = {
+		TEXT("SeedsTab"), TEXT("ToolsTab"), TEXT("CareTab"),
+		TEXT("PreparationTab"), TEXT("SalesTab"), TEXT("BuildingsTab")};
+	const TCHAR* IconNames[] = {
+		TEXT("T_Command_TabSeeds"), TEXT("T_Command_TabTools"),
+		TEXT("T_Command_TabCare"), TEXT("T_Command_Preparation"),
+		TEXT("T_Command_TabSales"), TEXT("T_Command_TabBuildings")};
+	const TCHAR* Tooltips[] = {
+		TEXT("Graines"), TEXT("Outils"), TEXT("Soin et entretien"),
+		TEXT("Préparation"), TEXT("Vente"), TEXT("Bâtiments")};
+
+	for (int32 Index = 0; Index < UE_ARRAY_COUNT(TabNames); ++Index)
+	{
+		UButton* Button = Cast<UButton>(Tree->FindWidget(TabNames[Index]));
+		UTexture2D* Texture = CommandTexture(IconNames[Index]);
+		if (!Button || !Texture)
+		{
+			return false;
+		}
+		Button->Modify();
+		Button->ClearChildren();
+		const FName IconWidgetName(*FString::Printf(
+			TEXT("%sIcon"), TabNames[Index]));
+		UImage* Icon = Tree->ConstructWidget<UImage>(
+			UImage::StaticClass(), IconWidgetName);
+		Icon->SetBrushFromTexture(Texture, true);
+		Icon->SetDesiredSizeOverride(FVector2D(48.0f, 48.0f));
+		if (UButtonSlot* Slot = Cast<UButtonSlot>(Button->AddChild(Icon)))
+		{
+			Slot->SetHorizontalAlignment(HAlign_Center);
+			Slot->SetVerticalAlignment(VAlign_Center);
+		}
+		Button->SetToolTipText(FText::FromString(Tooltips[Index]));
+	}
+
+	Blueprint->WidgetVariableNameToGuidMap.Reset();
+	FKismetEditorUtilities::CompileBlueprint(Blueprint);
+	Blueprint->WidgetVariableNameToGuidMap.Reset();
+	Tree->ForEachWidget([Blueprint](UWidget* Widget)
+	{
+		if (Widget)
+		{
+			Blueprint->WidgetVariableNameToGuidMap.Emplace(
+				Widget->GetFName(),
+				FGuid::NewDeterministicGuid(Widget->GetPathName()));
+		}
+	});
+	Blueprint->MarkPackageDirty();
+	const bool bSaved = UPackage::SavePackage(
+		Blueprint->GetOutermost(), Blueprint,
+		*FPackageName::LongPackageNameToFilename(
+			PackagePath, FPackageName::GetAssetPackageExtension()),
+		FSavePackageArgs());
+	UE_LOG(LogTemp, Display,
+		TEXT("BOTANICUS_COMMAND_TAB_ICONS_UPGRADE saved=%d"), bSaved);
+	return bSaved;
 #else
 	return false;
 #endif

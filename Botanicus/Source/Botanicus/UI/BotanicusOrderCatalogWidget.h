@@ -22,6 +22,7 @@ enum class EBotanicusCommandPanelTab : uint8
 {
 	Seeds,
 	GardeningTools,
+	CareAndMaintenance,
 	Preparation,
 	Sales,
 	Buildings
@@ -206,6 +207,9 @@ private:
 
 	UFUNCTION()
 	void HandleToolsTabClicked();
+
+	UFUNCTION()
+	void HandleCareAndMaintenanceTabClicked();
 
 	UFUNCTION()
 	void HandlePreparationTabClicked();

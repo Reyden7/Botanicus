@@ -37,7 +37,8 @@ enum class EBotanicusCatalogTab : uint8
 	Seeds = 1 << 0,
 	GardeningTools = 1 << 1,
 	Preparation = 1 << 2,
-	Sales = 1 << 3
+	Sales = 1 << 3,
+	CareAndMaintenance = 1 << 4
 };
 ENUM_CLASS_FLAGS(EBotanicusCatalogTab);
 

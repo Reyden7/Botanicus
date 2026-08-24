@@ -15,6 +15,14 @@ public:
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Botanicus|Editor")
 	static bool RebuildCommandComputerWidget();
 
+	/** Adds the designer-editable care tab without rebuilding the whole widget. */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Botanicus|Editor")
+	static bool UpgradeCommandComputerCareTab();
+
+	/** Replaces command tab labels with designer-editable icon images. */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Botanicus|Editor")
+	static bool UpgradeCommandComputerTabIcons();
+
 	/** Creates the designer-editable botanist notebook opened with I. */
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Botanicus|Editor")
 	static bool RebuildBotanistNotebookWidget();
