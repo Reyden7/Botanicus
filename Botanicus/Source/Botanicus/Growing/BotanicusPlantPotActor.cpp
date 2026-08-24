@@ -5,6 +5,7 @@
 #include "Botanicus.h"
 #include "BotanicusCharacter.h"
 #include "BotanicusPlayerController.h"
+#include "BotanicusGameState.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Building/BotanicusElementalGreenhouseActor.h"
 #include "Components/StaticMeshComponent.h"
@@ -601,6 +602,14 @@ void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 				DeltaSeconds,
 		0.0f,
 		1.0f);
+	const bool bDiseaseChanged = UpdateDiseases(*Definition, DeltaSeconds);
+	if (!DiseaseState.ActiveDiseaseKeys.IsEmpty())
+	{
+		CareScore = FMath::Clamp(
+			CareScore - DiseaseState.ActiveDiseaseKeys.Num() * 0.0005f *
+				DeltaSeconds,
+			0.0f, 1.0f);
+	}
 	if (Definition->Element == EBotanicusPlantElement::Fire &&
 		WaterLevel > Definition->MaximumHealthyWater)
 	{
@@ -632,6 +641,7 @@ void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 			DeltaSeconds /
 				FMath::Max(1.0f, Definition->GrowthDurationSeconds) *
 			EnvironmentState.GrowthRateMultiplier *
+			FMath::Pow(0.80f, DiseaseState.ActiveDiseaseKeys.Num()) *
 			EvaluateBotanicusPlantCompatibility(
 				GetWorld(),
 				GetActorLocation(),
@@ -675,6 +685,7 @@ void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 		!FMath::IsNearlyEqual(PreviousCareScore, CareScore, 0.0001f) ||
 		bPrimaryUseChanged ||
 		bElementalChanged ||
+		bDiseaseChanged ||
 		bEnvironmentChanged)
 	{
 		RefreshVisuals();
@@ -691,6 +702,7 @@ void ABotanicusPlantPotActor::GetLifetimeReplicatedProps(
 	DOREPLIFETIME(ABotanicusPlantPotActor, WaterLevel);
 	DOREPLIFETIME(ABotanicusPlantPotActor, GrowthProgress);
 	DOREPLIFETIME(ABotanicusPlantPotActor, CareScore);
+	DOREPLIFETIME(ABotanicusPlantPotActor, DiseaseState);
 	DOREPLIFETIME(ABotanicusPlantPotActor, EnvironmentState);
 	DOREPLIFETIME(ABotanicusPlantPotActor, WateringCount);
 	DOREPLIFETIME(ABotanicusPlantPotActor, PlantingStartServerTime);
@@ -903,6 +915,31 @@ void ABotanicusPlantPotActor::BeginPrimaryUse(AActor* Interactor)
 			TEXT("Cette plante est morte a cause d'une reaction elementaire."));
 		return;
 	}
+	const FBotanicusPlantDiseaseDefinition* TreatableDisease =
+		DiseaseState.ActiveDiseaseKeys.IsEmpty()
+			? nullptr
+			: GetBotanicusPlantDiseaseDefinitions().FindByPredicate(
+				[this, SelectedItemKey](
+					const FBotanicusPlantDiseaseDefinition& Disease)
+				{
+					return Disease.TreatmentItemKey == SelectedItemKey &&
+						DiseaseState.ActiveDiseaseKeys.Contains(
+							Disease.DiseaseKey);
+				});
+	if (TreatableDisease)
+	{
+		const FText DiseaseName = TreatableDisease->DisplayName;
+		if (QuickBar->ConsumeSelectedItem(1) &&
+			TryApplyDiseaseTreatment(SelectedItemKey))
+		{
+			SendInteractorMessage(
+				Interactor,
+				FString::Printf(
+					TEXT("Traitement réussi : %s est soignée."),
+					*DiseaseName.ToString()));
+		}
+		return;
+	}
 
 	if (SelectedItemKey == TEXT("GardenTrowel") &&
 		PlantKey.IsNone() &&
@@ -954,6 +991,7 @@ void ABotanicusPlantPotActor::BeginPrimaryUse(AActor* Interactor)
 			return;
 		}
 		PlantKey = Definition->PlantKey;
+		DiseaseState = FBotanicusPlantDiseaseState();
 		PlantingStartServerTime = GetWorld()
 			? GetWorld()->GetTimeSeconds()
 			: 0.0f;
@@ -1211,6 +1249,7 @@ bool ABotanicusPlantPotActor::UpdatePrimaryUse(float DeltaSeconds)
 			WaterLevel = 0.0f;
 			GrowthProgress = 0.0f;
 			CareScore = 0.0f;
+			DiseaseState = FBotanicusPlantDiseaseState();
 			WateringCount = 0;
 			bElementalDead = false;
 			HarvestProgress = 0.0f;
@@ -1320,7 +1359,8 @@ void ABotanicusPlantPotActor::RestoreGrowingState(
 	float InWaterLevel,
 	float InGrowthProgress,
 	float InCareScore,
-	bool bInElementalDead)
+	bool bInElementalDead,
+	const FBotanicusPlantDiseaseState& InDiseaseState)
 {
 	if (!HasAuthority())
 	{
@@ -1332,6 +1372,9 @@ void ABotanicusPlantPotActor::RestoreGrowingState(
 	WaterLevel = FMath::Clamp(InWaterLevel, 0.0f, 1.0f);
 	GrowthProgress = FMath::Clamp(InGrowthProgress, 0.0f, 1.0f);
 	CareScore = FMath::Clamp(InCareScore, 0.0f, 1.0f);
+	DiseaseState = PlantKey.IsNone()
+		? FBotanicusPlantDiseaseState()
+		: InDiseaseState;
 	bElementalDead = bInElementalDead && !PlantKey.IsNone();
 	if (PlantKey.IsNone())
 	{
@@ -1643,6 +1686,54 @@ bool ABotanicusPlantPotActor::UpdateEnvironmentState(
 	}
 	EnvironmentState = NewState;
 	return true;
+}
+
+bool ABotanicusPlantPotActor::UpdateDiseases(
+	const FBotanicusPlantDefinition& Definition,
+	float DeltaSeconds)
+{
+	TArray<FName> NewDiseaseKeys;
+	const bool bChanged = UpdateBotanicusPlantDiseaseState(
+		DiseaseState,
+		Definition.DiseaseSusceptibility,
+		Definition.Element,
+		WaterLevel,
+		Definition.MaximumHealthyWater,
+		EnvironmentState,
+		DeltaSeconds,
+		NewDiseaseKeys);
+	if (bChanged)
+	{
+		if (ABotanicusGameState* GameState =
+			GetWorld()->GetGameState<ABotanicusGameState>())
+		{
+			for (const FName DiseaseKey : NewDiseaseKeys)
+			{
+				GameState->RegisterDiscoveredDisease(DiseaseKey);
+			}
+		}
+	}
+	return bChanged;
+}
+
+bool ABotanicusPlantPotActor::TryApplyDiseaseTreatment(
+	FName TreatmentItemKey)
+{
+	if (!HasAuthority() || TreatmentItemKey.IsNone())
+	{
+		return false;
+	}
+	FName CuredDiseaseKey;
+	if (ApplyBotanicusPlantDiseaseTreatment(
+		DiseaseState,
+		TreatmentItemKey,
+		CuredDiseaseKey))
+	{
+		RefreshVisuals();
+		ForceNetUpdate();
+		return true;
+	}
+	return false;
 }
 
 FText ABotanicusPlantPotActor::GetEnvironmentDiagnostic() const

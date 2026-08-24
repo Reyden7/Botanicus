@@ -450,6 +450,51 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 		static_cast<int32>(
 			EBotanicusPlacementSurface::Floor);
 
+	const auto AddPlantTreatment =
+		[this](FName ItemKey, const FText& DisplayName, int32 Price)
+		{
+			FBotanicusItemDefinition& Treatment =
+				NativeFallbackItems.AddDefaulted_GetRef();
+			Treatment.ItemKey = ItemKey;
+			Treatment.DisplayName = DisplayName;
+			Treatment.Category = EBotanicusItemCategory::Supply;
+			Treatment.CatalogTabs = static_cast<int32>(
+				EBotanicusCatalogTab::GardeningTools);
+			Treatment.WorldMesh = TSoftObjectPtr<UStaticMesh>(
+				FSoftObjectPath(TEXT("/Engine/BasicShapes/Cylinder.Cylinder")));
+			Treatment.WorldScale = FVector(0.10f, 0.10f, 0.16f);
+			Treatment.MaximumStack = 10;
+			Treatment.WeightClass = EBotanicusItemWeightClass::Hotbar;
+			Treatment.Price = Price;
+			Treatment.DeliveryQuantity = 3;
+			Treatment.DeliveryDelaySeconds = 2.0f;
+			Treatment.AllowedPlacementSurfaces = 0;
+		};
+	AddPlantTreatment(TEXT("TreatmentElementNormal"),
+		NSLOCTEXT("BotanicusCatalog", "TreatmentElementNormal",
+			"Fortifiant végétal"), 55);
+	AddPlantTreatment(TEXT("TreatmentElementFire"),
+		NSLOCTEXT("BotanicusCatalog", "TreatmentElementFire",
+			"Élixir igné"), 80);
+	AddPlantTreatment(TEXT("TreatmentElementWater"),
+		NSLOCTEXT("BotanicusCatalog", "TreatmentElementWater",
+			"Sérum aquatique"), 80);
+	AddPlantTreatment(TEXT("TreatmentElementIce"),
+		NSLOCTEXT("BotanicusCatalog", "TreatmentElementIce",
+			"Baume cryogénique"), 85);
+	AddPlantTreatment(TEXT("TreatmentElementShadow"),
+		NSLOCTEXT("BotanicusCatalog", "TreatmentElementShadow",
+			"Essence d'ombre"), 90);
+	AddPlantTreatment(TEXT("TreatmentRootRot"),
+		NSLOCTEXT("BotanicusCatalog", "TreatmentRootRot",
+			"Poudre drainante"), 65);
+	AddPlantTreatment(TEXT("TreatmentHumidity"),
+		NSLOCTEXT("BotanicusCatalog", "TreatmentHumidity",
+			"Sérum hygrométrique"), 65);
+	AddPlantTreatment(TEXT("TreatmentLightBurn"),
+		NSLOCTEXT("BotanicusCatalog", "TreatmentLightBurn",
+			"Baume réparateur"), 65);
+
 	const auto AddSeedDefinition =
 		[this](
 			FName ItemKey,

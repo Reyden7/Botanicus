@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/SaveGame.h"
+#include "Growing/BotanicusPlantCatalog.h"
 #include "QuickBar/BotanicusQuickBarComponent.h"
 #include "BotanicusWorldSaveGame.generated.h"
 
@@ -229,6 +230,12 @@ struct BOTANICUS_API FBotanicusSavedWorldItem
 	TArray<bool> MultiPlanterElementalDead;
 
 	UPROPERTY()
+	TArray<FBotanicusPlantDiseaseState> MultiPlanterDiseaseStates;
+
+	UPROPERTY()
+	FBotanicusPlantDiseaseState PlantDiseaseState;
+
+	UPROPERTY()
 	FName DisplayedPlantItemKey = NAME_None;
 
 	UPROPERTY()
@@ -271,7 +278,7 @@ class BOTANICUS_API UBotanicusWorldSaveGame : public USaveGame
 
 public:
 	UPROPERTY()
-	int32 SaveVersion = 30;
+	int32 SaveVersion = 31;
 
 	UPROPERTY()
 	FString MapName;
@@ -336,6 +343,9 @@ public:
 
 	UPROPERTY()
 	float TrendRemainingSeconds = 600.0f;
+
+	UPROPERTY()
+	TArray<FName> DiscoveredDiseaseKeys;
 
 	UPROPERTY()
 	TArray<FBotanicusSavedBuildingActor> BuildingActors;

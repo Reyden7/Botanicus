@@ -3,6 +3,7 @@
 #include "UI/BotanicusBotanistNotebookWidget.h"
 
 #include "BotanicusPlayerController.h"
+#include "BotanicusGameState.h"
 #include "Components/Button.h"
 #include "Components/Image.h"
 #include "Components/TextBlock.h"
@@ -479,17 +480,45 @@ void UBotanicusBotanistNotebookWidget::ShowPlantOnPage(
 FText UBotanicusBotanistNotebookWidget::BuildPlantNote(
 	const FBotanicusPlantDefinition& Definition) const
 {
+	TArray<FString> NoteLines;
 	if (!Definition.CompatibleNeighbourPlantKeys.IsEmpty())
 	{
-		return FText::FromString(
+		NoteLines.Add(
 			TEXT("Note : apprécie la présence de plantes compatibles à proximité."));
 	}
-	if (!Definition.IncompatibleNeighbourPlantKeys.IsEmpty())
+	else if (!Definition.IncompatibleNeighbourPlantKeys.IsEmpty())
 	{
-		return FText::FromString(
+		NoteLines.Add(
 			TEXT("Note : préfère être éloignée de certaines espèces."));
 	}
-	return FText::FromString(TEXT("Note : aucune interaction particulière connue."));
+	else
+	{
+		NoteLines.Add(TEXT("Note : aucune interaction particulière connue."));
+	}
+
+	const ABotanicusGameState* GameState = GetWorld()
+		? GetWorld()->GetGameState<ABotanicusGameState>()
+		: nullptr;
+	if (GameState)
+	{
+		for (const FBotanicusPlantDiseaseDefinition& Disease :
+			GetBotanicusPlantDiseaseDefinitions())
+		{
+			const bool bRelevantToPlant =
+				!Disease.bElementSpecific || Disease.Element == Definition.Element;
+			if (!bRelevantToPlant ||
+				!GameState->IsDiseaseDiscovered(Disease.DiseaseKey))
+			{
+				continue;
+			}
+			NoteLines.Add(FString::Printf(
+				TEXT("Maladie : %s\nCause : %s\nTraitement : %s"),
+				*Disease.DisplayName.ToString(),
+				*Disease.CauseDescription.ToString(),
+				*Disease.TreatmentDescription.ToString()));
+		}
+	}
+	return FText::FromString(FString::Join(NoteLines, TEXT("\n\n")));
 }
 
 void UBotanicusBotanistNotebookWidget::SetDetailText(

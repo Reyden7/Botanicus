@@ -3,6 +3,7 @@
 #include "Growing/BotanicusMultiPlantPotActor.h"
 
 #include "BotanicusCharacter.h"
+#include "BotanicusGameState.h"
 #include "Building/BotanicusElementalGreenhouseActor.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Components/StaticMeshComponent.h"
@@ -317,6 +318,37 @@ void ABotanicusMultiPlantPotActor::Tick(float DeltaSeconds)
 					DeltaSeconds,
 			0.0f,
 			1.0f);
+		TArray<FName> NewDiseaseKeys;
+		const bool bDiseaseChanged = UpdateBotanicusPlantDiseaseState(
+			Slot.DiseaseState,
+			Definition->DiseaseSusceptibility,
+			Definition->Element,
+			Slot.WaterLevel,
+			Definition->MaximumHealthyWater,
+			Slot.EnvironmentState,
+			DeltaSeconds,
+			NewDiseaseKeys);
+		if (bDiseaseChanged)
+		{
+			if (ABotanicusGameState* GameState =
+				GetWorld()->GetGameState<ABotanicusGameState>())
+			{
+				for (const FName DiseaseKey : NewDiseaseKeys)
+				{
+					GameState->RegisterDiscoveredDisease(DiseaseKey);
+				}
+			}
+			bChanged = true;
+		}
+		if (!Slot.DiseaseState.ActiveDiseaseKeys.IsEmpty())
+		{
+			Slot.CareScore = FMath::Clamp(
+				Slot.CareScore -
+					Slot.DiseaseState.ActiveDiseaseKeys.Num() * 0.0005f *
+						DeltaSeconds,
+				0.0f,
+				1.0f);
+		}
 		if (Definition->Element == EBotanicusPlantElement::Fire &&
 			Slot.WaterLevel > Definition->MaximumHealthyWater)
 		{
@@ -349,6 +381,9 @@ void ABotanicusMultiPlantPotActor::Tick(float DeltaSeconds)
 					1.0f,
 					Definition->GrowthDurationSeconds) *
 				Slot.EnvironmentState.GrowthRateMultiplier *
+				FMath::Pow(
+					0.80f,
+					Slot.DiseaseState.ActiveDiseaseKeys.Num()) *
 				EvaluateBotanicusPlantCompatibility(
 					GetWorld(),
 					GetActorTransform().TransformPosition(
@@ -523,6 +558,36 @@ void ABotanicusMultiPlantPotActor::BeginPrimaryUse(
 			TEXT("Cette plante est morte a cause d'une reaction elementaire."));
 		return;
 	}
+	const FBotanicusPlantDiseaseDefinition* TreatableDisease =
+		Slot.DiseaseState.ActiveDiseaseKeys.IsEmpty()
+			? nullptr
+			: GetBotanicusPlantDiseaseDefinitions().FindByPredicate(
+				[&Slot, SelectedKey](
+					const FBotanicusPlantDiseaseDefinition& Disease)
+				{
+					return Disease.TreatmentItemKey == SelectedKey &&
+						Slot.DiseaseState.ActiveDiseaseKeys.Contains(
+							Disease.DiseaseKey);
+				});
+	if (TreatableDisease)
+	{
+		FName CuredDiseaseKey;
+		if (QuickBar->ConsumeSelectedItem(1) &&
+			ApplyBotanicusPlantDiseaseTreatment(
+				Slot.DiseaseState,
+				SelectedKey,
+				CuredDiseaseKey))
+		{
+			SendMessage(
+				Interactor,
+				FString::Printf(
+					TEXT("Traitement réussi : %s est soignée."),
+					*TreatableDisease->DisplayName.ToString()));
+			RefreshVisuals();
+			ForceNetUpdate();
+		}
+		return;
+	}
 	if (Slot.PlantKey.IsNone())
 	{
 		const UGameInstance* GameInstance = GetGameInstance();
@@ -541,6 +606,7 @@ void ABotanicusMultiPlantPotActor::BeginPrimaryUse(
 			return;
 		}
 		Slot.PlantKey = Definition->PlantKey;
+		Slot.DiseaseState = FBotanicusPlantDiseaseState();
 		Slot.bElementalDead = false;
 		Slot.GrowthProgress = 0.02f;
 		Slot.CareScore = 0.01f;

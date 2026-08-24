@@ -19,6 +19,99 @@ enum class EBotanicusPlantElement : uint8
 	Shadow
 };
 
+/** Runtime disease state carried independently by every living plant. */
+USTRUCT(BlueprintType)
+struct BOTANICUS_API FBotanicusPlantDiseaseState
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category="Disease")
+	TArray<FName> ActiveDiseaseKeys;
+
+	UPROPERTY(BlueprintReadOnly, Category="Disease|Exposure")
+	float ElementNeglectSeconds = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category="Disease|Exposure")
+	float OverwateringSeconds = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category="Disease|Exposure")
+	float IncorrectHumiditySeconds = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category="Disease|Exposure")
+	float ExcessLightSeconds = 0.0f;
+};
+
+/** Author-facing thresholds controlling how quickly one species becomes ill. */
+USTRUCT(BlueprintType)
+struct BOTANICUS_API FBotanicusPlantDiseaseSusceptibility
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Disease",
+		meta=(ClampMin="1.0", Units="s"))
+	float ElementNeglectDelaySeconds = 120.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Disease",
+		meta=(ClampMin="1.0", Units="s"))
+	float OverwateringDelaySeconds = 45.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Disease",
+		meta=(ClampMin="1.0", Units="s"))
+	float IncorrectHumidityDelaySeconds = 90.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Disease",
+		meta=(ClampMin="1.0", Units="s"))
+	float ExcessLightDelaySeconds = 60.0f;
+};
+
+/** Read-only description used by treatments and the botanist notebook. */
+USTRUCT(BlueprintType)
+struct BOTANICUS_API FBotanicusPlantDiseaseDefinition
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category="Disease")
+	FName DiseaseKey = NAME_None;
+
+	UPROPERTY(BlueprintReadOnly, Category="Disease")
+	FText DisplayName;
+
+	UPROPERTY(BlueprintReadOnly, Category="Disease")
+	FText CauseDescription;
+
+	UPROPERTY(BlueprintReadOnly, Category="Disease")
+	FText TreatmentDescription;
+
+	UPROPERTY(BlueprintReadOnly, Category="Disease")
+	FName TreatmentItemKey = NAME_None;
+
+	UPROPERTY(BlueprintReadOnly, Category="Disease")
+	bool bElementSpecific = false;
+
+	UPROPERTY(BlueprintReadOnly, Category="Disease")
+	EBotanicusPlantElement Element = EBotanicusPlantElement::Normal;
+};
+
+BOTANICUS_API const TArray<FBotanicusPlantDiseaseDefinition>&
+GetBotanicusPlantDiseaseDefinitions();
+BOTANICUS_API const FBotanicusPlantDiseaseDefinition*
+FindBotanicusPlantDisease(FName DiseaseKey);
+BOTANICUS_API FName GetBotanicusElementDiseaseKey(
+	EBotanicusPlantElement Element);
+BOTANICUS_API bool UpdateBotanicusPlantDiseaseState(
+	FBotanicusPlantDiseaseState& State,
+	const FBotanicusPlantDiseaseSusceptibility& Susceptibility,
+	EBotanicusPlantElement Element,
+	float WaterLevel,
+	float MaximumHealthyWater,
+	const struct FBotanicusPlantEnvironmentState& EnvironmentState,
+	float DeltaSeconds,
+	TArray<FName>& OutNewDiseaseKeys);
+BOTANICUS_API bool ApplyBotanicusPlantDiseaseTreatment(
+	FBotanicusPlantDiseaseState& State,
+	FName TreatmentItemKey,
+	FName& OutCuredDiseaseKey);
+
 /** Ideal and survivable greenhouse ranges authored independently per species. */
 USTRUCT(BlueprintType)
 struct BOTANICUS_API FBotanicusPlantEnvironmentRequirements
@@ -271,6 +364,10 @@ struct BOTANICUS_API FBotanicusPlantDefinition
 	/** Climate ranges used to evaluate this species in the greenhouse. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Environment")
 	FBotanicusPlantEnvironmentRequirements Environment;
+
+	/** Delays before prolonged poor care develops persistent diseases. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Diseases")
+	FBotanicusPlantDiseaseSusceptibility DiseaseSusceptibility;
 
 	/** Mesh displayed from 0% up to (but excluding) 30% growth. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Growth|Visual Stages",

@@ -79,6 +79,7 @@ void ABotanicusGameState::GetLifetimeReplicatedProps(
 	DOREPLIFETIME(ABotanicusGameState, DevelopmentTimeScale);
 	DOREPLIFETIME(ABotanicusGameState, DayTimeMinutes);
 	DOREPLIFETIME(ABotanicusGameState, OutdoorEnvironment);
+	DOREPLIFETIME(ABotanicusGameState, DiscoveredDiseaseKeys);
 	DOREPLIFETIME(ABotanicusGameState, TotalPlantsSold);
 	DOREPLIFETIME(ABotanicusGameState, TotalCatalogOrders);
 	DOREPLIFETIME(ABotanicusGameState, ShopReputationPoints);
@@ -88,6 +89,35 @@ void ABotanicusGameState::GetLifetimeReplicatedProps(
 	DOREPLIFETIME(ABotanicusGameState, TrendTypeTag);
 	DOREPLIFETIME(ABotanicusGameState, TrendQualityTag);
 	DOREPLIFETIME(ABotanicusGameState, TrendEndServerTime);
+}
+
+void ABotanicusGameState::RegisterDiscoveredDisease(FName DiseaseKey)
+{
+	if (!HasAuthority() || DiseaseKey.IsNone() ||
+		DiscoveredDiseaseKeys.Contains(DiseaseKey))
+	{
+		return;
+	}
+	DiscoveredDiseaseKeys.Add(DiseaseKey);
+	ForceNetUpdate();
+}
+
+void ABotanicusGameState::InitializeDiscoveredDiseases(
+	const TArray<FName>& DiseaseKeys)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	DiscoveredDiseaseKeys.Reset();
+	for (const FName DiseaseKey : DiseaseKeys)
+	{
+		if (!DiseaseKey.IsNone())
+		{
+			DiscoveredDiseaseKeys.AddUnique(DiseaseKey);
+		}
+	}
+	ForceNetUpdate();
 }
 
 float ABotanicusGameState::GetTrendRemainingSeconds() const

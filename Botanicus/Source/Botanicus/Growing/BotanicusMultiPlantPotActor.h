@@ -39,6 +39,9 @@ struct BOTANICUS_API FBotanicusMultiPlantSlotState
 
 	UPROPERTY(BlueprintReadOnly, Category="Environment")
 	FBotanicusPlantEnvironmentState EnvironmentState;
+
+	UPROPERTY(BlueprintReadOnly, Category="Disease")
+	FBotanicusPlantDiseaseState DiseaseState;
 };
 
 /** Rectangular preparation planter containing two to four independent plants. */

@@ -51,7 +51,9 @@ public:
 		float InWaterLevel,
 		float InGrowthProgress,
 		float InCareScore,
-		bool bInElementalDead = false);
+		bool bInElementalDead = false,
+		const FBotanicusPlantDiseaseState& InDiseaseState =
+			FBotanicusPlantDiseaseState());
 
 	/** True only when there is enough soil to plant or repot. */
 	bool HasSoil() const { return IsSoilFull(); }
@@ -59,6 +61,19 @@ public:
 	float GetWaterLevel() const { return WaterLevel; }
 	float GetGrowthProgress() const { return GrowthProgress; }
 	float GetCareScore() const { return CareScore; }
+	UFUNCTION(BlueprintPure, Category="Botanicus|Growing|Diseases")
+	FBotanicusPlantDiseaseState GetDiseaseState() const
+	{
+		return DiseaseState;
+	}
+	UFUNCTION(BlueprintPure, Category="Botanicus|Growing|Diseases")
+	bool HasActiveDisease() const
+	{
+		return !DiseaseState.ActiveDiseaseKeys.IsEmpty();
+	}
+	/** Removes the disease matching this treatment item. */
+	UFUNCTION(BlueprintCallable, Category="Botanicus|Growing|Diseases")
+	bool TryApplyDiseaseTreatment(FName TreatmentItemKey);
 	UFUNCTION(BlueprintPure, Category="Botanicus|Growing|Environment")
 	FBotanicusPlantEnvironmentState GetEnvironmentState() const
 	{
@@ -111,6 +126,9 @@ private:
 		const FBotanicusPlantDefinition& Definition);
 	bool ProcessElementalInteractions(
 		const FBotanicusPlantDefinition& Definition);
+	bool UpdateDiseases(
+		const FBotanicusPlantDefinition& Definition,
+		float DeltaSeconds);
 	void RefreshLocalContextAction();
 	FVector2D GetConfiguredSoilHorizontalOffset() const;
 	float GetConfiguredSoilMaximumHeight() const;
@@ -293,6 +311,9 @@ private:
 
 	UPROPERTY(ReplicatedUsing=OnRep_GrowingState)
 	float CareScore = 0.0f;
+
+	UPROPERTY(ReplicatedUsing=OnRep_GrowingState)
+	FBotanicusPlantDiseaseState DiseaseState;
 
 	UPROPERTY(ReplicatedUsing=OnRep_GrowingState)
 	FBotanicusPlantEnvironmentState EnvironmentState;

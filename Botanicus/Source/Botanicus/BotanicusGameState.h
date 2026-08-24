@@ -128,6 +128,22 @@ public:
 		return OutdoorEnvironment.LuminosityPercent;
 	}
 
+	UFUNCTION(BlueprintPure, Category="Botanicus|Plants|Diseases")
+	TArray<FName> GetDiscoveredDiseaseKeys() const
+	{
+		return DiscoveredDiseaseKeys;
+	}
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Plants|Diseases")
+	bool IsDiseaseDiscovered(FName DiseaseKey) const
+	{
+		return DiscoveredDiseaseKeys.Contains(DiseaseKey);
+	}
+
+	/** Server-side discovery shared with every player and persisted in autosaves. */
+	void RegisterDiscoveredDisease(FName DiseaseKey);
+	void InitializeDiscoveredDiseases(const TArray<FName>& DiseaseKeys);
+
 	UFUNCTION(BlueprintPure, Category="Botanicus|Shop")
 	int32 GetTotalPlantsSold() const { return TotalPlantsSold; }
 
@@ -309,6 +325,9 @@ private:
 
 	UPROPERTY(Replicated)
 	FBotanicusOutdoorEnvironmentState OutdoorEnvironment;
+
+	UPROPERTY(Replicated)
+	TArray<FName> DiscoveredDiseaseKeys;
 
 	UPROPERTY(ReplicatedUsing=OnRep_SharedFunds)
 	int32 TotalPlantsSold = 0;

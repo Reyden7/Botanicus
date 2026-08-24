@@ -511,7 +511,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 
 	CurrentSaveGame->MapName =
 		UGameplayStatics::GetCurrentLevelName(this, true);
-	CurrentSaveGame->SaveVersion = 30;
+	CurrentSaveGame->SaveVersion = 31;
 	if (const ABotanicusGameState* BotanicusGameState =
 		World->GetGameState<ABotanicusGameState>())
 	{
@@ -555,6 +555,8 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 			BotanicusGameState->GetTrendQualityTag();
 		CurrentSaveGame->TrendRemainingSeconds =
 			BotanicusGameState->GetTrendRemainingSeconds();
+		CurrentSaveGame->DiscoveredDiseaseKeys =
+			BotanicusGameState->GetDiscoveredDiseaseKeys();
 	}
 	CurrentSaveGame->BuildingActors.Reset();
 	CurrentSaveGame->Paths.Reset();
@@ -767,6 +769,8 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 					Slot.WateringCount);
 				SavedItem.MultiPlanterElementalDead.Add(
 					Slot.bElementalDead);
+				SavedItem.MultiPlanterDiseaseStates.Add(
+					Slot.DiseaseState);
 			}
 		}
 		else if (const ABotanicusPlantPotActor* PlantPot =
@@ -783,6 +787,8 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 				PlantPot->GetWateringCount();
 			SavedItem.bPlantElementalDead =
 				PlantPot->IsElementalDead();
+			SavedItem.PlantDiseaseState =
+				PlantPot->GetDiseaseState();
 		}
 		else if (const ABotanicusSalesDisplayActor* SalesDisplay =
 			Cast<ABotanicusSalesDisplayActor>(*ItemIt))
@@ -1061,6 +1067,10 @@ void ABotanicusGameMode::InitializeSharedEconomy()
 		CurrentSaveGame->SaveVersion >= 19
 			? CurrentSaveGame->DayTimeMinutes
 			: 420.0f);
+	BotanicusGameState->InitializeDiscoveredDiseases(
+		CurrentSaveGame->SaveVersion >= 31
+			? CurrentSaveGame->DiscoveredDiseaseKeys
+			: TArray<FName>());
 	UE_LOG(
 		LogBotanicus,
 		Display,
@@ -1583,6 +1593,11 @@ void ABotanicusGameMode::RestoreWorldState()
 							? SavedItem.
 								MultiPlanterElementalDead[Index]
 							: false;
+					Slot.DiseaseState =
+						CurrentSaveGame->SaveVersion >= 31 &&
+						SavedItem.MultiPlanterDiseaseStates.IsValidIndex(Index)
+							? SavedItem.MultiPlanterDiseaseStates[Index]
+							: FBotanicusPlantDiseaseState();
 				}
 				MultiPlanter->RestoreMultiPlantState(
 					SavedItem.MultiPlanterSoilUnits,
@@ -1597,7 +1612,10 @@ void ABotanicusGameMode::RestoreWorldState()
 					SavedItem.PlantWaterLevel,
 					SavedItem.PlantGrowthProgress,
 					SavedItem.PlantCareScore,
-					SavedItem.bPlantElementalDead);
+					SavedItem.bPlantElementalDead,
+					CurrentSaveGame->SaveVersion >= 31
+						? SavedItem.PlantDiseaseState
+						: FBotanicusPlantDiseaseState());
 				PlantPot->RestoreWateringCount(
 					SavedItem.PlantWateringCount);
 			}
