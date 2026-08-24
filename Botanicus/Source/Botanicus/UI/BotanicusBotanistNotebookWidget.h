@@ -9,6 +9,7 @@
 class ABotanicusPlayerController;
 class UButton;
 class UImage;
+class URichTextBlock;
 class UTextBlock;
 
 /** Designer-authored, two-page botanist notebook opened with I. */
@@ -45,7 +46,7 @@ private:
 		TWeakObjectPtr<UTextBlock> Luminosity;
 		TWeakObjectPtr<UTextBlock> Water;
 		TWeakObjectPtr<UTextBlock> Growth;
-		TWeakObjectPtr<UTextBlock> Note;
+		TWeakObjectPtr<URichTextBlock> Note;
 	};
 
 	void BindDesignerWidgets();
@@ -60,6 +61,9 @@ private:
 	void JumpToLetter(TCHAR Letter);
 	void SetDetailText(
 		const TWeakObjectPtr<UTextBlock>& Label,
+		const FText& Text) const;
+	void SetNoteText(
+		const TWeakObjectPtr<URichTextBlock>& Label,
 		const FText& Text) const;
 	FText BuildPlantNote(const FBotanicusPlantDefinition& Definition) const;
 

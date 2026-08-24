@@ -4,8 +4,10 @@
 
 #include "BotanicusPlayerController.h"
 #include "BotanicusGameState.h"
+#include "Catalog/BotanicusItemCatalogSubsystem.h"
 #include "Components/Button.h"
 #include "Components/Image.h"
+#include "Components/RichTextBlock.h"
 #include "Components/TextBlock.h"
 #include "Engine/Texture2D.h"
 #include "EngineUtils.h"
@@ -34,6 +36,37 @@ FString GrowthDurationDisplay(float Seconds)
 	return Seconds >= 60.0f
 		? FString::Printf(TEXT("%.0f min"), Seconds / 60.0f)
 		: FString::Printf(TEXT("%.0f s"), Seconds);
+}
+
+FString EscapeRichText(FString Text)
+{
+	Text.ReplaceInline(TEXT("&"), TEXT("&amp;"));
+	Text.ReplaceInline(TEXT("<"), TEXT("&lt;"));
+	Text.ReplaceInline(TEXT(">"), TEXT("&gt;"));
+	return Text;
+}
+
+float DiseaseDelaySeconds(
+	const FBotanicusPlantDefinition& Plant,
+	const FBotanicusPlantDiseaseDefinition& Disease)
+{
+	if (Disease.bElementSpecific)
+	{
+		return Plant.DiseaseSusceptibility.ElementNeglectDelaySeconds;
+	}
+	if (Disease.DiseaseKey == TEXT("Disease_Overwatering"))
+	{
+		return Plant.DiseaseSusceptibility.OverwateringDelaySeconds;
+	}
+	if (Disease.DiseaseKey == TEXT("Disease_Humidity"))
+	{
+		return Plant.DiseaseSusceptibility.IncorrectHumidityDelaySeconds;
+	}
+	if (Disease.DiseaseKey == TEXT("Disease_ExcessLight"))
+	{
+		return Plant.DiseaseSusceptibility.ExcessLightDelaySeconds;
+	}
+	return 0.0f;
 }
 
 UTexture2D* PlantElementIcon(EBotanicusPlantElement Element)
@@ -106,6 +139,11 @@ void UBotanicusBotanistNotebookWidget::BindPageWidgets(
 		return Cast<UImage>(GetWidgetFromName(
 			FName(*FString::Printf(TEXT("%s%s"), Prefix, Suffix))));
 	};
+	auto FindRichText = [this, Prefix](const TCHAR* Suffix)
+	{
+		return Cast<URichTextBlock>(GetWidgetFromName(
+			FName(*FString::Printf(TEXT("%s%s"), Prefix, Suffix))));
+	};
 	OutWidgets.Name = FindText(TEXT("PlantNameLabel"));
 	OutWidgets.Illustration = FindText(TEXT("PlantIllustrationLabel"));
 	OutWidgets.IllustrationImage = FindImage(TEXT("PlantImage"));
@@ -121,7 +159,7 @@ void UBotanicusBotanistNotebookWidget::BindPageWidgets(
 	OutWidgets.Luminosity = FindText(TEXT("LuminosityLabel"));
 	OutWidgets.Water = FindText(TEXT("WaterLabel"));
 	OutWidgets.Growth = FindText(TEXT("GrowthLabel"));
-	OutWidgets.Note = FindText(TEXT("NoteLabel"));
+	OutWidgets.Note = FindRichText(TEXT("NoteLabel"));
 }
 
 void UBotanicusBotanistNotebookWidget::BindDesignerWidgets()
@@ -402,7 +440,7 @@ void UBotanicusBotanistNotebookWidget::ShowPlantOnPage(
 		SetDetailText(Page.Luminosity, FText::GetEmpty());
 		SetDetailText(Page.Water, FText::GetEmpty());
 		SetDetailText(Page.Growth, FText::GetEmpty());
-		SetDetailText(Page.Note, FText::GetEmpty());
+		SetNoteText(Page.Note, FText::GetEmpty());
 		const TWeakObjectPtr<UImage> Images[] = {
 			Page.IllustrationImage, Page.ElementIcon, Page.TemperatureIcon,
 			Page.AirHumidityIcon, Page.LuminosityIcon, Page.WaterIcon,
@@ -436,7 +474,7 @@ void UBotanicusBotanistNotebookWidget::ShowPlantOnPage(
 		SetDetailText(Page.Luminosity, FText::FromString(TEXT("Luminosité : ???")));
 		SetDetailText(Page.Water, FText::FromString(TEXT("Terreau : ???")));
 		SetDetailText(Page.Growth, FText::FromString(TEXT("Croissance : ???")));
-		SetDetailText(Page.Note, FText::FromString(TEXT("Note : ???")));
+		SetNoteText(Page.Note, FText::FromString(TEXT("Note : ???")));
 		if (Page.IllustrationImage.IsValid())
 		{
 			Page.IllustrationImage->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
@@ -474,7 +512,7 @@ void UBotanicusBotanistNotebookWidget::ShowPlantOnPage(
 		Definition.MaximumHealthyWater * 100.0f)));
 	SetDetailText(Page.Growth, FText::FromString(FString::Printf(
 		TEXT("Croissance : %s"), *GrowthDurationDisplay(Definition.GrowthDurationSeconds))));
-	SetDetailText(Page.Note, BuildPlantNote(Definition));
+	SetNoteText(Page.Note, BuildPlantNote(Definition));
 }
 
 FText UBotanicusBotanistNotebookWidget::BuildPlantNote(
@@ -499,6 +537,9 @@ FText UBotanicusBotanistNotebookWidget::BuildPlantNote(
 	const ABotanicusGameState* GameState = GetWorld()
 		? GetWorld()->GetGameState<ABotanicusGameState>()
 		: nullptr;
+	const UBotanicusItemCatalogSubsystem* ItemCatalog = GetGameInstance()
+		? GetGameInstance()->GetSubsystem<UBotanicusItemCatalogSubsystem>()
+		: nullptr;
 	if (GameState)
 	{
 		for (const FBotanicusPlantDiseaseDefinition& Disease :
@@ -511,14 +552,36 @@ FText UBotanicusBotanistNotebookWidget::BuildPlantNote(
 			{
 				continue;
 			}
+			FString ProductName = Disease.TreatmentItemKey.ToString();
+			if (ItemCatalog)
+			{
+				if (const FBotanicusItemDefinition* Product =
+					ItemCatalog->FindItem(Disease.TreatmentItemKey))
+				{
+					ProductName = Product->DisplayName.ToString();
+				}
+			}
+			const float DelaySeconds = DiseaseDelaySeconds(Definition, Disease);
 			NoteLines.Add(FString::Printf(
-				TEXT("Maladie : %s\nCause : %s\nTraitement : %s"),
-				*Disease.DisplayName.ToString(),
-				*Disease.CauseDescription.ToString(),
-				*Disease.TreatmentDescription.ToString()));
+				TEXT("Maladie : <b>%s</>\nCause : %s\nDurée avant apparition : <b>%s</>\nTraitement : <b>%s</>\nProduit : <b>%s</>"),
+				*EscapeRichText(Disease.DisplayName.ToString()),
+				*EscapeRichText(Disease.CauseDescription.ToString()),
+				*EscapeRichText(GrowthDurationDisplay(DelaySeconds)),
+				*EscapeRichText(Disease.TreatmentDescription.ToString()),
+				*EscapeRichText(ProductName)));
 		}
 	}
 	return FText::FromString(FString::Join(NoteLines, TEXT("\n\n")));
+}
+
+void UBotanicusBotanistNotebookWidget::SetNoteText(
+	const TWeakObjectPtr<URichTextBlock>& Label,
+	const FText& Text) const
+{
+	if (Label.IsValid())
+	{
+		Label->SetText(Text);
+	}
 }
 
 void UBotanicusBotanistNotebookWidget::SetDetailText(

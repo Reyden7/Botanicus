@@ -13,7 +13,10 @@
 #include "Components/CanvasPanelSlot.h"
 #include "Components/ComboBoxString.h"
 #include "Components/Image.h"
+#include "Components/PanelWidget.h"
+#include "Components/RichTextBlock.h"
 #include "Components/ScrollBox.h"
+#include "Components/ScrollBoxSlot.h"
 #include "Components/Slider.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
@@ -28,6 +31,7 @@
 #include "UObject/SavePackage.h"
 #include "UI/BotanicusOrderCatalogWidget.h"
 #include "UI/BotanicusBotanistNotebookWidget.h"
+#include "UI/BotanicusNotebookBoldDecorator.h"
 #include "WidgetBlueprint.h"
 
 namespace
@@ -383,10 +387,28 @@ bool UBotanicusCommandWidgetBuilder::RebuildBotanistNotebookWidget()
 			Tree, Root, Named(TEXT("NoteFrame")), FVector2D(X + 48.0f, 842.0f),
 			FVector2D(535.0f, 93.0f), 3);
 		NoteFrame->SetBrushColor(FLinearColor(0.63f, 0.54f, 0.34f, 0.18f));
-		UTextBlock* Note = AddNotebookText(Tree, Root,
-			Named(TEXT("NoteLabel")), TEXT("Note : ???"),
-			FVector2D(X + 70.0f, 858.0f), FVector2D(495.0f, 62.0f), 16);
+		UScrollBox* NoteScroll = AddCanvasWidget<UScrollBox>(
+			Tree, Root, Named(TEXT("NoteScrollBox")),
+			FVector2D(X + 62.0f, 850.0f), FVector2D(507.0f, 77.0f), 4);
+		NoteScroll->SetOrientation(Orient_Vertical);
+		NoteScroll->SetConsumeMouseWheel(EConsumeMouseWheel::WhenScrollingPossible);
+		NoteScroll->SetAnimateWheelScrolling(true);
+		NoteScroll->SetScrollBarVisibility(ESlateVisibility::Visible);
+		NoteScroll->SetScrollbarThickness(FVector2D(6.0f, 6.0f));
+		URichTextBlock* Note = Tree->ConstructWidget<URichTextBlock>(
+			URichTextBlock::StaticClass(), Named(TEXT("NoteLabel")));
+		Note->SetText(FText::FromString(TEXT("Note : ???")));
+		Note->SetDefaultFont(NotebookFontInfo(16));
+		Note->SetDefaultColorAndOpacity(FSlateColor(
+			FLinearColor(0.24f, 0.16f, 0.08f, 1.0f)));
+		Note->SetDecorators({UBotanicusNotebookBoldDecorator::StaticClass()});
 		Note->SetAutoWrapText(true);
+		if (UScrollBoxSlot* NoteSlot = Cast<UScrollBoxSlot>(
+			NoteScroll->AddChild(Note)))
+		{
+			NoteSlot->SetHorizontalAlignment(HAlign_Fill);
+			NoteSlot->SetPadding(FMargin(8.0f, 4.0f, 8.0f, 8.0f));
+		}
 	};
 	AddPage(TEXT("Left"), 310.0f);
 	AddPage(TEXT("Right"), 980.0f);
@@ -501,6 +523,203 @@ bool UBotanicusCommandWidgetBuilder::RebuildBotanistNotebookWidget()
 		*FPackageName::LongPackageNameToFilename(
 			PackagePath, FPackageName::GetAssetPackageExtension()),
 		FSavePackageArgs());
+#else
+	return false;
+#endif
+}
+
+bool UBotanicusCommandWidgetBuilder::
+	UpgradeBotanistNotebookNoteScrollBoxes()
+{
+#if WITH_EDITOR
+	const TCHAR* ObjectPath =
+		TEXT("/Game/Botanicus/UI/Botanist/WBP_BotanistNotebook.WBP_BotanistNotebook");
+	const TCHAR* PackagePath =
+		TEXT("/Game/Botanicus/UI/Botanist/WBP_BotanistNotebook");
+	UWidgetBlueprint* Blueprint = LoadObject<UWidgetBlueprint>(nullptr, ObjectPath);
+	if (!Blueprint || !Blueprint->WidgetTree)
+	{
+		return false;
+	}
+
+	Blueprint->Modify();
+	UWidgetTree* Tree = Blueprint->WidgetTree;
+	Tree->Modify();
+	UCanvasPanel* Root = Cast<UCanvasPanel>(Tree->RootWidget);
+	if (!Root)
+	{
+		return false;
+	}
+
+	bool bChanged = false;
+	const TCHAR* Prefixes[] = {TEXT("Left"), TEXT("Right")};
+	for (const TCHAR* Prefix : Prefixes)
+	{
+		const FName NoteName(*FString::Printf(TEXT("%sNoteLabel"), Prefix));
+		const FName FrameName(*FString::Printf(TEXT("%sNoteFrame"), Prefix));
+		const FName ScrollName(*FString::Printf(TEXT("%sNoteScrollBox"), Prefix));
+		UTextBlock* Note = Cast<UTextBlock>(Tree->FindWidget(NoteName));
+		UBorder* Frame = Cast<UBorder>(Tree->FindWidget(FrameName));
+		UScrollBox* NoteScroll = Cast<UScrollBox>(Tree->FindWidget(ScrollName));
+		UCanvasPanelSlot* FrameSlot = Frame
+			? Cast<UCanvasPanelSlot>(Frame->Slot)
+			: nullptr;
+		if (!Note || !FrameSlot)
+		{
+			return false;
+		}
+
+		const FVector2D Padding(12.0f, 10.0f);
+		const FVector2D ScrollPosition = FrameSlot->GetPosition() + Padding;
+		const FVector2D ScrollSize(
+			FMath::Max(80.0f, FrameSlot->GetSize().X - Padding.X * 2.0f),
+			FMath::Max(48.0f, FrameSlot->GetSize().Y - Padding.Y * 2.0f));
+		if (!NoteScroll)
+		{
+			NoteScroll = AddCanvasWidget<UScrollBox>(
+				Tree, Root, ScrollName, ScrollPosition, ScrollSize,
+				FrameSlot->GetZOrder() + 1);
+			bChanged = true;
+		}
+		else if (UCanvasPanelSlot* ScrollCanvasSlot =
+			Cast<UCanvasPanelSlot>(NoteScroll->Slot))
+		{
+			ScrollCanvasSlot->SetPosition(ScrollPosition);
+			ScrollCanvasSlot->SetSize(ScrollSize);
+		}
+
+		NoteScroll->SetOrientation(Orient_Vertical);
+		NoteScroll->SetConsumeMouseWheel(EConsumeMouseWheel::WhenScrollingPossible);
+		NoteScroll->SetAnimateWheelScrolling(true);
+		NoteScroll->SetScrollBarVisibility(ESlateVisibility::Visible);
+		NoteScroll->SetScrollbarThickness(FVector2D(6.0f, 6.0f));
+		if (Note->GetParent() != NoteScroll)
+		{
+			if (UPanelWidget* Parent = Note->GetParent())
+			{
+				Parent->RemoveChild(Note);
+			}
+			if (UScrollBoxSlot* NoteSlot = Cast<UScrollBoxSlot>(
+				NoteScroll->AddChild(Note)))
+			{
+				NoteSlot->SetHorizontalAlignment(HAlign_Fill);
+				NoteSlot->SetPadding(FMargin(4.0f, 2.0f, 8.0f, 8.0f));
+			}
+			bChanged = true;
+		}
+		Note->SetAutoWrapText(true);
+		Note->SetWrapTextAt(FMath::Max(60.0f, ScrollSize.X - 22.0f));
+	}
+
+	Blueprint->WidgetVariableNameToGuidMap.Reset();
+	FKismetEditorUtilities::CompileBlueprint(Blueprint);
+	Blueprint->WidgetVariableNameToGuidMap.Reset();
+	Tree->ForEachWidget([Blueprint](UWidget* Widget)
+	{
+		if (Widget)
+		{
+			Blueprint->WidgetVariableNameToGuidMap.Emplace(
+				Widget->GetFName(),
+				FGuid::NewDeterministicGuid(Widget->GetPathName()));
+		}
+	});
+	Blueprint->MarkPackageDirty();
+	return UPackage::SavePackage(
+		Blueprint->GetOutermost(), Blueprint,
+		*FPackageName::LongPackageNameToFilename(
+			PackagePath, FPackageName::GetAssetPackageExtension()),
+		FSavePackageArgs()) && bChanged;
+#else
+	return false;
+#endif
+}
+
+bool UBotanicusCommandWidgetBuilder::UpgradeBotanistNotebookRichNotes()
+{
+#if WITH_EDITOR
+	const TCHAR* ObjectPath =
+		TEXT("/Game/Botanicus/UI/Botanist/WBP_BotanistNotebook.WBP_BotanistNotebook");
+	const TCHAR* PackagePath =
+		TEXT("/Game/Botanicus/UI/Botanist/WBP_BotanistNotebook");
+	UWidgetBlueprint* Blueprint = LoadObject<UWidgetBlueprint>(nullptr, ObjectPath);
+	if (!Blueprint || !Blueprint->WidgetTree)
+	{
+		return false;
+	}
+
+	Blueprint->Modify();
+	UWidgetTree* Tree = Blueprint->WidgetTree;
+	Tree->Modify();
+	bool bChanged = false;
+	const TCHAR* Prefixes[] = {TEXT("Left"), TEXT("Right")};
+	for (const TCHAR* Prefix : Prefixes)
+	{
+		const FName NoteName(*FString::Printf(TEXT("%sNoteLabel"), Prefix));
+		const FName ScrollName(*FString::Printf(TEXT("%sNoteScrollBox"), Prefix));
+		UScrollBox* NoteScroll = Cast<UScrollBox>(Tree->FindWidget(ScrollName));
+		UWidget* ExistingNote = Tree->FindWidget(NoteName);
+		if (!NoteScroll || !ExistingNote)
+		{
+			return false;
+		}
+
+		URichTextBlock* RichNote = Cast<URichTextBlock>(ExistingNote);
+		if (!RichNote)
+		{
+			UTextBlock* LegacyNote = Cast<UTextBlock>(ExistingNote);
+			if (!LegacyNote)
+			{
+				return false;
+			}
+			const FText PreviousText = LegacyNote->GetText();
+			if (UPanelWidget* Parent = LegacyNote->GetParent())
+			{
+				Parent->RemoveChild(LegacyNote);
+			}
+			const FName LegacyName = MakeUniqueObjectName(
+				Tree, UTextBlock::StaticClass(),
+				FName(*FString::Printf(TEXT("%sLegacyNoteLabel"), Prefix)));
+			LegacyNote->Rename(*LegacyName.ToString(), Tree,
+				REN_DontCreateRedirectors | REN_NonTransactional);
+
+			RichNote = Tree->ConstructWidget<URichTextBlock>(
+				URichTextBlock::StaticClass(), NoteName);
+			RichNote->SetText(PreviousText);
+			if (UScrollBoxSlot* NoteSlot = Cast<UScrollBoxSlot>(
+				NoteScroll->AddChild(RichNote)))
+			{
+				NoteSlot->SetHorizontalAlignment(HAlign_Fill);
+				NoteSlot->SetPadding(FMargin(4.0f, 2.0f, 8.0f, 8.0f));
+			}
+			bChanged = true;
+		}
+
+		RichNote->SetDefaultFont(NotebookFontInfo(16));
+		RichNote->SetDefaultColorAndOpacity(FSlateColor(
+			FLinearColor(0.24f, 0.16f, 0.08f, 1.0f)));
+		RichNote->SetDecorators(
+			{UBotanicusNotebookBoldDecorator::StaticClass()});
+		RichNote->SetAutoWrapText(true);
+	}
+
+	Blueprint->WidgetVariableNameToGuidMap.Reset();
+	FKismetEditorUtilities::CompileBlueprint(Blueprint);
+	Blueprint->WidgetVariableNameToGuidMap.Reset();
+	Tree->ForEachWidget([Blueprint](UWidget* Widget)
+	{
+		if (Widget)
+		{
+			Blueprint->WidgetVariableNameToGuidMap.Emplace(
+				Widget->GetFName(),
+				FGuid::NewDeterministicGuid(Widget->GetPathName()));
+		}
+	});
+	Blueprint->MarkPackageDirty();
+	return UPackage::SavePackage(
+		Blueprint->GetOutermost(), Blueprint,
+		*FPackageName::LongPackageNameToFilename(
+			PackagePath, FPackageName::GetAssetPackageExtension()),
+		FSavePackageArgs()) && bChanged;
 #else
 	return false;
 #endif

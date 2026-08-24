@@ -19,6 +19,14 @@ public:
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Botanicus|Editor")
 	static bool RebuildBotanistNotebookWidget();
 
+	/** Wraps both existing note labels in vertically scrolling designer widgets. */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Botanicus|Editor")
+	static bool UpgradeBotanistNotebookNoteScrollBoxes();
+
+	/** Converts notebook notes to rich text with data-driven bold emphasis. */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Botanicus|Editor")
+	static bool UpgradeBotanistNotebookRichNotes();
+
 	/** Makes every emitter in NS_AnimeWater follow its owning Blueprint component. */
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Botanicus|Editor")
 	static bool MakeAnimeWaterLocalSpace();
