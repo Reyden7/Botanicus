@@ -194,68 +194,154 @@ bool UBotanicusCommandWidgetBuilder::RebuildBotanistNotebookWidget()
 	UBorder* Backdrop = AddCanvasWidget<UBorder>(
 		Tree, Root, TEXT("Backdrop"), FVector2D::ZeroVector,
 		FVector2D(1920.0f, 1080.0f), 0);
-	Backdrop->SetBrushColor(FLinearColor(0.01f, 0.018f, 0.012f, 0.82f));
+	Backdrop->SetBrushColor(FLinearColor(0.01f, 0.018f, 0.012f, 0.72f));
 
-	UBorder* NotebookPanel = AddCanvasWidget<UBorder>(
-		Tree, Root, TEXT("NotebookPanel"), FVector2D(185.0f, 80.0f),
-		FVector2D(1550.0f, 920.0f), 1);
-	NotebookPanel->SetBrushColor(FLinearColor(0.055f, 0.12f, 0.075f, 0.98f));
-
-	UTextBlock* Title = AddText(
-		Tree, Root, TEXT("NotebookTitle"), TEXT("CARNET DE BOTANISTE"),
-		FVector2D(255.0f, 125.0f), FVector2D(800.0f, 70.0f), 42);
-	Title->SetColorAndOpacity(FSlateColor(FLinearColor(0.95f, 0.84f, 0.48f)));
-	AddText(Tree, Root, TEXT("NotebookSubtitle"),
-		TEXT("Les espèces observées apparaissent progressivement dans le carnet."),
-		FVector2D(258.0f, 190.0f), FVector2D(950.0f, 38.0f), 19);
+	// Neutral structural placeholders. The final book, paper, corners and
+	// foliage textures can be assigned directly to these WBP elements later.
+	UBorder* BookCover = AddCanvasWidget<UBorder>(
+		Tree, Root, TEXT("BookCover"), FVector2D(170.0f, 42.0f),
+		FVector2D(1580.0f, 996.0f), 1);
+	BookCover->SetBrushColor(FLinearColor(0.055f, 0.15f, 0.09f, 1.0f));
+	UBorder* LeftPage = AddCanvasWidget<UBorder>(
+		Tree, Root, TEXT("LeftPageBackground"), FVector2D(215.0f, 72.0f),
+		FVector2D(715.0f, 925.0f), 2);
+	LeftPage->SetBrushColor(FLinearColor(0.78f, 0.70f, 0.52f, 1.0f));
+	UBorder* RightPage = AddCanvasWidget<UBorder>(
+		Tree, Root, TEXT("RightPageBackground"), FVector2D(945.0f, 72.0f),
+		FVector2D(715.0f, 925.0f), 2);
+	RightPage->SetBrushColor(FLinearColor(0.80f, 0.72f, 0.55f, 1.0f));
+	UBorder* Spine = AddCanvasWidget<UBorder>(
+		Tree, Root, TEXT("BookSpine"), FVector2D(925.0f, 68.0f),
+		FVector2D(40.0f, 935.0f), 3);
+	Spine->SetBrushColor(FLinearColor(0.16f, 0.10f, 0.045f, 0.88f));
 
 	UButton* CloseButton = AddCanvasWidget<UButton>(
-		Tree, Root, TEXT("CloseButton"), FVector2D(1450.0f, 125.0f),
-		FVector2D(205.0f, 62.0f), 3);
+		Tree, Root, TEXT("CloseButton"), FVector2D(1748.0f, 46.0f),
+		FVector2D(125.0f, 48.0f), 6);
 	UTextBlock* CloseLabel = Tree->ConstructWidget<UTextBlock>(
 		UTextBlock::StaticClass(), TEXT("CloseButtonLabel"));
-	CloseLabel->SetText(FText::FromString(TEXT("FERMER  [I]")));
+	CloseLabel->SetText(FText::FromString(TEXT("FERMER [I]")));
 	CloseLabel->SetJustification(ETextJustify::Center);
 	FSlateFontInfo CloseFont = CloseLabel->GetFont();
-	CloseFont.Size = 22;
+	CloseFont.Size = 16;
 	CloseLabel->SetFont(CloseFont);
 	CloseLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 	CloseButton->AddChild(CloseLabel);
 
-	AddText(Tree, Root, TEXT("SpeciesListTitle"), TEXT("ESPÈCES"),
-		FVector2D(265.0f, 280.0f), FVector2D(480.0f, 45.0f), 25);
-	UComboBoxString* Selector = AddCanvasWidget<UComboBoxString>(
-		Tree, Root, TEXT("PlantSelector"), FVector2D(260.0f, 335.0f),
-		FVector2D(520.0f, 58.0f), 3);
-	Selector->AddOption(TEXT("??? [01]"));
-	Selector->SetSelectedIndex(0);
+	auto AddPage = [Tree, Root](const TCHAR* Prefix, float X)
+	{
+		auto Named = [Prefix](const TCHAR* Suffix)
+		{
+			return FName(*FString::Printf(TEXT("%s%s"), Prefix, Suffix));
+		};
+		UTextBlock* Name = AddText(Tree, Root, Named(TEXT("PlantNameLabel")),
+			TEXT("????????????"), FVector2D(X + 65.0f, 105.0f),
+			FVector2D(585.0f, 55.0f), 28);
+		Name->SetJustification(ETextJustify::Center);
+		Name->SetColorAndOpacity(FSlateColor(FLinearColor(0.20f, 0.14f, 0.07f)));
 
-	UBorder* DetailPanel = AddCanvasWidget<UBorder>(
-		Tree, Root, TEXT("DetailPanel"), FVector2D(825.0f, 270.0f),
-		FVector2D(815.0f, 620.0f), 2);
-	DetailPanel->SetBrushColor(FLinearColor(0.025f, 0.055f, 0.037f, 0.95f));
+		UBorder* IllustrationFrame = AddCanvasWidget<UBorder>(
+			Tree, Root, Named(TEXT("IllustrationFrame")),
+			FVector2D(X + 80.0f, 175.0f), FVector2D(555.0f, 330.0f), 3);
+		IllustrationFrame->SetBrushColor(FLinearColor(0.58f, 0.54f, 0.39f, 0.55f));
+		UImage* PlantImage = AddCanvasWidget<UImage>(
+			Tree, Root, Named(TEXT("PlantImage")),
+			FVector2D(X + 95.0f, 190.0f), FVector2D(525.0f, 300.0f), 4);
+		PlantImage->SetColorAndOpacity(FLinearColor(1.0f, 1.0f, 1.0f, 0.0f));
+		UTextBlock* Illustration = AddText(
+			Tree, Root, Named(TEXT("PlantIllustrationLabel")), TEXT("?"),
+			FVector2D(X + 125.0f, 255.0f), FVector2D(465.0f, 170.0f), 72);
+		Illustration->SetJustification(ETextJustify::Center);
+		Illustration->SetColorAndOpacity(
+			FSlateColor(FLinearColor(0.35f, 0.31f, 0.22f, 0.75f)));
 
-	UTextBlock* PlantName = AddText(Tree, Root, TEXT("PlantNameLabel"),
-		TEXT("ESPÈCE INCONNUE"), FVector2D(885.0f, 315.0f),
-		FVector2D(680.0f, 62.0f), 32);
-	PlantName->SetColorAndOpacity(FSlateColor(FLinearColor(0.78f, 0.95f, 0.56f)));
-	AddText(Tree, Root, TEXT("PlantElementLabel"), TEXT("Élément : ???"),
-		FVector2D(890.0f, 395.0f), FVector2D(650.0f, 42.0f), 21);
-	AddText(Tree, Root, TEXT("TemperatureLabel"), TEXT("Température idéale : ???"),
-		FVector2D(890.0f, 470.0f), FVector2D(650.0f, 42.0f), 21);
-	AddText(Tree, Root, TEXT("AirHumidityLabel"), TEXT("Humidité idéale : ???"),
-		FVector2D(890.0f, 535.0f), FVector2D(650.0f, 42.0f), 21);
-	AddText(Tree, Root, TEXT("LuminosityLabel"), TEXT("Luminosité idéale : ???"),
-		FVector2D(890.0f, 600.0f), FVector2D(650.0f, 42.0f), 21);
-	AddText(Tree, Root, TEXT("WaterLabel"), TEXT("Humidité du terreau : ???"),
-		FVector2D(890.0f, 665.0f), FVector2D(650.0f, 42.0f), 21);
-	AddText(Tree, Root, TEXT("GrowthLabel"), TEXT("Temps de croissance : ???"),
-		FVector2D(890.0f, 730.0f), FVector2D(650.0f, 42.0f), 21);
-	AddText(Tree, Root, TEXT("NotebookHint"),
-		TEXT("Placez une plante dans un pot pour découvrir sa fiche."),
-		FVector2D(265.0f, 870.0f), FVector2D(1120.0f, 42.0f), 18);
+		const TCHAR* Suffixes[] = {
+			TEXT("Element"), TEXT("Temperature"), TEXT("AirHumidity"),
+			TEXT("Luminosity"), TEXT("Water"), TEXT("Growth")};
+		const TCHAR* Defaults[] = {
+			TEXT("Type : ???"), TEXT("Température : ???"), TEXT("Humidité : ???"),
+			TEXT("Luminosité : ???"), TEXT("Terreau : ???"), TEXT("Croissance : ???")};
+		for (int32 Index = 0; Index < 6; ++Index)
+		{
+			AddCanvasWidget<UImage>(Tree, Root,
+				Named(*FString::Printf(TEXT("%sIcon"), Suffixes[Index])),
+				FVector2D(X + 58.0f, 535.0f + Index * 48.0f),
+				FVector2D(30.0f, 30.0f), 4);
+			UTextBlock* Detail = AddText(Tree, Root,
+				Named(*FString::Printf(TEXT("%sLabel"), Suffixes[Index])),
+				Defaults[Index], FVector2D(X + 100.0f, 532.0f + Index * 48.0f),
+				FVector2D(520.0f, 38.0f), 18);
+			Detail->SetColorAndOpacity(
+				FSlateColor(FLinearColor(0.18f, 0.12f, 0.055f)));
+		}
 
+		UBorder* NoteFrame = AddCanvasWidget<UBorder>(
+			Tree, Root, Named(TEXT("NoteFrame")), FVector2D(X + 52.0f, 830.0f),
+			FVector2D(610.0f, 110.0f), 3);
+		NoteFrame->SetBrushColor(FLinearColor(0.62f, 0.56f, 0.40f, 0.42f));
+		UTextBlock* Note = AddText(Tree, Root, Named(TEXT("NoteLabel")),
+			TEXT("Note : ???"), FVector2D(X + 75.0f, 852.0f),
+			FVector2D(565.0f, 70.0f), 16);
+		Note->SetAutoWrapText(true);
+		Note->SetColorAndOpacity(FSlateColor(FLinearColor(0.18f, 0.12f, 0.055f)));
+	};
+	AddPage(TEXT("Left"), 215.0f);
+	AddPage(TEXT("Right"), 945.0f);
+
+	auto AddArrowButton = [Tree, Root](const FName Name, const TCHAR* Label,
+		const FVector2D Position)
+	{
+		UButton* Button = AddCanvasWidget<UButton>(
+			Tree, Root, Name, Position, FVector2D(72.0f, 72.0f), 6);
+		UTextBlock* Text = Tree->ConstructWidget<UTextBlock>();
+		Text->SetText(FText::FromString(Label));
+		Text->SetJustification(ETextJustify::Center);
+		FSlateFontInfo Font = Text->GetFont();
+		Font.Size = 35;
+		Text->SetFont(Font);
+		Button->AddChild(Text);
+	};
+	AddArrowButton(TEXT("PreviousPageButton"), TEXT("<"), FVector2D(238.0f, 905.0f));
+	AddArrowButton(TEXT("NextPageButton"), TEXT(">"), FVector2D(1565.0f, 905.0f));
+
+	for (int32 Index = 0; Index < 26; ++Index)
+	{
+		const TCHAR Letter = static_cast<TCHAR>('A' + Index);
+		const FName ButtonName(*FString::Printf(TEXT("Letter%cButton"), Letter));
+		UButton* Button = AddCanvasWidget<UButton>(
+			Tree, Root, ButtonName, FVector2D(1662.0f, 82.0f + Index * 35.0f),
+			FVector2D(48.0f, 33.0f), 5);
+		UTextBlock* LetterLabel = Tree->ConstructWidget<UTextBlock>();
+		LetterLabel->SetText(FText::FromString(FString::Chr(Letter)));
+		LetterLabel->SetJustification(ETextJustify::Center);
+		FSlateFontInfo Font = LetterLabel->GetFont();
+		Font.Size = 15;
+		LetterLabel->SetFont(Font);
+		LetterLabel->SetColorAndOpacity(
+			FSlateColor(FLinearColor(0.18f, 0.12f, 0.055f)));
+		Button->AddChild(LetterLabel);
+	}
+
+	// The tree is rebuilt programmatically. Reset the editor-only widget GUID map
+	// so the compiler can regenerate deterministic GUIDs for every new widget.
+	// Keeping the map from the previous layout makes every newly named widget
+	// trigger an ensure in WidgetBlueprintCompiler.
+	Blueprint->WidgetVariableNameToGuidMap.Reset();
 	FKismetEditorUtilities::CompileBlueprint(Blueprint);
+
+	// The previous disconnected widgets still exist as transient objects until
+	// the package is reloaded, so the compiler can temporarily add their names
+	// back to the map. Persist GUIDs only for widgets reachable from the new root.
+	Blueprint->WidgetVariableNameToGuidMap.Reset();
+	Tree->ForEachWidget([Blueprint](UWidget* Widget)
+	{
+		if (Widget)
+		{
+			Blueprint->WidgetVariableNameToGuidMap.Emplace(
+				Widget->GetFName(),
+				FGuid::NewDeterministicGuid(Widget->GetPathName()));
+		}
+	});
 	Blueprint->MarkPackageDirty();
 	FAssetRegistryModule::AssetCreated(Blueprint);
 	return UPackage::SavePackage(
