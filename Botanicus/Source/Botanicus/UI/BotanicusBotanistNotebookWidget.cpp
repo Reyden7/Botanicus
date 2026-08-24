@@ -4,7 +4,9 @@
 
 #include "BotanicusPlayerController.h"
 #include "Components/Button.h"
+#include "Components/Image.h"
 #include "Components/TextBlock.h"
+#include "Engine/Texture2D.h"
 #include "EngineUtils.h"
 #include "Growing/BotanicusMultiPlantPotActor.h"
 #include "Growing/BotanicusPlantPotActor.h"
@@ -31,6 +33,22 @@ FString GrowthDurationDisplay(float Seconds)
 	return Seconds >= 60.0f
 		? FString::Printf(TEXT("%.0f min"), Seconds / 60.0f)
 		: FString::Printf(TEXT("%.0f s"), Seconds);
+}
+
+UTexture2D* PlantElementIcon(EBotanicusPlantElement Element)
+{
+	const TCHAR* AssetName = TEXT("T_PlantElement_Normal");
+	switch (Element)
+	{
+	case EBotanicusPlantElement::Fire: AssetName = TEXT("T_PlantElement_Fire"); break;
+	case EBotanicusPlantElement::Water: AssetName = TEXT("T_PlantElement_Water"); break;
+	case EBotanicusPlantElement::Ice: AssetName = TEXT("T_PlantElement_Ice"); break;
+	case EBotanicusPlantElement::Shadow: AssetName = TEXT("T_PlantElement_Shadow"); break;
+	default: break;
+	}
+	return LoadObject<UTexture2D>(nullptr, *FString::Printf(
+		TEXT("/Game/Botanicus/UI/Plant/Inspection/Textures/%s.%s"),
+		AssetName, AssetName));
 }
 }
 
@@ -82,8 +100,20 @@ void UBotanicusBotanistNotebookWidget::BindPageWidgets(
 		return Cast<UTextBlock>(GetWidgetFromName(
 			FName(*FString::Printf(TEXT("%s%s"), Prefix, Suffix))));
 	};
+	auto FindImage = [this, Prefix](const TCHAR* Suffix)
+	{
+		return Cast<UImage>(GetWidgetFromName(
+			FName(*FString::Printf(TEXT("%s%s"), Prefix, Suffix))));
+	};
 	OutWidgets.Name = FindText(TEXT("PlantNameLabel"));
 	OutWidgets.Illustration = FindText(TEXT("PlantIllustrationLabel"));
+	OutWidgets.IllustrationImage = FindImage(TEXT("PlantImage"));
+	OutWidgets.ElementIcon = FindImage(TEXT("ElementIcon"));
+	OutWidgets.TemperatureIcon = FindImage(TEXT("TemperatureIcon"));
+	OutWidgets.AirHumidityIcon = FindImage(TEXT("AirHumidityIcon"));
+	OutWidgets.LuminosityIcon = FindImage(TEXT("LuminosityIcon"));
+	OutWidgets.WaterIcon = FindImage(TEXT("WaterIcon"));
+	OutWidgets.GrowthIcon = FindImage(TEXT("GrowthIcon"));
 	OutWidgets.Element = FindText(TEXT("ElementLabel"));
 	OutWidgets.Temperature = FindText(TEXT("TemperatureLabel"));
 	OutWidgets.AirHumidity = FindText(TEXT("AirHumidityLabel"));
@@ -151,6 +181,21 @@ void UBotanicusBotanistNotebookWidget::BindDesignerWidgets()
 	BOTANICUS_BIND_NOTEBOOK_LETTER(Y)
 	BOTANICUS_BIND_NOTEBOOK_LETTER(Z)
 #undef BOTANICUS_BIND_NOTEBOOK_LETTER
+
+#define BOTANICUS_BIND_NOTEBOOK_ELEMENT(Name) \
+	if (UButton* Button = Cast<UButton>(GetWidgetFromName(TEXT("Element" #Name "Button")))) \
+	{ \
+		Button->OnClicked.AddUniqueDynamic(this, \
+			&UBotanicusBotanistNotebookWidget::HandleElement##Name##Clicked); \
+		ElementButtons.Add(Button); \
+	}
+	BOTANICUS_BIND_NOTEBOOK_ELEMENT(All)
+	BOTANICUS_BIND_NOTEBOOK_ELEMENT(Normal)
+	BOTANICUS_BIND_NOTEBOOK_ELEMENT(Fire)
+	BOTANICUS_BIND_NOTEBOOK_ELEMENT(Water)
+	BOTANICUS_BIND_NOTEBOOK_ELEMENT(Shadow)
+	BOTANICUS_BIND_NOTEBOOK_ELEMENT(Ice)
+#undef BOTANICUS_BIND_NOTEBOOK_ELEMENT
 }
 
 void UBotanicusBotanistNotebookWidget::DiscoverPlantsInWorld()
@@ -199,27 +244,113 @@ void UBotanicusBotanistNotebookWidget::RefreshNotebook()
 		return Left.DisplayName.ToString().Compare(
 			Right.DisplayName.ToString(), ESearchCase::IgnoreCase) < 0;
 	});
-	ApplyLetterFilter(ActiveLetterFilter);
+	RebuildFilteredPlantIndices();
+	CurrentPageStartIndex = FMath::Clamp(
+		CurrentPageStartIndex, 0,
+		FMath::Max(0, FilteredPlantIndices.Num() - 1));
+	RefreshCurrentSpread();
 }
 
-void UBotanicusBotanistNotebookWidget::ApplyLetterFilter(TCHAR Letter)
+void UBotanicusBotanistNotebookWidget::RebuildFilteredPlantIndices()
 {
-	ActiveLetterFilter = Letter == 0 ? 0 : FChar::ToUpper(Letter);
 	FilteredPlantIndices.Reset();
-
 	for (int32 Index = 0; Index < PlantDefinitions.Num(); ++Index)
 	{
-		FString Name = PlantDefinitions[Index].DisplayName.ToString();
-		Name.TrimStartAndEndInline();
-		if (ActiveLetterFilter == 0 ||
-			(!Name.IsEmpty() && FChar::ToUpper(Name[0]) == ActiveLetterFilter))
+		if (!ActiveElementFilter.IsSet() ||
+			PlantDefinitions[Index].Element == ActiveElementFilter.GetValue())
 		{
 			FilteredPlantIndices.Add(Index);
 		}
 	}
+}
 
+void UBotanicusBotanistNotebookWidget::ApplyLetterFilter(TCHAR Letter)
+{
+	const TCHAR RequestedLetter = FChar::ToUpper(Letter);
+	RebuildFilteredPlantIndices();
+	int32 BestPosition = INDEX_NONE;
+	for (int32 Position = 0; Position < FilteredPlantIndices.Num(); ++Position)
+	{
+		FString Name = PlantDefinitions[FilteredPlantIndices[Position]].DisplayName.ToString();
+		Name.TrimStartAndEndInline();
+		if (!Name.IsEmpty() && FChar::ToUpper(Name[0]) >= RequestedLetter)
+		{
+			BestPosition = Position;
+			break;
+		}
+	}
+	if (BestPosition == INDEX_NONE && !FilteredPlantIndices.IsEmpty())
+	{
+		BestPosition = FMath::Max(0, FilteredPlantIndices.Num() - 2);
+	}
+	CurrentPageStartIndex = FMath::Max(0, BestPosition);
+	RefreshCurrentSpread();
+}
+
+void UBotanicusBotanistNotebookWidget::ApplyElementFilter(
+	EBotanicusPlantElement Element)
+{
+	ActiveElementFilter = Element;
+	RebuildFilteredPlantIndices();
 	CurrentPageStartIndex = 0;
 	RefreshCurrentSpread();
+}
+
+void UBotanicusBotanistNotebookWidget::UpdateTabVisuals()
+{
+	bool bAvailableLetters[26] = {};
+	for (const FBotanicusPlantDefinition& Plant : PlantDefinitions)
+	{
+		if (ActiveElementFilter.IsSet() &&
+			Plant.Element != ActiveElementFilter.GetValue())
+		{
+			continue;
+		}
+
+		FString Name = Plant.DisplayName.ToString();
+		Name.TrimStartAndEndInline();
+		if (!Name.IsEmpty())
+		{
+			const TCHAR FirstLetter = FChar::ToUpper(Name[0]);
+			if (FirstLetter >= TEXT('A') && FirstLetter <= TEXT('Z'))
+			{
+				bAvailableLetters[FirstLetter - TEXT('A')] = true;
+			}
+		}
+	}
+
+	for (int32 Index = 0; Index < AlphabetButtons.Num(); ++Index)
+	{
+		if (AlphabetButtons[Index].IsValid())
+		{
+			const bool bAvailable = Index < 26 && bAvailableLetters[Index];
+			const bool bActive = ActiveLetterFilter != 0 &&
+				Index == static_cast<int32>(ActiveLetterFilter - TEXT('A'));
+			AlphabetButtons[Index]->SetIsEnabled(bAvailable);
+			AlphabetButtons[Index]->SetBackgroundColor(!bAvailable
+				? FLinearColor(0.28f, 0.28f, 0.28f, 0.72f)
+				: bActive
+					? FLinearColor(0.55f, 0.82f, 0.42f, 1.0f)
+					: FLinearColor::White);
+		}
+	}
+	const EBotanicusPlantElement Elements[] = {
+		EBotanicusPlantElement::Normal, EBotanicusPlantElement::Fire,
+		EBotanicusPlantElement::Water, EBotanicusPlantElement::Shadow,
+		EBotanicusPlantElement::Ice};
+	for (int32 Index = 0; Index < ElementButtons.Num(); ++Index)
+	{
+		if (ElementButtons[Index].IsValid())
+		{
+			const bool bActive = Index == 0
+				? !ActiveElementFilter.IsSet()
+				: ActiveElementFilter.IsSet() &&
+					ActiveElementFilter.GetValue() == Elements[Index - 1];
+			ElementButtons[Index]->SetBackgroundColor(bActive
+				? FLinearColor(0.55f, 0.82f, 0.42f, 1.0f)
+				: FLinearColor::White);
+		}
+	}
 }
 
 void UBotanicusBotanistNotebookWidget::RefreshCurrentSpread()
@@ -234,6 +365,17 @@ void UBotanicusBotanistNotebookWidget::RefreshCurrentSpread()
 		: INDEX_NONE;
 	ShowPlantOnPage(LeftPageWidgets, LeftPlantIndex);
 	ShowPlantOnPage(RightPageWidgets, RightPlantIndex);
+	ActiveLetterFilter = 0;
+	if (PlantDefinitions.IsValidIndex(LeftPlantIndex))
+	{
+		FString Name = PlantDefinitions[LeftPlantIndex].DisplayName.ToString();
+		Name.TrimStartAndEndInline();
+		if (!Name.IsEmpty())
+		{
+			ActiveLetterFilter = FChar::ToUpper(Name[0]);
+		}
+	}
+	UpdateTabVisuals();
 	if (PreviousPageButtonWidget)
 	{
 		PreviousPageButtonWidget->SetIsEnabled(CurrentPageStartIndex > 0);
@@ -260,6 +402,14 @@ void UBotanicusBotanistNotebookWidget::ShowPlantOnPage(
 		SetDetailText(Page.Water, FText::GetEmpty());
 		SetDetailText(Page.Growth, FText::GetEmpty());
 		SetDetailText(Page.Note, FText::GetEmpty());
+		const TWeakObjectPtr<UImage> Images[] = {
+			Page.IllustrationImage, Page.ElementIcon, Page.TemperatureIcon,
+			Page.AirHumidityIcon, Page.LuminosityIcon, Page.WaterIcon,
+			Page.GrowthIcon};
+		for (const TWeakObjectPtr<UImage>& Image : Images)
+		{
+			if (Image.IsValid()) Image->SetVisibility(ESlateVisibility::Collapsed);
+		}
 	};
 	if (!PlantDefinitions.IsValidIndex(PlantIndex))
 	{
@@ -268,6 +418,13 @@ void UBotanicusBotanistNotebookWidget::ShowPlantOnPage(
 	}
 
 	const FBotanicusPlantDefinition& Definition = PlantDefinitions[PlantIndex];
+	const TWeakObjectPtr<UImage> DetailIcons[] = {
+		Page.ElementIcon, Page.TemperatureIcon, Page.AirHumidityIcon,
+		Page.LuminosityIcon, Page.WaterIcon, Page.GrowthIcon};
+	for (const TWeakObjectPtr<UImage>& Icon : DetailIcons)
+	{
+		if (Icon.IsValid()) Icon->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	}
 	if (!DiscoveredPlantKeys.Contains(Definition.PlantKey))
 	{
 		SetDetailText(Page.Name, FText::FromString(TEXT("????????????")));
@@ -279,9 +436,21 @@ void UBotanicusBotanistNotebookWidget::ShowPlantOnPage(
 		SetDetailText(Page.Water, FText::FromString(TEXT("Terreau : ???")));
 		SetDetailText(Page.Growth, FText::FromString(TEXT("Croissance : ???")));
 		SetDetailText(Page.Note, FText::FromString(TEXT("Note : ???")));
+		if (Page.IllustrationImage.IsValid())
+		{
+			Page.IllustrationImage->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		}
 		return;
 	}
 
+	if (Page.IllustrationImage.IsValid())
+	{
+		Page.IllustrationImage->SetVisibility(ESlateVisibility::Collapsed);
+	}
+	if (Page.ElementIcon.IsValid())
+	{
+		Page.ElementIcon->SetBrushFromTexture(PlantElementIcon(Definition.Element), true);
+	}
 	SetDetailText(Page.Name, Definition.DisplayName);
 	SetDetailText(Page.Illustration, FText::FromString(TEXT("ILLUSTRATION\nÀ AJOUTER")));
 	SetDetailText(Page.Element, FText::FromString(FString::Printf(
@@ -359,6 +528,39 @@ void UBotanicusBotanistNotebookWidget::HandleCloseClicked()
 	{
 		BotanicusController->ToggleBotanistNotebook();
 	}
+}
+
+void UBotanicusBotanistNotebookWidget::HandleElementAllClicked()
+{
+	ActiveElementFilter.Reset();
+	RebuildFilteredPlantIndices();
+	CurrentPageStartIndex = 0;
+	RefreshCurrentSpread();
+}
+
+void UBotanicusBotanistNotebookWidget::HandleElementNormalClicked()
+{
+	ApplyElementFilter(EBotanicusPlantElement::Normal);
+}
+
+void UBotanicusBotanistNotebookWidget::HandleElementFireClicked()
+{
+	ApplyElementFilter(EBotanicusPlantElement::Fire);
+}
+
+void UBotanicusBotanistNotebookWidget::HandleElementWaterClicked()
+{
+	ApplyElementFilter(EBotanicusPlantElement::Water);
+}
+
+void UBotanicusBotanistNotebookWidget::HandleElementShadowClicked()
+{
+	ApplyElementFilter(EBotanicusPlantElement::Shadow);
+}
+
+void UBotanicusBotanistNotebookWidget::HandleElementIceClicked()
+{
+	ApplyElementFilter(EBotanicusPlantElement::Ice);
 }
 
 #define BOTANICUS_DEFINE_NOTEBOOK_LETTER(Letter) \

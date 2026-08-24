@@ -7,6 +7,7 @@
 #include "Blueprint/WidgetBlueprintGeneratedClass.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Button.h"
+#include "Components/ButtonSlot.h"
 #include "Components/Border.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
@@ -16,7 +17,10 @@
 #include "Components/Slider.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
+#include "Engine/Font.h"
+#include "Engine/FontFace.h"
 #include "Engine/Texture2D.h"
+#include "Fonts/CompositeFont.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "NiagaraEmitter.h"
 #include "NiagaraEmitterHandle.h"
@@ -32,6 +36,72 @@ UTexture2D* CommandTexture(const TCHAR* Name)
 {
 	return LoadObject<UTexture2D>(nullptr, *FString::Printf(
 		TEXT("/Game/Botanicus/UI/Command/Textures/%s.%s"), Name, Name));
+}
+
+UTexture2D* NotebookTexture(const TCHAR* Name)
+{
+	return LoadObject<UTexture2D>(nullptr, *FString::Printf(
+		TEXT("/Game/Botanicus/UI/Botanist/Textures/%s.%s"), Name, Name));
+}
+
+UObject* NotebookFont()
+{
+	return LoadObject<UObject>(nullptr,
+		TEXT("/Game/Botanicus/UI/Botanist/Fonts/F_Notebook.F_Notebook"));
+}
+
+UFont* EnsureNotebookFontAsset()
+{
+	const TCHAR* FontPath =
+		TEXT("/Game/Botanicus/UI/Botanist/Fonts/F_Notebook.F_Notebook");
+	const TCHAR* PackagePath =
+		TEXT("/Game/Botanicus/UI/Botanist/Fonts/F_Notebook");
+	UFontFace* Face = LoadObject<UFontFace>(nullptr,
+		TEXT("/Game/Botanicus/UI/Botanist/Fonts/Notebook.Notebook"));
+	if (!Face)
+	{
+		return nullptr;
+	}
+
+	UFont* Font = LoadObject<UFont>(nullptr, FontPath);
+	const bool bCreated = Font == nullptr;
+	if (!Font)
+	{
+		UPackage* Package = CreatePackage(PackagePath);
+		Font = NewObject<UFont>(Package, TEXT("F_Notebook"),
+			RF_Public | RF_Standalone);
+	}
+	if (!Font)
+	{
+		return nullptr;
+	}
+
+	Font->Modify();
+	Font->FontCacheType = EFontCacheType::Runtime;
+	FCompositeFont& Composite = Font->GetMutableInternalCompositeFont();
+	Composite.DefaultTypeface.Fonts.Reset();
+	FTypefaceEntry Typeface;
+	Typeface.Name = TEXT("Regular");
+	Typeface.Font = FFontData(Face);
+	Composite.DefaultTypeface.Fonts.Add(MoveTemp(Typeface));
+	Font->PostEditChange();
+	Font->MarkPackageDirty();
+	if (bCreated)
+	{
+		FAssetRegistryModule::AssetCreated(Font);
+	}
+	const FString Filename = FPackageName::LongPackageNameToFilename(
+		PackagePath, FPackageName::GetAssetPackageExtension());
+	return UPackage::SavePackage(Font->GetOutermost(), Font, *Filename,
+		FSavePackageArgs()) ? Font : nullptr;
+}
+
+FSlateFontInfo NotebookFontInfo(int32 Size)
+{
+	FSlateFontInfo Font;
+	Font.FontObject = NotebookFont();
+	Font.Size = Size;
+	return Font;
 }
 
 template <typename T>
@@ -87,6 +157,57 @@ UButton* AddVisualButton(UWidgetTree* Tree, UCanvasPanel* Canvas, const FName Na
 	Label->SetJustification(ETextJustify::Center);
 	Label->SetColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.88f, 0.60f)));
 	Button->AddChild(Label);
+	return Button;
+}
+
+UImage* AddNotebookImage(UWidgetTree* Tree, UCanvasPanel* Canvas,
+	const FName Name, const TCHAR* Texture, const FVector2D Position,
+	const FVector2D Size, int32 ZOrder = 1)
+{
+	UImage* Image = AddCanvasWidget<UImage>(
+		Tree, Canvas, Name, Position, Size, ZOrder);
+	if (UTexture2D* Asset = NotebookTexture(Texture))
+	{
+		Image->SetBrushFromTexture(Asset, true);
+	}
+	return Image;
+}
+
+UTextBlock* AddNotebookText(UWidgetTree* Tree, UCanvasPanel* Canvas,
+	const FName Name, const TCHAR* Text, const FVector2D Position,
+	const FVector2D Size, int32 FontSize, int32 ZOrder = 4)
+{
+	UTextBlock* Label = AddCanvasWidget<UTextBlock>(
+		Tree, Canvas, Name, Position, Size, ZOrder);
+	Label->SetText(FText::FromString(Text));
+	Label->SetFont(NotebookFontInfo(FontSize));
+	Label->SetColorAndOpacity(
+		FSlateColor(FLinearColor(0.23f, 0.16f, 0.075f, 1.0f)));
+	return Label;
+}
+
+UButton* AddNotebookButton(UWidgetTree* Tree, UCanvasPanel* Canvas,
+	const FName Name, const TCHAR* NormalTexture, const TCHAR* PressedTexture,
+	const FVector2D Position, const FVector2D Size, int32 ZOrder = 7)
+{
+	UButton* Button = AddCanvasWidget<UButton>(
+		Tree, Canvas, Name, Position, Size, ZOrder);
+	auto MakeBrush = [Size](UTexture2D* Texture)
+	{
+		FSlateBrush Brush;
+		Brush.SetResourceObject(Texture);
+		Brush.ImageSize = Size;
+		Brush.DrawAs = ESlateBrushDrawType::Image;
+		return Brush;
+	};
+	FButtonStyle Style = Button->GetStyle();
+	const FSlateBrush Normal = MakeBrush(NotebookTexture(NormalTexture));
+	const FSlateBrush Pressed = MakeBrush(NotebookTexture(PressedTexture));
+	Style.SetNormal(Normal);
+	Style.SetHovered(Normal);
+	Style.SetPressed(Pressed);
+	Style.SetDisabled(Normal);
+	Button->SetStyle(Style);
 	return Button;
 }
 }
@@ -163,6 +284,10 @@ bool UBotanicusCommandWidgetBuilder::RebuildCommandComputerWidget()
 bool UBotanicusCommandWidgetBuilder::RebuildBotanistNotebookWidget()
 {
 #if WITH_EDITOR
+	if (!EnsureNotebookFontAsset())
+	{
+		return false;
+	}
 	const TCHAR* ObjectPath =
 		TEXT("/Game/Botanicus/UI/Botanist/WBP_BotanistNotebook.WBP_BotanistNotebook");
 	const TCHAR* PackagePath =
@@ -194,39 +319,13 @@ bool UBotanicusCommandWidgetBuilder::RebuildBotanistNotebookWidget()
 	UBorder* Backdrop = AddCanvasWidget<UBorder>(
 		Tree, Root, TEXT("Backdrop"), FVector2D::ZeroVector,
 		FVector2D(1920.0f, 1080.0f), 0);
-	Backdrop->SetBrushColor(FLinearColor(0.01f, 0.018f, 0.012f, 0.72f));
-
-	// Neutral structural placeholders. The final book, paper, corners and
-	// foliage textures can be assigned directly to these WBP elements later.
-	UBorder* BookCover = AddCanvasWidget<UBorder>(
-		Tree, Root, TEXT("BookCover"), FVector2D(170.0f, 42.0f),
-		FVector2D(1580.0f, 996.0f), 1);
-	BookCover->SetBrushColor(FLinearColor(0.055f, 0.15f, 0.09f, 1.0f));
-	UBorder* LeftPage = AddCanvasWidget<UBorder>(
-		Tree, Root, TEXT("LeftPageBackground"), FVector2D(215.0f, 72.0f),
-		FVector2D(715.0f, 925.0f), 2);
-	LeftPage->SetBrushColor(FLinearColor(0.78f, 0.70f, 0.52f, 1.0f));
-	UBorder* RightPage = AddCanvasWidget<UBorder>(
-		Tree, Root, TEXT("RightPageBackground"), FVector2D(945.0f, 72.0f),
-		FVector2D(715.0f, 925.0f), 2);
-	RightPage->SetBrushColor(FLinearColor(0.80f, 0.72f, 0.55f, 1.0f));
-	UBorder* Spine = AddCanvasWidget<UBorder>(
-		Tree, Root, TEXT("BookSpine"), FVector2D(925.0f, 68.0f),
-		FVector2D(40.0f, 935.0f), 3);
-	Spine->SetBrushColor(FLinearColor(0.16f, 0.10f, 0.045f, 0.88f));
-
-	UButton* CloseButton = AddCanvasWidget<UButton>(
-		Tree, Root, TEXT("CloseButton"), FVector2D(1748.0f, 46.0f),
-		FVector2D(125.0f, 48.0f), 6);
-	UTextBlock* CloseLabel = Tree->ConstructWidget<UTextBlock>(
-		UTextBlock::StaticClass(), TEXT("CloseButtonLabel"));
-	CloseLabel->SetText(FText::FromString(TEXT("FERMER [I]")));
-	CloseLabel->SetJustification(ETextJustify::Center);
-	FSlateFontInfo CloseFont = CloseLabel->GetFont();
-	CloseFont.Size = 16;
-	CloseLabel->SetFont(CloseFont);
-	CloseLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-	CloseButton->AddChild(CloseLabel);
+	Backdrop->SetBrushColor(FLinearColor(0.006f, 0.012f, 0.008f, 0.88f));
+	AddNotebookImage(Tree, Root, TEXT("BookBackground"),
+		TEXT("T_Notebook_Background"), FVector2D(150.0f, 0.0f),
+		FVector2D(1620.0f, 1080.0f), 1);
+	AddNotebookButton(Tree, Root, TEXT("CloseButton"),
+		TEXT("T_Notebook_CloseNormal"), TEXT("T_Notebook_ClosePressed"),
+		FVector2D(1770.0f, 24.0f), FVector2D(105.0f, 105.0f));
 
 	auto AddPage = [Tree, Root](const TCHAR* Prefix, float X)
 	{
@@ -234,26 +333,24 @@ bool UBotanicusCommandWidgetBuilder::RebuildBotanistNotebookWidget()
 		{
 			return FName(*FString::Printf(TEXT("%s%s"), Prefix, Suffix));
 		};
-		UTextBlock* Name = AddText(Tree, Root, Named(TEXT("PlantNameLabel")),
-			TEXT("????????????"), FVector2D(X + 65.0f, 105.0f),
-			FVector2D(585.0f, 55.0f), 28);
+		UTextBlock* Name = AddNotebookText(Tree, Root,
+			Named(TEXT("PlantNameLabel")), TEXT("????????????"),
+			FVector2D(X + 55.0f, 91.0f), FVector2D(520.0f, 58.0f), 31);
 		Name->SetJustification(ETextJustify::Center);
-		Name->SetColorAndOpacity(FSlateColor(FLinearColor(0.20f, 0.14f, 0.07f)));
+		AddNotebookImage(Tree, Root, Named(TEXT("TitleLeafLeft")),
+			TEXT("T_Notebook_TitleLeft"), FVector2D(X + 8.0f, 73.0f),
+			FVector2D(125.0f, 105.0f), 3);
+		AddNotebookImage(Tree, Root, Named(TEXT("TitleLeafRight")),
+			TEXT("T_Notebook_TitleRight"), FVector2D(X + 500.0f, 73.0f),
+			FVector2D(125.0f, 105.0f), 3);
 
-		UBorder* IllustrationFrame = AddCanvasWidget<UBorder>(
-			Tree, Root, Named(TEXT("IllustrationFrame")),
-			FVector2D(X + 80.0f, 175.0f), FVector2D(555.0f, 330.0f), 3);
-		IllustrationFrame->SetBrushColor(FLinearColor(0.58f, 0.54f, 0.39f, 0.55f));
-		UImage* PlantImage = AddCanvasWidget<UImage>(
-			Tree, Root, Named(TEXT("PlantImage")),
-			FVector2D(X + 95.0f, 190.0f), FVector2D(525.0f, 300.0f), 4);
-		PlantImage->SetColorAndOpacity(FLinearColor(1.0f, 1.0f, 1.0f, 0.0f));
-		UTextBlock* Illustration = AddText(
+		AddNotebookImage(Tree, Root, Named(TEXT("PlantImage")),
+			TEXT("T_Notebook_UnknownPlant"), FVector2D(X + 105.0f, 166.0f),
+			FVector2D(420.0f, 360.0f), 4);
+		UTextBlock* Illustration = AddNotebookText(
 			Tree, Root, Named(TEXT("PlantIllustrationLabel")), TEXT("?"),
-			FVector2D(X + 125.0f, 255.0f), FVector2D(465.0f, 170.0f), 72);
+			FVector2D(X + 125.0f, 260.0f), FVector2D(380.0f, 140.0f), 35, 5);
 		Illustration->SetJustification(ETextJustify::Center);
-		Illustration->SetColorAndOpacity(
-			FSlateColor(FLinearColor(0.35f, 0.31f, 0.22f, 0.75f)));
 
 		const TCHAR* Suffixes[] = {
 			TEXT("Element"), TEXT("Temperature"), TEXT("AirHumidity"),
@@ -261,65 +358,120 @@ bool UBotanicusCommandWidgetBuilder::RebuildBotanistNotebookWidget()
 		const TCHAR* Defaults[] = {
 			TEXT("Type : ???"), TEXT("Température : ???"), TEXT("Humidité : ???"),
 			TEXT("Luminosité : ???"), TEXT("Terreau : ???"), TEXT("Croissance : ???")};
+		const TCHAR* IconTextures[] = {
+			TEXT("T_PlantElement_Normal"), TEXT("T_Notebook_Temperature"),
+			TEXT("T_Notebook_Humidity"), TEXT("T_Notebook_Luminosity"),
+			TEXT("T_Notebook_Soil"), TEXT("T_Notebook_GrowthTime")};
 		for (int32 Index = 0; Index < 6; ++Index)
 		{
-			AddCanvasWidget<UImage>(Tree, Root,
+			UImage* Icon = AddCanvasWidget<UImage>(Tree, Root,
 				Named(*FString::Printf(TEXT("%sIcon"), Suffixes[Index])),
-				FVector2D(X + 58.0f, 535.0f + Index * 48.0f),
-				FVector2D(30.0f, 30.0f), 4);
-			UTextBlock* Detail = AddText(Tree, Root,
+				FVector2D(X + 62.0f, 554.0f + Index * 45.0f),
+				FVector2D(34.0f, 34.0f), 4);
+			UTexture2D* IconTexture = Index == 0
+				? LoadObject<UTexture2D>(nullptr,
+					TEXT("/Game/Botanicus/UI/Plant/Inspection/Textures/T_PlantElement_Normal.T_PlantElement_Normal"))
+				: NotebookTexture(IconTextures[Index]);
+			Icon->SetBrushFromTexture(IconTexture, true);
+			AddNotebookText(Tree, Root,
 				Named(*FString::Printf(TEXT("%sLabel"), Suffixes[Index])),
-				Defaults[Index], FVector2D(X + 100.0f, 532.0f + Index * 48.0f),
-				FVector2D(520.0f, 38.0f), 18);
-			Detail->SetColorAndOpacity(
-				FSlateColor(FLinearColor(0.18f, 0.12f, 0.055f)));
+				Defaults[Index], FVector2D(X + 108.0f, 552.0f + Index * 45.0f),
+				FVector2D(470.0f, 38.0f), 19);
 		}
 
 		UBorder* NoteFrame = AddCanvasWidget<UBorder>(
-			Tree, Root, Named(TEXT("NoteFrame")), FVector2D(X + 52.0f, 830.0f),
-			FVector2D(610.0f, 110.0f), 3);
-		NoteFrame->SetBrushColor(FLinearColor(0.62f, 0.56f, 0.40f, 0.42f));
-		UTextBlock* Note = AddText(Tree, Root, Named(TEXT("NoteLabel")),
-			TEXT("Note : ???"), FVector2D(X + 75.0f, 852.0f),
-			FVector2D(565.0f, 70.0f), 16);
+			Tree, Root, Named(TEXT("NoteFrame")), FVector2D(X + 48.0f, 842.0f),
+			FVector2D(535.0f, 93.0f), 3);
+		NoteFrame->SetBrushColor(FLinearColor(0.63f, 0.54f, 0.34f, 0.18f));
+		UTextBlock* Note = AddNotebookText(Tree, Root,
+			Named(TEXT("NoteLabel")), TEXT("Note : ???"),
+			FVector2D(X + 70.0f, 858.0f), FVector2D(495.0f, 62.0f), 16);
 		Note->SetAutoWrapText(true);
-		Note->SetColorAndOpacity(FSlateColor(FLinearColor(0.18f, 0.12f, 0.055f)));
 	};
-	AddPage(TEXT("Left"), 215.0f);
-	AddPage(TEXT("Right"), 945.0f);
+	AddPage(TEXT("Left"), 310.0f);
+	AddPage(TEXT("Right"), 980.0f);
 
-	auto AddArrowButton = [Tree, Root](const FName Name, const TCHAR* Label,
-		const FVector2D Position)
-	{
-		UButton* Button = AddCanvasWidget<UButton>(
-			Tree, Root, Name, Position, FVector2D(72.0f, 72.0f), 6);
-		UTextBlock* Text = Tree->ConstructWidget<UTextBlock>();
-		Text->SetText(FText::FromString(Label));
-		Text->SetJustification(ETextJustify::Center);
-		FSlateFontInfo Font = Text->GetFont();
-		Font.Size = 35;
-		Text->SetFont(Font);
-		Button->AddChild(Text);
-	};
-	AddArrowButton(TEXT("PreviousPageButton"), TEXT("<"), FVector2D(238.0f, 905.0f));
-	AddArrowButton(TEXT("NextPageButton"), TEXT(">"), FVector2D(1565.0f, 905.0f));
+	AddNotebookButton(Tree, Root, TEXT("PreviousPageButton"),
+		TEXT("T_Notebook_PreviousNormal"), TEXT("T_Notebook_PreviousPressed"),
+		FVector2D(250.0f, 905.0f), FVector2D(105.0f, 105.0f));
+	AddNotebookButton(Tree, Root, TEXT("NextPageButton"),
+		TEXT("T_Notebook_NextNormal"), TEXT("T_Notebook_NextPressed"),
+		FVector2D(1570.0f, 905.0f), FVector2D(105.0f, 105.0f));
 
 	for (int32 Index = 0; Index < 26; ++Index)
 	{
 		const TCHAR Letter = static_cast<TCHAR>('A' + Index);
 		const FName ButtonName(*FString::Printf(TEXT("Letter%cButton"), Letter));
 		UButton* Button = AddCanvasWidget<UButton>(
-			Tree, Root, ButtonName, FVector2D(1662.0f, 82.0f + Index * 35.0f),
-			FVector2D(48.0f, 33.0f), 5);
-		UTextBlock* LetterLabel = Tree->ConstructWidget<UTextBlock>();
-		LetterLabel->SetText(FText::FromString(FString::Chr(Letter)));
-		LetterLabel->SetJustification(ETextJustify::Center);
-		FSlateFontInfo Font = LetterLabel->GetFont();
-		Font.Size = 15;
-		LetterLabel->SetFont(Font);
-		LetterLabel->SetColorAndOpacity(
-			FSlateColor(FLinearColor(0.18f, 0.12f, 0.055f)));
-		Button->AddChild(LetterLabel);
+			Tree, Root, ButtonName, FVector2D(1642.0f, 79.0f + Index * 35.0f),
+			FVector2D(72.0f, 34.0f), 6);
+		FSlateBrush TabBrush;
+		const FString TabTextureName = FString::Printf(
+			TEXT("T_Notebook_Tab_%c"), Letter);
+		TabBrush.SetResourceObject(NotebookTexture(*TabTextureName));
+		TabBrush.ImageSize = FVector2D(72.0f, 34.0f);
+		TabBrush.DrawAs = ESlateBrushDrawType::Image;
+		FButtonStyle TabStyle = Button->GetStyle();
+		TabStyle.SetNormal(TabBrush);
+		TabStyle.SetHovered(TabBrush);
+		TabStyle.SetPressed(TabBrush);
+		TabStyle.SetDisabled(TabBrush);
+		Button->SetStyle(TabStyle);
+	}
+
+	const TCHAR* ElementNames[] = {
+		TEXT("All"), TEXT("Normal"), TEXT("Fire"), TEXT("Water"),
+		TEXT("Shadow"), TEXT("Ice")};
+	const TCHAR* ElementLabels[] = {
+		TEXT("Tous"), TEXT("Normal"), TEXT("Feu"), TEXT("Eau"),
+		TEXT("Ténèbres"), TEXT("Glace")};
+	const TCHAR* ElementTextureNames[] = {
+		TEXT("T_Notebook_ElementTab_Normal"),
+		TEXT("T_Notebook_ElementTab_Normal"),
+		TEXT("T_Notebook_ElementTab_Fire"),
+		TEXT("T_Notebook_ElementTab_Water"),
+		TEXT("T_Notebook_ElementTab_Shadow"),
+		TEXT("T_Notebook_ElementTab_Ice")};
+	for (int32 Index = 0; Index < 6; ++Index)
+	{
+		const FName ButtonName(*FString::Printf(
+			TEXT("Element%sButton"), ElementNames[Index]));
+		UButton* Button = AddCanvasWidget<UButton>(
+			Tree, Root, ButtonName,
+			FVector2D(1040.0f + Index * 88.0f, 982.0f),
+			FVector2D(64.0f, 96.0f), 7);
+		FSlateBrush TabBrush;
+		TabBrush.SetResourceObject(NotebookTexture(ElementTextureNames[Index]));
+		TabBrush.ImageSize = FVector2D(64.0f, 96.0f);
+		TabBrush.DrawAs = ESlateBrushDrawType::Image;
+		FButtonStyle TabStyle = Button->GetStyle();
+		TabStyle.SetNormal(TabBrush);
+		TabStyle.SetHovered(TabBrush);
+		TabStyle.SetPressed(TabBrush);
+		Button->SetStyle(TabStyle);
+		Button->SetToolTipText(FText::FromString(ElementLabels[Index]));
+
+		if (Index == 0)
+		{
+			// No dedicated "Tous" artwork was supplied. Reuse the matching
+			// parchment tab silhouette and cover its central emblem with a label.
+			UBorder* ContentBackground = Tree->ConstructWidget<UBorder>();
+			ContentBackground->SetBrushColor(
+				FLinearColor(0.92f, 0.79f, 0.54f, 0.98f));
+			ContentBackground->SetPadding(FMargin(5.0f, 3.0f));
+			UTextBlock* AllLabel = Tree->ConstructWidget<UTextBlock>();
+			AllLabel->SetText(FText::FromString(TEXT("Tous")));
+			AllLabel->SetFont(NotebookFontInfo(14));
+			AllLabel->SetColorAndOpacity(
+				FSlateColor(FLinearColor(0.18f, 0.11f, 0.04f, 1.0f)));
+			ContentBackground->AddChild(AllLabel);
+			if (UButtonSlot* ContentSlot = Cast<UButtonSlot>(
+				Button->AddChild(ContentBackground)))
+			{
+				ContentSlot->SetHorizontalAlignment(HAlign_Center);
+				ContentSlot->SetVerticalAlignment(VAlign_Center);
+			}
+		}
 	}
 
 	// The tree is rebuilt programmatically. Reset the editor-only widget GUID map
