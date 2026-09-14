@@ -2,6 +2,8 @@
 
 
 #include "BotanicusPlayerController.h"
+#include "Interaction/BotanicusInteractionComponent.h"
+#include "Visitors/BotanicusVisitorCharacter.h"
 #include "BotanicusCharacter.h"
 #include "QuickBar/BotanicusQuickBarComponent.h"
 #include "Sales/BotanicusSalesDisplayActor.h"
@@ -59,6 +61,10 @@
 #include "Growing/BotanicusPlantSubsystem.h"
 #include "Growing/BotanicusMultiPlantPotActor.h"
 #include "Growing/BotanicusWateringCanActor.h"
+#include "Water/BotanicusWaterSourceComponent.h"
+#include "Water/BotanicusWaterSourceProfile.h"
+#include "Water/BotanicusWaterSubsystem.h"
+#include "Water/BotanicusWaterTrajectory.h"
 #include "Growing/BotanicusWaterReserveActor.h"
 #include "Interaction/BotanicusInteractable.h"
 #include "Online/BotanicusMultiplayerSubsystem.h"
@@ -1530,6 +1536,21 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 	if (Params.Key == EKeys::E &&
 		Params.Event == IE_Pressed &&
 		!bBuildingTopDownViewActive &&
+		[&]()
+		{
+			if (const auto* Visitor = Cast<ABotanicusVisitorCharacter>(LocalInteractionHighlightActor.Get());
+				Visitor && Visitor->IsWaitingForSpecialOrder())
+			{
+				if (auto* Character = Cast<ABotanicusCharacter>(GetPawn())) Character->GetInteractionComponent()->TryInteract();
+				return true;
+			}
+			return false;
+		}())
+	{
+		return true;
+	}
+
+	if (Params.Key == EKeys::E && Params.Event == IE_Pressed && !bBuildingTopDownViewActive &&
 		(TryOpenNearbyWorkbenchUpgrade() ||
 		 TryUseNearbyComputer() ||
 		 TryPlacePlantOnNearbySalesDisplay() ||
@@ -2566,6 +2587,12 @@ void ABotanicusPlayerController::RefreshInteractionTargetName(
 	if (!IsValid(TargetActor))
 	{
 		InteractionTargetWidget->ClearTarget();
+		return;
+	}
+	if (const auto* Visitor = Cast<ABotanicusVisitorCharacter>(TargetActor))
+	{
+		const auto Prompt = Visitor->GetInteractionPrompt_Implementation(GetPawn());
+		InteractionTargetWidget->SetKeyboardPrompt(Prompt.ActionText, Prompt.TargetName);
 		return;
 	}
 	if (const ABotanicusPreparationWorkbenchActor* Workbench =
@@ -7157,7 +7184,6 @@ void ABotanicusPlayerController::UpdateLocalWateringEffect(float DeltaTime)
 		return;
 	}
 
-	FVector TargetLocation = FVector::ZeroVector;
 	bool bWateringAPlantedPot = false;
 	if (IsValid(LocalActivePlantPot))
 	{
@@ -7170,54 +7196,30 @@ void ABotanicusPlayerController::UpdateLocalWateringEffect(float DeltaTime)
 					return !Slot.PlantKey.IsNone();
 				})
 			: !LocalActivePlantPot->GetPlantKey().IsNone();
-		TargetLocation =
-			LocalActivePlantPot->GetActorLocation() +
-			FVector(
-				0.0f,
-				0.0f,
-				FMath::Max(
-					4.0f,
-					LocalActivePlantPot->GetSoilMaximumHeight()));
-	}
-	else
-	{
-		const FVector ViewLocation = PlayerCameraManager
-			? PlayerCameraManager->GetCameraLocation()
-			: BotanicusCharacter->GetPawnViewLocation();
-		const FVector ViewDirection = PlayerCameraManager
-			? PlayerCameraManager->GetCameraRotation().Vector()
-			: BotanicusCharacter->GetViewRotation().Vector();
-		const FVector TraceEnd =
-			ViewLocation + ViewDirection * 1600.0f;
-		FCollisionQueryParams QueryParams(
-			SCENE_QUERY_STAT(BotanicusWateringCanSprayAim),
-			true);
-		QueryParams.AddIgnoredActor(BotanicusCharacter);
-		QueryParams.AddIgnoredActor(WateringCan);
-		FHitResult Hit;
-		TargetLocation =
-			GetWorld() && GetWorld()->LineTraceSingleByChannel(
-				Hit,
-				ViewLocation,
-				TraceEnd,
-				ECC_Visibility,
-				QueryParams)
-				? Hit.ImpactPoint
-				: ViewLocation + ViewDirection * 700.0f;
 	}
 
-	WateringCan->SetWateringEffectActive(true, TargetLocation);
+	WateringCan->SetWateringEffectActive(true);
 
 	// A planted pot consumes water in its authoritative primary-use logic.
 	// Free spraying (including empty pots, scenery and other players) consumes
 	// the same reservoir rate through a server-limited pulse.
 	if (!bWateringAPlantedPot)
 	{
+		const UBotanicusWaterSourceComponent* WaterSource =
+			WateringCan->GetWaterSourceComponent();
+		FBotanicusWaterStreamParams StreamParams;
+		if (!WaterSource || !WaterSource->BuildStreamParams(StreamParams))
+		{
+			return;
+		}
 		WateringCanSprayRequestAccumulator += DeltaTime;
-		if (WateringCanSprayRequestAccumulator >= 0.10f)
+		if (WateringCanSprayRequestAccumulator >=
+			WaterSource->GetSimulationInterval())
 		{
 			WateringCanSprayRequestAccumulator = 0.0f;
-			ServerPulseWateringCanSpray();
+			ServerPulseWateringCanSpray(
+				StreamParams.Origin,
+				StreamParams.Direction);
 		}
 	}
 }
@@ -14118,7 +14120,9 @@ void ABotanicusPlayerController::
 }
 
 void ABotanicusPlayerController::
-	ServerPulseWateringCanSpray_Implementation()
+	ServerPulseWateringCanSpray_Implementation(
+		FVector_NetQuantize10 RequestedOrigin,
+		FVector_NetQuantizeNormal RequestedDirection)
 {
 	ABotanicusCharacter* BotanicusCharacter =
 		Cast<ABotanicusCharacter>(GetPawn());
@@ -14131,25 +14135,146 @@ void ABotanicusPlayerController::
 		return;
 	}
 
+	const FBotanicusItemDefinition* WateringCanDefinition =
+		FindItemDefinition(this, TEXT("WateringCan"));
+	UClass* WateringCanClass = WateringCanDefinition
+		? WateringCanDefinition->WorldActorClass.LoadSynchronous()
+		: nullptr;
+	const ABotanicusWateringCanActor* WateringCanDefaults =
+		WateringCanClass &&
+		WateringCanClass->IsChildOf(ABotanicusWateringCanActor::StaticClass())
+			? Cast<ABotanicusWateringCanActor>(
+				WateringCanClass->GetDefaultObject())
+			: GetDefault<ABotanicusWateringCanActor>();
+	const UBotanicusWaterSourceComponent* WaterSource = WateringCanDefaults
+		? WateringCanDefaults->GetWaterSourceComponent()
+		: nullptr;
+	if (!WaterSource)
+	{
+		return;
+	}
+
+	const FVector Origin(RequestedOrigin);
+	const FVector Direction(RequestedDirection);
+	const FVector ViewLocation = BotanicusCharacter->GetPawnViewLocation();
+	if (Origin.ContainsNaN() || Direction.ContainsNaN() ||
+		Direction.IsNearlyZero() ||
+		FVector::DistSquared(Origin, ViewLocation) > FMath::Square(250.0f))
+	{
+		return;
+	}
+
+	const float SimulationInterval = WaterSource->GetSimulationInterval();
+
 	const double CurrentServerTime =
 		GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
 	const double ElapsedSincePulse =
 		CurrentServerTime - LastServerWateringCanSprayPulseTime;
-	if (ElapsedSincePulse < 0.075)
+	if (ElapsedSincePulse < SimulationInterval * 0.75f)
 	{
 		return;
 	}
 
 	const float AcceptedDeltaTime =
 		LastServerWateringCanSprayPulseTime < -100.0
-			? 0.10f
+			? SimulationInterval
 			: FMath::Clamp(
 				static_cast<float>(ElapsedSincePulse),
-				0.075f,
-				0.15f);
+				SimulationInterval * 0.75f,
+				SimulationInterval * 1.5f);
 	LastServerWateringCanSprayPulseTime = CurrentServerTime;
-	QuickBar->ConsumeSelectedWateringCanWater(
-		0.12f * AcceptedDeltaTime);
+
+	FBotanicusWaterStreamParams StreamParams;
+	WaterSource->BuildStreamParams(Origin, Direction, StreamParams);
+	const float WaterEmitted = FMath::Min(
+		StreamParams.FlowRate * AcceptedDeltaTime,
+		QuickBar->GetSelectedWateringCanWaterLevel());
+	FBotanicusWaterHit WaterHit;
+	TArray<const AActor*> IgnoredActors;
+	IgnoredActors.Add(BotanicusCharacter);
+	const bool bHitSurface = BotanicusWaterTrajectory::TraceFirstBlockingHit(
+		GetWorld(),
+		StreamParams,
+		BotanicusCharacter,
+		IgnoredActors,
+		WaterEmitted,
+		WaterHit);
+	if (bHitSurface)
+	{
+		if (UBotanicusWaterSubsystem* WaterSubsystem =
+			GetWorld()->GetSubsystem<UBotanicusWaterSubsystem>())
+		{
+			WaterSubsystem->ApplyWaterHit(WaterHit);
+		}
+		for (FConstPlayerControllerIterator Iterator =
+			GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
+		{
+			ABotanicusPlayerController* OtherController =
+				Cast<ABotanicusPlayerController>(Iterator->Get());
+			if (OtherController && !OtherController->IsLocalController())
+			{
+				OtherController->ClientApplyWaterSurfaceImpact(
+					WaterHit.Location,
+					WaterHit.Normal,
+					WaterHit.Amount,
+					WaterHit.HitActor);
+			}
+		}
+	}
+
+	// The reservoir pays for everything emitted, whether it hit a receiver,
+	// splashed, or left the simulated range.
+	QuickBar->ConsumeSelectedWateringCanWater(WaterEmitted);
+}
+
+void ABotanicusPlayerController::
+	ClientApplyWaterSurfaceImpact_Implementation(
+		FVector_NetQuantize10 ImpactLocation,
+		FVector_NetQuantizeNormal ImpactNormal,
+		float EmittedAmount,
+		AActor* SurfaceActor)
+{
+	UWorld* World = GetWorld();
+	if (!World || EmittedAmount <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	FBotanicusWaterHit WaterHit;
+	WaterHit.Location = FVector(ImpactLocation);
+	WaterHit.Normal = FVector(ImpactNormal).GetSafeNormal();
+	WaterHit.Amount = EmittedAmount;
+	WaterHit.HitActor = SurfaceActor;
+	WaterHit.SourceActor = GetPawn();
+
+	// Resolve the local component so zones follow movable furniture and can
+	// merge on the same rendered surface even when that component is not net-addressable.
+	FCollisionQueryParams QueryParams(
+		SCENE_QUERY_STAT(BotanicusWaterSurfaceClientResolve),
+		false);
+	if (APawn* ControlledPawn = GetPawn())
+	{
+		QueryParams.AddIgnoredActor(ControlledPawn);
+	}
+	FHitResult LocalHit;
+	if (World->LineTraceSingleByChannel(
+		LocalHit,
+		WaterHit.Location + WaterHit.Normal * 12.0f,
+		WaterHit.Location - WaterHit.Normal * 24.0f,
+		ECC_Visibility,
+		QueryParams))
+	{
+		WaterHit.Location = LocalHit.ImpactPoint;
+		WaterHit.Normal = LocalHit.ImpactNormal.GetSafeNormal();
+		WaterHit.HitActor = LocalHit.GetActor();
+		WaterHit.HitComponent = LocalHit.GetComponent();
+	}
+
+	if (UBotanicusWaterSubsystem* WaterSubsystem =
+		World->GetSubsystem<UBotanicusWaterSubsystem>())
+	{
+		WaterSubsystem->ApplyWaterHit(WaterHit);
+	}
 }
 
 void ABotanicusPlayerController::

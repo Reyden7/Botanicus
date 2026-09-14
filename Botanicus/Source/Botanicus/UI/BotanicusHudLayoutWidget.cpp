@@ -3,6 +3,9 @@
 #include "UI/BotanicusHudLayoutWidget.h"
 
 #include "Components/NamedSlot.h"
+#include "Blueprint/WidgetTree.h"
+#include "Components/CanvasPanel.h"
+#include "UI/BotanicusSpecialOrdersWidget.h"
 #include "Components/CanvasPanelSlot.h"
 #include "UI/BotanicusClockWidget.h"
 #include "UI/BotanicusCrosshairWidget.h"
@@ -45,7 +48,6 @@ void UBotanicusHudLayoutWidget::NativeOnInitialized()
 {
 	Super::NativeOnInitialized();
 	SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-
 	ClockWidget = CreateElement<UBotanicusClockWidget>(ClockSlot,
 		TEXT("/Game/Botanicus/UI/HUD/Elements/WBP_HUD_Clock.WBP_HUD_Clock_C"));
 	OutdoorEnvironmentWidget =
@@ -60,6 +62,43 @@ void UBotanicusHudLayoutWidget::NativeOnInitialized()
 	ObjectivesWidget =
 		CreateElement<UBotanicusShopObjectivesWidget>(ObjectivesSlot,
 			TEXT("/Game/Botanicus/UI/HUD/Elements/WBP_HUD_Objectives.WBP_HUD_Objectives_C"));
+	SpecialOrdersWidget = CreateElement<UBotanicusSpecialOrdersWidget>(SpecialOrdersSlot);
+	if (!SpecialOrdersWidget)
+	{
+		// Place the accepted orders directly below the authored objectives panel.
+		// Copying its Canvas anchors and alignment keeps both panels together at
+		// every viewport size instead of relying on an unrelated screen position.
+		auto* ObjectivesCanvasSlot = ObjectivesSlot
+			? Cast<UCanvasPanelSlot>(ObjectivesSlot->Slot)
+			: nullptr;
+		auto* Canvas = ObjectivesSlot
+			? Cast<UCanvasPanel>(ObjectivesSlot->GetParent())
+			: Cast<UCanvasPanel>(WidgetTree->RootWidget);
+		if (Canvas)
+		{
+			SpecialOrdersWidget = CreateWidget<UBotanicusSpecialOrdersWidget>(GetOwningPlayer());
+			if (SpecialOrdersWidget)
+			{
+				auto* OrdersCanvasSlot = Canvas->AddChildToCanvas(SpecialOrdersWidget);
+				if (ObjectivesCanvasSlot)
+				{
+					OrdersCanvasSlot->SetAnchors(ObjectivesCanvasSlot->GetAnchors());
+					OrdersCanvasSlot->SetAlignment(ObjectivesCanvasSlot->GetAlignment());
+					OrdersCanvasSlot->SetPosition(ObjectivesCanvasSlot->GetPosition() +
+						FVector2D(0.0f, ObjectivesCanvasSlot->GetSize().Y + 12.0f));
+					OrdersCanvasSlot->SetZOrder(ObjectivesCanvasSlot->GetZOrder() + 1);
+				}
+				else
+				{
+					OrdersCanvasSlot->SetAnchors(FAnchors(1.0f, 0.0f));
+					OrdersCanvasSlot->SetAlignment(FVector2D(1.0f, 0.0f));
+					OrdersCanvasSlot->SetPosition(FVector2D(-28.0f, 542.0f));
+					OrdersCanvasSlot->SetZOrder(10);
+				}
+				OrdersCanvasSlot->SetAutoSize(true);
+			}
+		}
+	}
 	QuickBarWidget = CreateElement<UBotanicusQuickBarWidget>(QuickBarSlot,
 		TEXT("/Game/Botanicus/UI/HUD/Elements/WBP_HUD_QuickBar.WBP_HUD_QuickBar_C"));
 	InteractionWidget =

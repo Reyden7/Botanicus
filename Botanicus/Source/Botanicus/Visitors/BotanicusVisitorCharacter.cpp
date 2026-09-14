@@ -3,6 +3,8 @@
 #include "Visitors/BotanicusVisitorCharacter.h"
 
 #include "BotanicusGameState.h"
+#include "SpecialOrders/BotanicusSpecialOrderComponent.h"
+#include "Sales/BotanicusCashRegisterActor.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -23,6 +25,8 @@
 #include "UI/BotanicusVisitorSpeechBubbleWidget.h"
 #include "Visitors/BotanicusVisitorZoneActor.h"
 #include "UObject/ConstructorHelpers.h"
+#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundBase.h"
 
 namespace
 {
@@ -84,6 +88,9 @@ ABotanicusVisitorCharacter::ABotanicusVisitorCharacter()
 	bReplicates = true;
 	SetReplicateMovement(true);
 	bAlwaysRelevant = true;
+	static ConstructorHelpers::FObjectFinder<USoundBase> BellAsset(
+		TEXT("/Game/Botanicus/Audio/S_SpecialOrderBell.S_SpecialOrderBell"));
+	SpecialOrderBellSound = BellAsset.Object;
 
 	GetCapsuleComponent()->InitCapsuleSize(34.0f, 88.0f);
 	GetCapsuleComponent()->SetCollisionResponseToChannel(
@@ -395,6 +402,7 @@ void ABotanicusVisitorCharacter::GetLifetimeReplicatedProps(
 	TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(ABotanicusVisitorCharacter, SpecialOrderId);
 	DOREPLIFETIME(
 		ABotanicusVisitorCharacter,
 		VisitorState);
@@ -434,7 +442,7 @@ void ABotanicusVisitorCharacter::Tick(float DeltaSeconds)
 
 	case EBotanicusVisitorState::FollowingRoute:
 		DisplaySearchRemaining -= DeltaSeconds;
-		if (!bPlantSelected &&
+		if (!SpecialOrderId.IsValid() && !bPlantSelected &&
 			DisplaySearchRemaining <= 0.0f &&
 			RouteWaypointIndex <= CheckoutWaypointIndex &&
 			IsInsideSalesArea())
@@ -547,6 +555,34 @@ void ABotanicusVisitorCharacter::Tick(float DeltaSeconds)
 		}
 		break;
 
+	case EBotanicusVisitorState::SpecialOrderApproaching:
+		if (!SpecialOrderCounter.IsValid() || !SpecialOrderCounter->IsOperational())
+		{
+			if (auto* Orders = UBotanicusSpecialOrderComponent::Get(GetWorld())) Orders->CustomerDeparted(SpecialOrderId, this);
+			break;
+		}
+		MoveTowards(SpecialOrderStandLocation, DeltaSeconds);
+		if (FVector::DistSquared2D(GetActorLocation(), SpecialOrderStandLocation) <= FMath::Square(45.0f))
+		{
+			GetCharacterMovement()->StopMovementImmediately();
+			VisitorState = EBotanicusVisitorState::SpecialOrderWaiting;
+			if (auto* Orders = UBotanicusSpecialOrderComponent::Get(GetWorld())) Orders->CustomerArrived(SpecialOrderId, this);
+			TryRingSpecialOrderBell();
+			OnRep_VisitorState();
+			RefreshSpecialOrderSpeech();
+			ForceNetUpdate();
+		}
+		break;
+	case EBotanicusVisitorState::SpecialOrderWaiting:
+		if (!SpecialOrderCounter.IsValid() || !SpecialOrderCounter->IsOperational())
+		{
+			if (auto* Orders = UBotanicusSpecialOrderComponent::Get(GetWorld())) Orders->CustomerDeparted(SpecialOrderId, this);
+		}
+		else
+		{
+			TryRingSpecialOrderBellReminder();
+		}
+		break;
 	case EBotanicusVisitorState::Leaving:
 		if (!RoutePoints.IsValidIndex(RouteWaypointIndex))
 		{
@@ -1298,7 +1334,13 @@ void ABotanicusVisitorCharacter::FollowRoute(float DeltaSeconds)
 		FMath::Square(AcceptanceRadius))
 	{
 		++RouteWaypointIndex;
-		if (DestinationWaypointIndex == CheckoutWaypointIndex &&
+		if (DestinationWaypointIndex == CheckoutWaypointIndex && SpecialOrderId.IsValid())
+		{
+			VisitorState = EBotanicusVisitorState::SpecialOrderApproaching;
+			RefreshStatusText();
+			ForceNetUpdate();
+		}
+		else if (DestinationWaypointIndex == CheckoutWaypointIndex &&
 			bPlantSelected)
 		{
 			VisitorState = EBotanicusVisitorState::CheckoutQueue;
@@ -1338,7 +1380,8 @@ void ABotanicusVisitorCharacter::SwitchToDirectReturnRoute()
 void ABotanicusVisitorCharacter::UpdateStuckDetection(
 	float DeltaSeconds)
 {
-	if (VisitorState == EBotanicusVisitorState::Inspecting ||
+	if (VisitorState == EBotanicusVisitorState::SpecialOrderWaiting ||
+		VisitorState == EBotanicusVisitorState::Inspecting ||
 		VisitorState == EBotanicusVisitorState::CheckoutQueue ||
 		VisitorState == EBotanicusVisitorState::Paying ||
 		VisitorState == EBotanicusVisitorState::SelfCheckout ||
@@ -1400,6 +1443,11 @@ void ABotanicusVisitorCharacter::BeginShopClosureDeparture()
 		return;
 	}
 
+	if (SpecialOrderId.IsValid())
+	{
+		if (auto* Orders = UBotanicusSpecialOrderComponent::Get(GetWorld())) Orders->CustomerDeparted(SpecialOrderId, this);
+		return;
+	}
 	const EBotanicusVisitorState PreviousState = VisitorState;
 	const bool bWasInsideShop =
 		IsInsideSalesArea() ||
@@ -1490,6 +1538,10 @@ void ABotanicusVisitorCharacter::BeginShopClosureDeparture()
 void ABotanicusVisitorCharacter::EndPlay(
 	const EEndPlayReason::Type EndPlayReason)
 {
+	if (HasAuthority() && EndPlayReason == EEndPlayReason::Destroyed && SpecialOrderId.IsValid())
+	{
+		if (auto* Orders = UBotanicusSpecialOrderComponent::Get(GetWorld())) Orders->CustomerDeparted(SpecialOrderId, this);
+	}
 	if (HasAuthority() && TargetDisplay)
 	{
 		TargetDisplay->NotifyVisitorEnded(this);
@@ -1506,6 +1558,12 @@ void ABotanicusVisitorCharacter::RefreshStatusText()
 
 	switch (VisitorState)
 	{
+	case EBotanicusVisitorState::SpecialOrderApproaching:
+		StatusText->SetText(FText::FromString(TEXT("COMMANDE SPÉCIALE\nVERS LE COMPTOIR")));
+		break;
+	case EBotanicusVisitorState::SpecialOrderWaiting:
+		StatusText->SetText(FText::FromString(TEXT("COMMANDE SPÉCIALE\nEN ATTENTE")));
+		break;
 	case EBotanicusVisitorState::Queued:
 		StatusText->SetText(
 			FText::FromString(TEXT("VISITEUR\nFILE D'ATTENTE")));
@@ -1553,6 +1611,8 @@ void ABotanicusVisitorCharacter::RefreshStatusText()
 
 void ABotanicusVisitorCharacter::OnRep_VisitorState()
 {
+	GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Visibility,
+		IsWaitingForSpecialOrder() ? ECR_Block : ECR_Ignore);
 	RefreshStatusText();
 }
 
@@ -1575,4 +1635,116 @@ void ABotanicusVisitorCharacter::OnRep_CarriedPlant()
 {
 	RefreshCarriedPlantVisuals();
 	RefreshStatusText();
+}
+
+void ABotanicusVisitorCharacter::BeginSpecialOrderVisit(FGuid Id, ABotanicusCashRegisterActor* Counter)
+{
+	if (!HasAuthority() || !Counter || !PurchaseRoute.IsValidIndex(PurchaseCheckoutWaypointIndex)) return;
+	int32 CounterSlot = 0;
+	for (TActorIterator<ABotanicusVisitorCharacter> It(GetWorld()); It; ++It)
+		if (*It != this && It->SpecialOrderCounter == Counter && It->SpecialOrderId.IsValid()) ++CounterSlot;
+	SpecialOrderId = Id;
+	bSpecialOrderBellRung = false;
+	NextSpecialOrderBellTime = 0.0f;
+	SpecialOrderCounter = Counter;
+	SpecialOrderStandLocation = Counter->GetCustomerStandLocation() - Counter->GetActorRightVector() * (170.0f + 100.0f * CounterSlot);
+	// RoutePoints still contains the authored parking-to-sales arrival route here.
+	// Keep every one of those waypoints, then append the normal sales-to-checkout
+	// and checkout-to-parking route. Replacing it with PurchaseRoute would make
+	// the customer walk straight from the parking to the sales area through walls.
+	const int32 ArrivalPointCount = RoutePoints.Num();
+	for (int32 Index = 1; Index < PurchaseRoute.Num(); ++Index)
+	{
+		RoutePoints.Add(PurchaseRoute[Index]);
+	}
+	RouteWaypointIndex = 0;
+	CheckoutWaypointIndex = ArrivalPointCount - 1 + PurchaseCheckoutWaypointIndex;
+	bPlantSelected = false;
+	bReturningToRoute = false;
+	VisitorState = EBotanicusVisitorState::FollowingRoute;
+	SetSpeechLine(TEXT("Je voudrais passer une commande spéciale au comptoir."));
+	OnRep_VisitorState();
+	ForceNetUpdate();
+}
+
+bool ABotanicusVisitorCharacter::TryRingSpecialOrderBell()
+{
+	if (!HasAuthority() || !IsWaitingForSpecialOrder() || !SpecialOrderId.IsValid() ||
+		!SpecialOrderCounter.IsValid() || bSpecialOrderBellRung) return false;
+	bSpecialOrderBellRung = true;
+	NextSpecialOrderBellTime = GetWorld()->GetTimeSeconds() + 60.0f;
+	// An event, not a replicated-state side effect: late joins never replay a past ring.
+	MulticastPlaySpecialOrderBell(SpecialOrderCounter->GetActorLocation() + FVector(0.0f, 0.0f, 100.0f));
+	return true;
+}
+
+bool ABotanicusVisitorCharacter::TryRingSpecialOrderBellReminder()
+{
+	if (!HasAuthority() || !IsWaitingForSpecialOrder() || !bSpecialOrderBellRung ||
+		!SpecialOrderCounter.IsValid() || GetWorld()->GetTimeSeconds() < NextSpecialOrderBellTime) return false;
+	const auto* Orders = UBotanicusSpecialOrderComponent::Get(GetWorld());
+	const auto* Order = Orders ? Orders->FindOrder(SpecialOrderId) : nullptr;
+	if (!Order || Order->Customer != this || Order->Status != EBotanicusSpecialOrderStatus::Offered ||
+		Orders->GetRemainingSeconds(*Order) <= 0.0f) return false;
+	// Do not extend the customer's patience or catch up missed reminders in a burst.
+	NextSpecialOrderBellTime = GetWorld()->GetTimeSeconds() + 60.0f;
+	MulticastPlaySpecialOrderBell(SpecialOrderCounter->GetActorLocation() + FVector(0.0f, 0.0f, 100.0f));
+	return true;
+}
+
+void ABotanicusVisitorCharacter::MulticastPlaySpecialOrderBell_Implementation(FVector_NetQuantize BellLocation)
+{
+	if (GetNetMode() != NM_DedicatedServer && SpecialOrderBellSound && SpecialOrderBellVolume > 0.0f)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, SpecialOrderBellSound, BellLocation,
+			SpecialOrderBellVolume);
+	}
+}
+
+void ABotanicusVisitorCharacter::FinishSpecialOrderVisit(bool bSucceeded)
+{
+	if (!HasAuthority()) return;
+	bVisitOutcomeRecorded = true; // The shared order component records the one review.
+	SpecialOrderId.Invalidate();
+	SpecialOrderCounter = nullptr;
+	if (RoutePoints.IsValidIndex(RouteWaypointIndex)) BeginDeparture(false);
+	else SwitchToDirectReturnRoute();
+	OnRep_VisitorState();
+	SetSpeechLine(bSucceeded ? TEXT("Merci à toute l'équipe ! C'est exactement ce qu'il me fallait.") : TEXT("J'ai trop attendu… Je dois partir."));
+}
+
+void ABotanicusVisitorCharacter::RefreshSpecialOrderSpeech()
+{
+	if (!HasAuthority()) return;
+	if (const auto* Orders = UBotanicusSpecialOrderComponent::Get(GetWorld()))
+		SetSpeechLine(Orders->GetRequestText(SpecialOrderId).ToString());
+}
+
+FBotanicusInteractionPrompt ABotanicusVisitorCharacter::GetInteractionPrompt_Implementation(AActor* Interactor) const
+{
+	FBotanicusInteractionPrompt Prompt;
+	Prompt.bCanInteract = CanInteract_Implementation(Interactor);
+	if (const auto* Orders = UBotanicusSpecialOrderComponent::Get(GetWorld()))
+	{
+		if (const auto* Order = Orders->FindOrder(SpecialOrderId))
+		{
+			Prompt.TargetName = FText::FromString(FString::Printf(
+				TEXT("Client — commande spéciale #%d"), Order->Number));
+			Prompt.ActionText = FText::FromString(Order->Status == EBotanicusSpecialOrderStatus::Offered
+				? TEXT("POUR PRENDRE LA COMMANDE") : (Prompt.bCanInteract ? TEXT("POUR LIVRER LA PLANTE") : TEXT("PLANTE SÉLECTIONNÉE NON CONFORME")));
+		}
+	}
+	return Prompt;
+}
+
+bool ABotanicusVisitorCharacter::CanInteract_Implementation(AActor* Interactor) const
+{
+	const auto* Orders = UBotanicusSpecialOrderComponent::Get(GetWorld());
+	return IsWaitingForSpecialOrder() && Orders && Orders->CanInteract(SpecialOrderId, Interactor);
+}
+
+void ABotanicusVisitorCharacter::Interact_Implementation(AActor* Interactor)
+{
+	if (HasAuthority())
+		if (auto* Orders = UBotanicusSpecialOrderComponent::Get(GetWorld())) Orders->Interact(SpecialOrderId, Interactor);
 }

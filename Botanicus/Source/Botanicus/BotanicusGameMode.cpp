@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "BotanicusGameMode.h"
+#include "SpecialOrders/BotanicusSpecialOrderComponent.h"
 
 #include "Botanicus.h"
 #include "BotanicusCharacter.h"
@@ -511,7 +512,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 
 	CurrentSaveGame->MapName =
 		UGameplayStatics::GetCurrentLevelName(this, true);
-	CurrentSaveGame->SaveVersion = 31;
+	CurrentSaveGame->SaveVersion = 32;
 	if (const ABotanicusGameState* BotanicusGameState =
 		World->GetGameState<ABotanicusGameState>())
 	{
@@ -555,6 +556,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 			BotanicusGameState->GetTrendQualityTag();
 		CurrentSaveGame->TrendRemainingSeconds =
 			BotanicusGameState->GetTrendRemainingSeconds();
+		CurrentSaveGame->SpecialOrders = BotanicusGameState->SpecialOrders->CaptureSaveData();
 		CurrentSaveGame->DiscoveredDiseaseKeys =
 			BotanicusGameState->GetDiscoveredDiseaseKeys();
 	}
@@ -1067,6 +1069,7 @@ void ABotanicusGameMode::InitializeSharedEconomy()
 		CurrentSaveGame->SaveVersion >= 19
 			? CurrentSaveGame->DayTimeMinutes
 			: 420.0f);
+	if (CurrentSaveGame->SaveVersion >= 32) BotanicusGameState->SpecialOrders->RestoreSaveData(CurrentSaveGame->SpecialOrders);
 	BotanicusGameState->InitializeDiscoveredDiseases(
 		CurrentSaveGame->SaveVersion >= 31
 			? CurrentSaveGame->DiscoveredDiseaseKeys

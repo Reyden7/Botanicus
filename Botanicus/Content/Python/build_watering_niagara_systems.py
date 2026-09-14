@@ -4,16 +4,24 @@ import unreal
 
 
 TARGET_FOLDER = "/Game/Botanicus/VFX/Watering"
-ASSETS = {
-    "/Niagara/DefaultAssets/Templates/Systems/FountainLightweight.FountainLightweight":
-        f"{TARGET_FOLDER}/NS_BotanicusWateringJet",
-    "/Niagara/DefaultAssets/Templates/Systems/DirectionalBurstLightweight.DirectionalBurstLightweight":
-        f"{TARGET_FOLDER}/NS_BotanicusWateringImpact",
-}
+ASSETS = [
+	(
+		"/Niagara/DefaultAssets/Templates/Systems/FountainLightweight.FountainLightweight",
+		f"{TARGET_FOLDER}/NS_BotanicusWateringJet",
+	),
+	(
+		"/Niagara/DefaultAssets/Templates/Systems/DirectionalBurstLightweight.DirectionalBurstLightweight",
+		f"{TARGET_FOLDER}/NS_BotanicusWateringImpact",
+	),
+	(
+		"/Niagara/DefaultAssets/Templates/Systems/FountainLightweight.FountainLightweight",
+		f"{TARGET_FOLDER}/NS_BotanicusWaterRunoff",
+	),
+]
 
 
 unreal.EditorAssetLibrary.make_directory(TARGET_FOLDER)
-for source, destination in ASSETS.items():
+for source, destination in ASSETS:
     if unreal.EditorAssetLibrary.does_asset_exist(destination):
         unreal.log(f"Botanicus Niagara déjà présent: {destination}")
         continue

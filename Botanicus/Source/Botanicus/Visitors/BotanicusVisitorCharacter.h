@@ -4,14 +4,17 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "Interaction/BotanicusInteractable.h"
 #include "BotanicusVisitorCharacter.generated.h"
 
 class ABotanicusSalesDisplayActor;
+class ABotanicusCashRegisterActor;
 class ABotanicusSelfCheckoutActor;
 class UStaticMeshComponent;
 class UTextRenderComponent;
 class UWidgetComponent;
 class UMaterialInstanceDynamic;
+class USoundBase;
 
 UENUM()
 enum class EBotanicusVisitorState : uint8
@@ -23,12 +26,14 @@ enum class EBotanicusVisitorState : uint8
 	CheckoutQueue,
 	Paying,
 	SelfCheckout,
-	Leaving
+	Leaving,
+	SpecialOrderApproaching,
+	SpecialOrderWaiting
 };
 
 /** First casual nursery visitor: arrives, inspects, buys, then leaves. */
 UCLASS()
-class BOTANICUS_API ABotanicusVisitorCharacter : public ACharacter
+class BOTANICUS_API ABotanicusVisitorCharacter : public ACharacter, public IBotanicusInteractable
 {
 	GENERATED_BODY()
 
@@ -66,7 +71,9 @@ public:
 			VisitorState == EBotanicusVisitorState::Inspecting ||
 			VisitorState == EBotanicusVisitorState::CheckoutQueue ||
 			VisitorState == EBotanicusVisitorState::Paying ||
-			VisitorState == EBotanicusVisitorState::SelfCheckout;
+			VisitorState == EBotanicusVisitorState::SelfCheckout ||
+			VisitorState == EBotanicusVisitorState::SpecialOrderApproaching ||
+			VisitorState == EBotanicusVisitorState::SpecialOrderWaiting;
 	}
 	bool IsInCheckoutQueue() const
 	{
@@ -106,8 +113,17 @@ public:
 	}
 	void BeginDeparture(bool bKeepPurchasedPlant = false);
 	void BeginShopClosureDeparture();
+	void BeginSpecialOrderVisit(FGuid Id, ABotanicusCashRegisterActor* Counter);
+	void FinishSpecialOrderVisit(bool bSucceeded);
+	void RefreshSpecialOrderSpeech();
+	bool IsWaitingForSpecialOrder() const { return VisitorState == EBotanicusVisitorState::SpecialOrderWaiting; }
+	ABotanicusCashRegisterActor* GetSpecialOrderCounter() const { return SpecialOrderCounter.Get(); }
+	virtual FBotanicusInteractionPrompt GetInteractionPrompt_Implementation(AActor* Interactor) const override;
+	virtual bool CanInteract_Implementation(AActor* Interactor) const override;
+	virtual void Interact_Implementation(AActor* Interactor) override;
 
 private:
+	friend class FBotanicusSpecialOrderLifecycleTest;
 	void MoveTowards(
 		const FVector& Destination,
 		float DeltaSeconds);
@@ -129,6 +145,18 @@ private:
 	void SwitchToDirectReturnRoute();
 	void UpdateStuckDetection(float DeltaSeconds);
 	void RefreshStatusText();
+	bool TryRingSpecialOrderBell();
+	bool TryRingSpecialOrderBellReminder();
+
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastPlaySpecialOrderBell(FVector_NetQuantize BellLocation);
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Special Orders|Audio")
+	TObjectPtr<USoundBase> SpecialOrderBellSound;
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Special Orders|Audio", meta=(ClampMin="0.0", ClampMax="2.0"))
+	float SpecialOrderBellVolume = 0.8f;
+	bool bSpecialOrderBellRung = false;
+	float NextSpecialOrderBellTime = 0.0f;
 
 	UFUNCTION()
 	void OnRep_VisitorState();
@@ -157,6 +185,11 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> CarriedPlantMaterial;
 
+	UPROPERTY(ReplicatedUsing=OnRep_VisitorState)
+	FGuid SpecialOrderId;
+	UPROPERTY(Transient)
+	TWeakObjectPtr<ABotanicusCashRegisterActor> SpecialOrderCounter;
+	FVector SpecialOrderStandLocation = FVector::ZeroVector;
 	FVector EntranceLocation = FVector::ZeroVector;
 	TArray<FVector> RoutePoints;
 	TArray<FVector> PurchaseRoute;
