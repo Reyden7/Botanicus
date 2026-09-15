@@ -7,12 +7,7 @@
 #include "BotanicusWateringCanActor.generated.h"
 
 class ABotanicusCharacter;
-class UMaterialInterface;
-class UNiagaraComponent;
-class UNiagaraSystem;
 class USceneComponent;
-class USplineMeshComponent;
-class UStaticMesh;
 class UBotanicusWaterSourceComponent;
 
 /** Replicated physical watering can that must stay in a player's hand to water. */
@@ -24,8 +19,6 @@ class BOTANICUS_API ABotanicusWateringCanActor
 
 public:
 	ABotanicusWateringCanActor();
-	virtual void BeginPlay() override;
-	virtual void Tick(float DeltaSeconds) override;
 
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -38,7 +31,7 @@ public:
 	void Refill();
 	void RestoreWaterLevel(float InWaterLevel);
 
-	/** Local cosmetic stream shown while this watering can is being used. */
+	/** Activates the water source. Visual rendering is intentionally separate. */
 	void SetWateringEffectActive(bool bActive);
 
 	ABotanicusCharacter* GetCarrier() const { return Carrier; }
@@ -55,9 +48,6 @@ private:
 	void OnRep_Carrier();
 
 	void ApplyCarrierState();
-	void RefreshWateringEffect(float DeltaSeconds);
-	void CreateWaterStreamVisualPool();
-	void HideWaterStreamVisuals();
 
 	UPROPERTY(ReplicatedUsing=OnRep_Carrier)
 	TObjectPtr<ABotanicusCharacter> Carrier;
@@ -65,41 +55,12 @@ private:
 	UPROPERTY(Replicated)
 	float WaterLevel = 1.0f;
 
-	/** Secondary cosmetic droplets emitted from the watering-can spout. */
-	UPROPERTY(VisibleAnywhere, Category="Botanicus|Water Effect")
-	TObjectPtr<UNiagaraComponent> WaterJetEffect;
-
-	/** Niagara splash played where the stream touches the soil. */
-	UPROPERTY(VisibleAnywhere, Category="Botanicus|Water Effect")
-	TObjectPtr<UNiagaraComponent> WaterImpactEffect;
-
-	/** Single origin and orientation shared by gameplay and all stream visuals. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Botanicus|Water Effect",
+	/** Single official origin and orientation of emitted water. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Botanicus|Water",
 		meta=(AllowPrivateAccess="true"))
 	TObjectPtr<USceneComponent> WaterNozzle;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Botanicus|Water Effect",
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Botanicus|Water",
 		meta=(AllowPrivateAccess="true"))
 	TObjectPtr<UBotanicusWaterSourceComponent> WaterSourceComponent;
-
-	/** Fixed pool: no component allocation or destruction while spraying. */
-	UPROPERTY(Transient)
-	TArray<TObjectPtr<USplineMeshComponent>> WaterStreamSegments;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UStaticMesh> WaterStreamSegmentMesh;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UMaterialInterface> WaterStreamMaterial;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UNiagaraSystem> WaterDropletSystem;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UNiagaraSystem> WaterImpactSystem;
-
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Water Effect", meta=(ClampMin="4", ClampMax="32"))
-	int32 MaximumVisualSegments = 24;
-
-	bool bWateringEffectActive = false;
 };

@@ -38,18 +38,6 @@ struct BOTANICUS_API FBotanicusWaterStreamParams
 	UPROPERTY(BlueprintReadOnly, Category="Water", meta=(Units="cm"))
 	float Radius = 7.0f;
 
-	/** Visible diameter of the continuous stream core. */
-	UPROPERTY(BlueprintReadOnly, Category="Water", meta=(Units="cm"))
-	float StreamWidth = 5.0f;
-
-	/** Cosmetic cone angle used by secondary droplets. */
-	UPROPERTY(BlueprintReadOnly, Category="Water", meta=(Units="deg"))
-	float DropletSpread = 4.0f;
-
-	/** Fractional speed variation used by secondary droplets. */
-	UPROPERTY(BlueprintReadOnly, Category="Water")
-	float DropletSpeedVariation = 0.12f;
-
 	/** Normalized reservoir units emitted per second. */
 	UPROPERTY(BlueprintReadOnly, Category="Water")
 	float FlowRate = 0.12f;
