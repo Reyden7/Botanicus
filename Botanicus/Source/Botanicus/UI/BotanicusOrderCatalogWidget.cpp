@@ -122,67 +122,6 @@ UTexture2D* LoadCommandTexture(const TCHAR* AssetName)
 			AssetName));
 }
 
-UTexture2D* LoadNotebookTexture(const TCHAR* AssetName)
-{
-	return LoadObject<UTexture2D>(
-		nullptr,
-		*FString::Printf(
-			TEXT("/Game/Botanicus/UI/Botanist/Textures/%s.%s"),
-			AssetName,
-			AssetName));
-}
-
-struct FClimateEffectIndicator
-{
-	const TCHAR* Icon = nullptr;
-	bool bIncrease = true;
-	FText Tooltip;
-};
-
-bool ClimateEffectForItem(
-	FName ItemKey,
-	FClimateEffectIndicator& OutIndicator)
-{
-	const FString Key = ItemKey.ToString().ToLower();
-	if (Key.Contains(TEXT("climateheater")))
-	{
-		OutIndicator = {TEXT("T_Notebook_Temperature"), true,
-			NSLOCTEXT("BotanicusOrders", "HeaterEffect", "Augmente la température")};
-		return true;
-	}
-	if (Key.Contains(TEXT("climatecooler")))
-	{
-		OutIndicator = {TEXT("T_Notebook_Temperature"), false,
-			NSLOCTEXT("BotanicusOrders", "CoolerEffect", "Diminue la température")};
-		return true;
-	}
-	if (Key.Contains(TEXT("climategrowlight")))
-	{
-		OutIndicator = {TEXT("T_Notebook_Luminosity"), true,
-			NSLOCTEXT("BotanicusOrders", "GrowLightEffect", "Augmente la luminosité")};
-		return true;
-	}
-	if (Key.Contains(TEXT("climatemister")))
-	{
-		OutIndicator = {TEXT("T_Notebook_Humidity"), true,
-			NSLOCTEXT("BotanicusOrders", "MisterEffect", "Augmente l’humidité de l’air")};
-		return true;
-	}
-	if (Key.Contains(TEXT("climateshade")))
-	{
-		OutIndicator = {TEXT("T_Notebook_Luminosity"), false,
-			NSLOCTEXT("BotanicusOrders", "ShadeEffect", "Diminue la luminosité")};
-		return true;
-	}
-	if (Key.Contains(TEXT("climatedehumidifier")))
-	{
-		OutIndicator = {TEXT("T_Notebook_Humidity"), false,
-			NSLOCTEXT("BotanicusOrders", "DehumidifierEffect", "Diminue l’humidité de l’air")};
-		return true;
-	}
-	return false;
-}
-
 UImage* MakeCommandImage(
 	UWidgetTree* Tree,
 	const TCHAR* AssetName,
@@ -617,32 +556,6 @@ void UBotanicusOrderItemRowWidget::InitializeRow(
 			bInShowSeedElement ? ESlateVisibility::HitTestInvisible
 							   : ESlateVisibility::Collapsed);
 	}
-	FClimateEffectIndicator ClimateIndicator;
-	const bool bHasClimateEffect =
-		ClimateEffectForItem(InDefinition.ItemKey, ClimateIndicator);
-	if (ClimateEffectArea)
-	{
-		ClimateEffectArea->SetVisibility(
-			bHasClimateEffect ? ESlateVisibility::HitTestInvisible
-							  : ESlateVisibility::Collapsed);
-		if (bHasClimateEffect)
-		{
-			ClimateEffectArea->SetToolTipText(ClimateIndicator.Tooltip);
-		}
-	}
-	if (bHasClimateEffect && ClimateEffectIcon)
-	{
-		if (UTexture2D* Texture = LoadNotebookTexture(ClimateIndicator.Icon))
-		{
-			ClimateEffectIcon->SetBrushFromTexture(Texture, true);
-		}
-	}
-	if (bHasClimateEffect && ClimateEffectArrow)
-	{
-		// The catalogue arrow texture points downward by default.
-		ClimateEffectArrow->SetRenderTransformAngle(
-			ClimateIndicator.bIncrease ? 180.0f : 0.0f);
-	}
 	const FCommandElementStyle ElementStyle =
 		ElementStyleForDefinition(InDefinition);
 	if (bInShowSeedElement && ElementBadgeBackground)
@@ -751,9 +664,8 @@ void UBotanicusOrderItemRowWidget::BuildLayout()
 	UVerticalBox* Description =
 		WidgetTree->ConstructWidget<UVerticalBox>();
 	UHorizontalBoxSlot* DescriptionSlot =
-		Row->AddChildToHorizontalBox(
-			WrapAtSize(WidgetTree, Description, 330.0f, 48.0f));
-	DescriptionSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+		Row->AddChildToHorizontalBox(Description);
+	DescriptionSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 	DescriptionSlot->SetVerticalAlignment(VAlign_Center);
 
 	NameLabel = WidgetTree->ConstructWidget<UTextBlock>();
@@ -767,34 +679,6 @@ void UBotanicusOrderItemRowWidget::BuildLayout()
 		FSlateColor(FLinearColor(0.83f, 0.76f, 0.58f, 1.0f)));
 	SetTextSize(DetailsLabel, 11);
 	Description->AddChildToVerticalBox(DetailsLabel);
-
-	UHorizontalBox* ClimateEffect =
-		WidgetTree->ConstructWidget<UHorizontalBox>();
-	ClimateEffect->SetVisibility(ESlateVisibility::HitTestInvisible);
-	ClimateEffectIcon = WidgetTree->ConstructWidget<UImage>();
-	ClimateEffectIcon->SetDesiredSizeOverride(FVector2D(36.0f, 36.0f));
-	ClimateEffectIcon->SetVisibility(ESlateVisibility::HitTestInvisible);
-	UHorizontalBoxSlot* ClimateIconSlot =
-		ClimateEffect->AddChildToHorizontalBox(
-			WrapAtSize(WidgetTree, ClimateEffectIcon, 36.0f, 36.0f));
-	ClimateIconSlot->SetVerticalAlignment(VAlign_Center);
-	ClimateIconSlot->SetPadding(FMargin(0.0f, 0.0f, 4.0f, 0.0f));
-	ClimateEffectArrow = MakeCommandImage(
-		WidgetTree, TEXT("T_Command_ScrollArrow"), FVector2D(22.0f, 22.0f));
-	ClimateEffect->AddChildToHorizontalBox(
-		WrapAtSize(WidgetTree, ClimateEffectArrow, 22.0f, 22.0f))
-		->SetVerticalAlignment(VAlign_Center);
-	ClimateEffectArea = WrapAtSize(
-		WidgetTree, ClimateEffect, 70.0f, 42.0f);
-	ClimateEffectArea->SetVisibility(ESlateVisibility::Collapsed);
-	UHorizontalBoxSlot* ClimateEffectSlot =
-		Row->AddChildToHorizontalBox(ClimateEffectArea);
-	ClimateEffectSlot->SetVerticalAlignment(VAlign_Center);
-	ClimateEffectSlot->SetPadding(FMargin(8.0f, 0.0f, 10.0f, 0.0f));
-	UHorizontalBoxSlot* FlexibleGapSlot =
-		Row->AddChildToHorizontalBox(
-			WidgetTree->ConstructWidget<USpacer>());
-	FlexibleGapSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 
 	UOverlay* ElementBadge = WidgetTree->ConstructWidget<UOverlay>();
 	ElementBadge->SetVisibility(ESlateVisibility::HitTestInvisible);

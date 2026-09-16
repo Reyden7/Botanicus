@@ -15,7 +15,6 @@ class UBotanicusQuickBarWidget;
 class UBotanicusReputationWidget;
 class UBotanicusSharedFundsWidget;
 class UBotanicusShopObjectivesWidget;
-class UBotanicusSpecialOrdersWidget;
 class UNamedSlot;
 
 /**
@@ -46,12 +45,6 @@ protected:
 	virtual void NativeOnInitialized() override;
 
 private:
-	UPROPERTY(meta=(BindWidgetOptional))
-	TObjectPtr<UNamedSlot> SpecialOrdersSlot;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UBotanicusSpecialOrdersWidget> SpecialOrdersWidget;
-
 	template <typename WidgetType>
 	WidgetType* CreateElement(
 		UNamedSlot* HostSlot,

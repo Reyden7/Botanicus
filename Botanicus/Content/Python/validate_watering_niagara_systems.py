@@ -6,7 +6,6 @@ import unreal
 PATHS = [
     "/Game/Botanicus/VFX/Watering/NS_BotanicusWateringJet.NS_BotanicusWateringJet",
     "/Game/Botanicus/VFX/Watering/NS_BotanicusWateringImpact.NS_BotanicusWateringImpact",
-	"/Game/Botanicus/VFX/Watering/NS_BotanicusWaterRunoff.NS_BotanicusWaterRunoff",
 ]
 
 for path in PATHS:

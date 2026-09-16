@@ -38,8 +38,4 @@ public:
 	/** Makes every emitter in NS_AnimeWater follow its owning Blueprint component. */
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Botanicus|Editor")
 	static bool MakeAnimeWaterLocalSpace();
-
-	/** Adds the C++ water-stream contract to the lightweight Niagara asset. */
-	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Botanicus|Editor")
-	static bool ConfigureWateringJetUserParameters();
 };

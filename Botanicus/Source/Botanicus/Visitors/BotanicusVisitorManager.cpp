@@ -1,7 +1,6 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Visitors/BotanicusVisitorManager.h"
-#include "SpecialOrders/BotanicusSpecialOrderComponent.h"
 
 #include "Algo/Reverse.h"
 #include "BotanicusGameState.h"
@@ -85,7 +84,6 @@ void ABotanicusVisitorManager::Tick(float DeltaSeconds)
 		if (NextVisitor.IsValid())
 		{
 			NextVisitor->AdmitFromQueue();
-			if (auto* Orders = UBotanicusSpecialOrderComponent::Get(GetWorld())) Orders->TryAssignVisitor(NextVisitor.Get());
 			++VisitorsInside;
 			AdmissionRemaining =
 				FMath::FRandRange(

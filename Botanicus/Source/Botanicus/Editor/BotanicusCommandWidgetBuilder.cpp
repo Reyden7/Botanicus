@@ -28,8 +28,6 @@
 #include "NiagaraEmitter.h"
 #include "NiagaraEmitterHandle.h"
 #include "NiagaraSystem.h"
-#include "NiagaraTypes.h"
-#include "NiagaraUserRedirectionParameterStore.h"
 #include "UObject/SavePackage.h"
 #include "UI/BotanicusOrderCatalogWidget.h"
 #include "UI/BotanicusBotanistNotebookWidget.h"
@@ -957,65 +955,6 @@ bool UBotanicusCommandWidgetBuilder::MakeAnimeWaterLocalSpace()
 		return false;
 	}
 
-	System->RequestCompile(true);
-	System->WaitForCompilationComplete(true, false);
-	System->MarkPackageDirty();
-	const FString PackageName = System->GetOutermost()->GetName();
-	const FString PackageFilename = FPackageName::LongPackageNameToFilename(
-		PackageName,
-		FPackageName::GetAssetPackageExtension());
-	return UPackage::SavePackage(
-		System->GetOutermost(),
-		System,
-		*PackageFilename,
-		FSavePackageArgs());
-#else
-	return false;
-#endif
-}
-
-bool UBotanicusCommandWidgetBuilder::ConfigureWateringJetUserParameters()
-{
-#if WITH_EDITOR
-	const TCHAR* AssetPath =
-		TEXT("/Game/Botanicus/VFX/Watering/NS_BotanicusWateringJet.NS_BotanicusWateringJet");
-	UNiagaraSystem* System = LoadObject<UNiagaraSystem>(nullptr, AssetPath);
-	if (!System)
-	{
-		return false;
-	}
-
-	System->Modify();
-	FNiagaraUserRedirectionParameterStore& Parameters =
-		System->GetExposedParameters();
-	const auto AddParameter = [&Parameters](
-		const FNiagaraTypeDefinition& Type,
-		const TCHAR* Name)
-	{
-		Parameters.AddParameter(FNiagaraVariable(Type, FName(Name)));
-	};
-
-	AddParameter(FNiagaraTypeDefinition::GetVec3Def(), TEXT("User.Origin"));
-	AddParameter(FNiagaraTypeDefinition::GetVec3Def(), TEXT("User.Direction"));
-	AddParameter(FNiagaraTypeDefinition::GetVec3Def(), TEXT("User.InitialVelocity"));
-	AddParameter(FNiagaraTypeDefinition::GetVec3Def(), TEXT("User.Gravity"));
-	AddParameter(FNiagaraTypeDefinition::GetVec3Def(), TEXT("User.ImpactPoint"));
-	AddParameter(FNiagaraTypeDefinition::GetVec3Def(), TEXT("User.ImpactNormal"));
-	AddParameter(FNiagaraTypeDefinition::GetFloatDef(), TEXT("User.TimeOfImpact"));
-	AddParameter(FNiagaraTypeDefinition::GetFloatDef(), TEXT("User.InitialSpeed"));
-	AddParameter(FNiagaraTypeDefinition::GetFloatDef(), TEXT("User.FlowRate"));
-	AddParameter(FNiagaraTypeDefinition::GetFloatDef(), TEXT("User.StreamWidth"));
-	AddParameter(FNiagaraTypeDefinition::GetFloatDef(), TEXT("User.DropletSpread"));
-	AddParameter(
-		FNiagaraTypeDefinition::GetFloatDef(),
-		TEXT("User.DropletSpeedVariation"));
-	AddParameter(
-		FNiagaraTypeDefinition::GetFloatDef(),
-		TEXT("User.MaxSimulationTime"));
-	AddParameter(FNiagaraTypeDefinition::GetFloatDef(), TEXT("User.MaxDistance"));
-	AddParameter(FNiagaraTypeDefinition::GetBoolDef(), TEXT("User.HasImpact"));
-
-	Parameters.TriggerOnLayoutChanged();
 	System->RequestCompile(true);
 	System->WaitForCompilationComplete(true, false);
 	System->MarkPackageDirty();

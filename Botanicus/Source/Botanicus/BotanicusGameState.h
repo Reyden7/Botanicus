@@ -8,7 +8,6 @@
 #include "BotanicusGameState.generated.h"
 
 struct FBotanicusItemDefinition;
-class UBotanicusSpecialOrderComponent;
 
 /** Replicated, server-authoritative state shared by the whole nursery. */
 UCLASS()
@@ -18,9 +17,6 @@ class BOTANICUS_API ABotanicusGameState : public AGameStateBase
 
 public:
 	ABotanicusGameState();
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Botanicus|Special Orders")
-	TObjectPtr<UBotanicusSpecialOrderComponent> SpecialOrders;
 
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(

@@ -3,7 +3,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "SpecialOrders/BotanicusSpecialOrderTypes.h"
 #include "GameFramework/SaveGame.h"
 #include "Growing/BotanicusPlantCatalog.h"
 #include "QuickBar/BotanicusQuickBarComponent.h"
@@ -279,7 +278,7 @@ class BOTANICUS_API UBotanicusWorldSaveGame : public USaveGame
 
 public:
 	UPROPERTY()
-	int32 SaveVersion = 32;
+	int32 SaveVersion = 31;
 
 	UPROPERTY()
 	FString MapName;
@@ -347,9 +346,6 @@ public:
 
 	UPROPERTY()
 	TArray<FName> DiscoveredDiseaseKeys;
-
-	UPROPERTY()
-	TArray<FBotanicusSpecialOrderSaveData> SpecialOrders;
 
 	UPROPERTY()
 	TArray<FBotanicusSavedBuildingActor> BuildingActors;

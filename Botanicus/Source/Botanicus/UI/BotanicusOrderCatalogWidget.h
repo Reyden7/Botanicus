@@ -146,15 +146,6 @@ private:
 	TObjectPtr<USizeBox> ElementBadgeArea;
 
 	UPROPERTY(Transient)
-	TObjectPtr<USizeBox> ClimateEffectArea;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UImage> ClimateEffectIcon;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UImage> ClimateEffectArrow;
-
-	UPROPERTY(Transient)
 	TObjectPtr<UImage> ElementBadgeBackground;
 
 	UPROPERTY(Transient)

@@ -3,7 +3,6 @@
 #include "BotanicusGameState.h"
 
 #include "BotanicusCharacter.h"
-#include "SpecialOrders/BotanicusSpecialOrderComponent.h"
 #include "BotanicusGameMode.h"
 #include "Catalog/BotanicusItemCatalog.h"
 #include "Engine/World.h"
@@ -15,7 +14,6 @@
 
 ABotanicusGameState::ABotanicusGameState()
 {
-	SpecialOrders = CreateDefaultSubobject<UBotanicusSpecialOrderComponent>(TEXT("SpecialOrders"));
 	bReplicates = true;
 	bAlwaysRelevant = true;
 	PrimaryActorTick.bCanEverTick = true;

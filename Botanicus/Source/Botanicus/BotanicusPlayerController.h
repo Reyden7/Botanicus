@@ -762,17 +762,7 @@ protected:
 		ABotanicusWaterReserveActor* WaterReserve);
 
 	UFUNCTION(Server, Unreliable)
-	void ServerPulseWateringCanSpray(
-		FVector_NetQuantize10 RequestedOrigin,
-		FVector_NetQuantizeNormal RequestedDirection);
-
-	/** Lightweight cosmetic mirror; persistent replication remains deferred. */
-	UFUNCTION(Client, Unreliable)
-	void ClientApplyWaterSurfaceImpact(
-		FVector_NetQuantize10 ImpactLocation,
-		FVector_NetQuantizeNormal ImpactNormal,
-		float EmittedAmount,
-		AActor* SurfaceActor);
+	void ServerPulseWateringCanSpray();
 
 	UFUNCTION(Server, Reliable)
 	void ServerBeginPlantPotAction(
