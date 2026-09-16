@@ -36,7 +36,8 @@ namespace BotanicusWaterTrajectory
 		AActor* SourceActor,
 		const TArray<const AActor*>& IgnoredActors,
 		float EmittedAmount,
-		FBotanicusWaterHit& OutWaterHit);
+		FBotanicusWaterHit& OutWaterHit,
+		TArray<FBotanicusWaterTrajectorySample>* OutTrajectorySamples = nullptr);
 
 	BOTANICUS_API bool IsDebugEnabled();
 }

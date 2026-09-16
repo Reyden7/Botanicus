@@ -119,15 +119,23 @@ bool BotanicusWaterTrajectory::TraceFirstBlockingHit(
 	AActor* SourceActor,
 	const TArray<const AActor*>& IgnoredActors,
 	float EmittedAmount,
-	FBotanicusWaterHit& OutWaterHit)
+	FBotanicusWaterHit& OutWaterHit,
+	TArray<FBotanicusWaterTrajectorySample>* OutTrajectorySamples)
 {
 	OutWaterHit = FBotanicusWaterHit();
+	if (OutTrajectorySamples)
+	{
+		OutTrajectorySamples->Reset();
+	}
 	if (!World)
 	{
 		return false;
 	}
 
-	TArray<FBotanicusWaterTrajectorySample> Samples;
+	TArray<FBotanicusWaterTrajectorySample> LocalSamples;
+	TArray<FBotanicusWaterTrajectorySample>& Samples = OutTrajectorySamples
+		? *OutTrajectorySamples
+		: LocalSamples;
 	BuildSamples(Params, Samples);
 	if (Samples.Num() < 2)
 	{

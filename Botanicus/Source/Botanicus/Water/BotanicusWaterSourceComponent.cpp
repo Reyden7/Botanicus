@@ -66,6 +66,12 @@ void UBotanicusWaterSourceComponent::BuildStreamParams(
 		0.0f,
 		WorldGravityZ * FMath::Max(0.0f, Profile->GravityScale));
 	OutParams.Radius = FMath::Max(0.1f, Profile->TraceRadius);
+	OutParams.StreamWidth = FMath::Max(0.5f, Profile->StreamWidth);
+	OutParams.DropletSpread = FMath::Max(0.0f, Profile->DropletSpread);
+	OutParams.DropletSpeedVariation = FMath::Clamp(
+		Profile->DropletSpeedVariation,
+		0.0f,
+		1.0f);
 	OutParams.FlowRate = FMath::Max(0.0f, Profile->FlowRate);
 	OutParams.MaxSimulationTime = FMath::Max(0.01f, Profile->MaxSimulationTime);
 	OutParams.MaxDistance = FMath::Max(1.0f, Profile->MaxDistance);

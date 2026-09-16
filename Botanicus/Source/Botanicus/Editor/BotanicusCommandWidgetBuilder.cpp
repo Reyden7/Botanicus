@@ -25,6 +25,11 @@
 #include "Engine/Texture2D.h"
 #include "Fonts/CompositeFont.h"
 #include "Kismet2/KismetEditorUtilities.h"
+#include "NiagaraEmitter.h"
+#include "NiagaraEmitterHandle.h"
+#include "NiagaraSystem.h"
+#include "NiagaraTypes.h"
+#include "NiagaraUserRedirectionParameterStore.h"
 #include "UObject/SavePackage.h"
 #include "UI/BotanicusOrderCatalogWidget.h"
 #include "UI/BotanicusBotanistNotebookWidget.h"
@@ -38,6 +43,7 @@ UTexture2D* CommandTexture(const TCHAR* Name)
 	return LoadObject<UTexture2D>(nullptr, *FString::Printf(
 		TEXT("/Game/Botanicus/UI/Command/Textures/%s.%s"), Name, Name));
 }
+
 UTexture2D* NotebookTexture(const TCHAR* Name)
 {
 	return LoadObject<UTexture2D>(nullptr, *FString::Printf(
@@ -398,6 +404,7 @@ bool UBotanicusCommandWidgetBuilder::UpgradeCommandComputerCareTab()
 	return false;
 #endif
 }
+
 bool UBotanicusCommandWidgetBuilder::UpgradeCommandComputerTabIcons()
 {
 #if WITH_EDITOR
@@ -823,6 +830,7 @@ bool UBotanicusCommandWidgetBuilder::
 	return false;
 #endif
 }
+
 bool UBotanicusCommandWidgetBuilder::UpgradeBotanistNotebookRichNotes()
 {
 #if WITH_EDITOR
@@ -913,3 +921,115 @@ bool UBotanicusCommandWidgetBuilder::UpgradeBotanistNotebookRichNotes()
 	return false;
 #endif
 }
+
+bool UBotanicusCommandWidgetBuilder::MakeAnimeWaterLocalSpace()
+{
+#if WITH_EDITOR
+	const TCHAR* AssetPath =
+		TEXT("/Game/Botanicus/VFX/Watering/NS_AnimeWater.NS_AnimeWater");
+	UNiagaraSystem* System = LoadObject<UNiagaraSystem>(nullptr, AssetPath);
+	if (!System)
+	{
+		return false;
+	}
+
+	System->Modify();
+	bool bFoundEmitter = false;
+	for (FNiagaraEmitterHandle& Handle : System->GetEmitterHandles())
+	{
+		FVersionedNiagaraEmitterData* EmitterData = Handle.GetEmitterData();
+		if (!EmitterData)
+		{
+			continue;
+		}
+
+		bFoundEmitter = true;
+		if (UNiagaraEmitter* Emitter =
+				Cast<UNiagaraEmitter>(Handle.GetEmitterBase()))
+		{
+			Emitter->Modify();
+		}
+		EmitterData->bLocalSpace = true;
+	}
+
+	if (!bFoundEmitter)
+	{
+		return false;
+	}
+
+	System->RequestCompile(true);
+	System->WaitForCompilationComplete(true, false);
+	System->MarkPackageDirty();
+	const FString PackageName = System->GetOutermost()->GetName();
+	const FString PackageFilename = FPackageName::LongPackageNameToFilename(
+		PackageName,
+		FPackageName::GetAssetPackageExtension());
+	return UPackage::SavePackage(
+		System->GetOutermost(),
+		System,
+		*PackageFilename,
+		FSavePackageArgs());
+#else
+	return false;
+#endif
+}
+
+bool UBotanicusCommandWidgetBuilder::ConfigureWateringJetUserParameters()
+{
+#if WITH_EDITOR
+	const TCHAR* AssetPath =
+		TEXT("/Game/Botanicus/VFX/Watering/NS_BotanicusWateringJet.NS_BotanicusWateringJet");
+	UNiagaraSystem* System = LoadObject<UNiagaraSystem>(nullptr, AssetPath);
+	if (!System)
+	{
+		return false;
+	}
+
+	System->Modify();
+	FNiagaraUserRedirectionParameterStore& Parameters =
+		System->GetExposedParameters();
+	const auto AddParameter = [&Parameters](
+		const FNiagaraTypeDefinition& Type,
+		const TCHAR* Name)
+	{
+		Parameters.AddParameter(FNiagaraVariable(Type, FName(Name)));
+	};
+
+	AddParameter(FNiagaraTypeDefinition::GetVec3Def(), TEXT("User.Origin"));
+	AddParameter(FNiagaraTypeDefinition::GetVec3Def(), TEXT("User.Direction"));
+	AddParameter(FNiagaraTypeDefinition::GetVec3Def(), TEXT("User.InitialVelocity"));
+	AddParameter(FNiagaraTypeDefinition::GetVec3Def(), TEXT("User.Gravity"));
+	AddParameter(FNiagaraTypeDefinition::GetVec3Def(), TEXT("User.ImpactPoint"));
+	AddParameter(FNiagaraTypeDefinition::GetVec3Def(), TEXT("User.ImpactNormal"));
+	AddParameter(FNiagaraTypeDefinition::GetFloatDef(), TEXT("User.TimeOfImpact"));
+	AddParameter(FNiagaraTypeDefinition::GetFloatDef(), TEXT("User.InitialSpeed"));
+	AddParameter(FNiagaraTypeDefinition::GetFloatDef(), TEXT("User.FlowRate"));
+	AddParameter(FNiagaraTypeDefinition::GetFloatDef(), TEXT("User.StreamWidth"));
+	AddParameter(FNiagaraTypeDefinition::GetFloatDef(), TEXT("User.DropletSpread"));
+	AddParameter(
+		FNiagaraTypeDefinition::GetFloatDef(),
+		TEXT("User.DropletSpeedVariation"));
+	AddParameter(
+		FNiagaraTypeDefinition::GetFloatDef(),
+		TEXT("User.MaxSimulationTime"));
+	AddParameter(FNiagaraTypeDefinition::GetFloatDef(), TEXT("User.MaxDistance"));
+	AddParameter(FNiagaraTypeDefinition::GetBoolDef(), TEXT("User.HasImpact"));
+
+	Parameters.TriggerOnLayoutChanged();
+	System->RequestCompile(true);
+	System->WaitForCompilationComplete(true, false);
+	System->MarkPackageDirty();
+	const FString PackageName = System->GetOutermost()->GetName();
+	const FString PackageFilename = FPackageName::LongPackageNameToFilename(
+		PackageName,
+		FPackageName::GetAssetPackageExtension());
+	return UPackage::SavePackage(
+		System->GetOutermost(),
+		System,
+		*PackageFilename,
+		FSavePackageArgs());
+#else
+	return false;
+#endif
+}
+

@@ -26,6 +26,18 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Collision", meta=(ClampMin="0.1", Units="cm"))
 	float TraceRadius = 7.0f;
 
+	/** Diameter of the continuous visible core. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Visuals", meta=(ClampMin="0.5", ClampMax="30.0", Units="cm"))
+	float StreamWidth = 5.0f;
+
+	/** Angular spread of the cosmetic droplets around the ballistic direction. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Visuals", meta=(ClampMin="0.0", ClampMax="30.0", Units="deg"))
+	float DropletSpread = 4.0f;
+
+	/** Fractional variation around InitialSpeed for cosmetic droplets. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Visuals", meta=(ClampMin="0.0", ClampMax="1.0"))
+	float DropletSpeedVariation = 0.12f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Trajectory", meta=(ClampMin="0.01", Units="s"))
 	float MaxSimulationTime = 2.0f;
 
