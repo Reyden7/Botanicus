@@ -135,6 +135,18 @@ private:
 	UPROPERTY(VisibleAnywhere)
 	TArray<TObjectPtr<UStaticMeshComponent>> MultiFlowerMeshes;
 
+	UPROPERTY(VisibleAnywhere, Category="Botanicus|Plant UI")
+	TArray<TObjectPtr<UWidgetComponent>> SlotGrowthWidgets;
+
+	UPROPERTY(EditAnywhere, Category="Botanicus|Plant UI",
+		meta=(DisplayName="Marge au-dessus de chaque plante", Units="cm",
+			ClampMin="0.0"))
+	float SlotGrowthWidgetClearance = 10.0f;
+
+	UPROPERTY(EditAnywhere, Category="Botanicus|Plant UI",
+		meta=(DisplayName="Echelle UI de chaque plante", ClampMin="0.05"))
+	float SlotGrowthWidgetScale = 0.12f;
+
 	UPROPERTY(VisibleAnywhere)
 	TArray<TObjectPtr<UWidgetComponent>> EnvironmentAlertWidgets;
 

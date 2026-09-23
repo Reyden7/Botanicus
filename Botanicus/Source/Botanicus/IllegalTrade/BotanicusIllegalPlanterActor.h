@@ -128,9 +128,9 @@ private:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Botanicus|Illegal Planter|Visuals", meta=(AllowPrivateAccess="true", Units="cm"))
 	float SoilBottomHeight = 15.0f;
 
-	/** Height of each plant information widget above its planter slot. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Botanicus|Illegal Planter|UI", meta=(AllowPrivateAccess="true", Units="cm"))
-	float PlantGrowthWidgetHeight = 175.0f;
+	/** Clear space between the top of each plant and the bottom of its widget. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Botanicus|Illegal Planter|UI", meta=(AllowPrivateAccess="true", ClampMin="0.0", Units="cm"))
+	float PlantGrowthWidgetClearance = 10.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Botanicus|Illegal Planter|UI", meta=(AllowPrivateAccess="true", ClampMin="0.01", ClampMax="1.0"))
 	float PlantGrowthWidgetScale = 0.12f;

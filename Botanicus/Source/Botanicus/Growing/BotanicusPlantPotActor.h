@@ -241,16 +241,11 @@ private:
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UWidgetComponent> EnvironmentDebugWidget;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Botanicus|Plant UI",
-		meta=(DisplayName="Hauteur minimale UI croissance", Units="cm",
-			ClampMin="0.0", AllowPrivateAccess="true"))
-	float PlantGrowthWidgetHeight = 115.0f;
-
 	/** Empty space kept between the highest leaf and the bottom of the UI. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Botanicus|Plant UI",
 		meta=(DisplayName="Marge au-dessus de la plante", Units="cm",
 			ClampMin="0.0", ClampMax="100.0", AllowPrivateAccess="true"))
-	float PlantGrowthWidgetClearance = 12.0f;
+	float PlantGrowthWidgetClearance = 10.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Botanicus|Plant UI",
 		meta=(DisplayName="Echelle UI croissance", ClampMin="0.05",

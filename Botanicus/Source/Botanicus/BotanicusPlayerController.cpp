@@ -94,6 +94,19 @@ namespace
 	bool IsPreparedPotActor(
 		const ABotanicusPlaceableItemActor* WorldItem)
 	{
+		if (const ABotanicusIllegalPlanterActor* IllegalPlanter =
+				Cast<ABotanicusIllegalPlanterActor>(WorldItem))
+		{
+			if (IllegalPlanter->GetSoilUnits() > 0)
+			{
+				return true;
+			}
+			return IllegalPlanter->GetPlantSlots().ContainsByPredicate(
+				[](const FBotanicusIllegalPlantSlotState& Slot)
+				{
+					return !Slot.PlantId.IsNone();
+				});
+		}
 		if (const ABotanicusMultiPlantPotActor* MultiPlanter =
 				Cast<ABotanicusMultiPlantPotActor>(WorldItem))
 		{
@@ -4842,6 +4855,18 @@ void ABotanicusPlayerController::CopyWorldItemStateToPreview(
 {
 	if (!IsValid(WorldItem) || !IsValid(Preview))
 	{
+		return;
+	}
+	if (const ABotanicusIllegalPlanterActor* Source =
+			Cast<ABotanicusIllegalPlanterActor>(WorldItem))
+	{
+		if (ABotanicusIllegalPlanterActor* Target =
+				Cast<ABotanicusIllegalPlanterActor>(Preview))
+		{
+			Target->RestoreIllegalPlanterState(
+				Source->GetPlanterLevel(), Source->GetSoilUnits(),
+				Source->GetWaterAmount(), Source->GetPlantSlots());
+		}
 		return;
 	}
 	if (const ABotanicusMultiPlantPotActor* Source =

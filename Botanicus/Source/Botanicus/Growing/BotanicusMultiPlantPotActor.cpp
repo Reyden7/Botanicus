@@ -23,6 +23,7 @@
 #include "UObject/ConstructorHelpers.h"
 #include "UI/BotanicusPlantEnvironmentAlertWidget.h"
 #include "UI/BotanicusPlantEnvironmentDebugWidget.h"
+#include "UI/BotanicusPlantGrowthWidget.h"
 
 ABotanicusMultiPlantPotActor::ABotanicusMultiPlantPotActor()
 {
@@ -108,6 +109,23 @@ ABotanicusMultiPlantPotActor::ABotanicusMultiPlantPotActor()
 		Flower->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		MultiFlowerMeshes.Add(Flower);
 
+		UWidgetComponent* GrowthWidget =
+			CreateDefaultSubobject<UWidgetComponent>(
+				*FString::Printf(TEXT("SlotGrowthWidget_%d"), Index));
+		GrowthWidget->SetupAttachment(SceneRoot);
+		GrowthWidget->SetWidgetSpace(EWidgetSpace::World);
+		GrowthWidget->SetDrawSize(FVector2D(360.0f, 180.0f));
+		GrowthWidget->SetPivot(FVector2D(0.5f, 0.5f));
+		GrowthWidget->SetRelativeScale3D(FVector(SlotGrowthWidgetScale));
+		GrowthWidget->SetTintColorAndOpacity(
+			FLinearColor(1.5f, 1.5f, 1.5f, 1.0f));
+		GrowthWidget->SetTwoSided(true);
+		GrowthWidget->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		GrowthWidget->SetWidgetClass(
+			UBotanicusPlantGrowthWidget::StaticClass());
+		GrowthWidget->SetVisibility(false);
+		SlotGrowthWidgets.Add(GrowthWidget);
+
 		UWidgetComponent* AlertWidget =
 			CreateDefaultSubobject<UWidgetComponent>(
 				*FString::Printf(TEXT("EnvironmentAlerts_%d"), Index));
@@ -183,6 +201,21 @@ void ABotanicusMultiPlantPotActor::BeginPlay()
 		}
 		AlertWidget->InitWidget();
 	}
+	UClass* GrowthWidgetClass = LoadClass<UUserWidget>(
+		nullptr,
+		TEXT("/Game/Botanicus/UI/Plant/WBP_PlantGrowthInfo.WBP_PlantGrowthInfo_C"));
+	for (UWidgetComponent* GrowthWidget : SlotGrowthWidgets)
+	{
+		if (!GrowthWidget)
+		{
+			continue;
+		}
+		if (GrowthWidgetClass)
+		{
+			GrowthWidget->SetWidgetClass(GrowthWidgetClass);
+		}
+		GrowthWidget->InitWidget();
+	}
 	UClass* DebugWidgetClass = LoadClass<UUserWidget>(
 		nullptr,
 		TEXT("/Game/Botanicus/UI/Plant/Environment/WBP_PlantEnvironmentDebug.WBP_PlantEnvironmentDebug_C"));
@@ -242,6 +275,15 @@ void ABotanicusMultiPlantPotActor::Tick(float DeltaSeconds)
 							AlertWidget->SetWorldRotation(
 								(CameraLocation -
 								 AlertWidget->GetComponentLocation()).Rotation());
+						}
+					}
+					for (UWidgetComponent* GrowthWidget : SlotGrowthWidgets)
+					{
+						if (GrowthWidget)
+						{
+							GrowthWidget->SetWorldRotation(
+								(CameraLocation -
+								 GrowthWidget->GetComponentLocation()).Rotation());
 						}
 					}
 					FVector CameraRight =
@@ -956,6 +998,10 @@ void ABotanicusMultiPlantPotActor::RefreshVisuals()
 		0.45f + static_cast<float>(Capacity) * 0.3f;
 	Mesh->SetRelativeScale3D(
 		FVector(LengthScale, 0.42f, 0.3f));
+	const FBoxSphereBounds PotBounds =
+		Mesh->CalcBounds(Mesh->GetRelativeTransform());
+	const float PotRimHeight =
+		PotBounds.Origin.Z + PotBounds.BoxExtent.Z;
 	MultiSoilMesh->SetRelativeLocation(
 		FVector(0.0f, 0.0f, GetSoilMaximumHeight()));
 	MultiSoilMesh->SetRelativeScale3D(
@@ -1096,13 +1142,62 @@ void ABotanicusMultiPlantPotActor::RefreshVisuals()
 					0.16f * Growth * BehaviourHorizontalScale,
 					0.16f * Growth * BehaviourVerticalScale));
 		}
+		if (SlotGrowthWidgets.IsValidIndex(Index) &&
+			SlotGrowthWidgets[Index])
+		{
+			UWidgetComponent* GrowthComponent = SlotGrowthWidgets[Index];
+			GrowthComponent->SetRelativeScale3D(
+				FVector(SlotGrowthWidgetScale));
+			const UStaticMesh* PlantMesh =
+				MultiFlowerMeshes[Index]->GetStaticMesh();
+			const float PlantTopHeight = PlantMesh
+				? MultiFlowerMeshes[Index]->GetRelativeLocation().Z +
+					PlantMesh->GetBoundingBox().Max.Z *
+					MultiFlowerMeshes[Index]->GetRelativeScale3D().Z
+				: BaseLocation.Z;
+			const float WidgetBelowPivot =
+				GrowthComponent->GetDrawSize().Y * SlotGrowthWidgetScale *
+				GrowthComponent->GetPivot().Y;
+			GrowthComponent->SetRelativeLocation(FVector(
+				BaseLocation.X,
+				BaseLocation.Y,
+				FMath::Max(PlantTopHeight, PotRimHeight) +
+				SlotGrowthWidgetClearance + WidgetBelowPivot));
+			if (UBotanicusPlantGrowthWidget* GrowthWidget =
+				Cast<UBotanicusPlantGrowthWidget>(GrowthComponent->GetWidget()))
+			{
+				const FText PlantName = Definition &&
+					!Definition->DisplayName.IsEmpty()
+						? Definition->DisplayName
+						: FText::FromName(Slot.PlantKey);
+				GrowthWidget->SetPlantState(
+					PlantName, Slot.WaterLevel, Slot.GrowthProgress);
+			}
+			GrowthComponent->SetVisibility(
+				bPlanted &&
+				!ActorHasTag(TEXT("BotanicusPlacementPreview")));
+		}
 		if (EnvironmentAlertWidgets.IsValidIndex(Index) &&
 			EnvironmentAlertWidgets[Index])
 		{
 			UWidgetComponent* AlertComponent =
 				EnvironmentAlertWidgets[Index];
-			AlertComponent->SetRelativeLocation(
-				BaseLocation + FVector(0.0f, 0.0f, 145.0f));
+			const UWidgetComponent* GrowthComponent =
+				SlotGrowthWidgets.IsValidIndex(Index)
+					? SlotGrowthWidgets[Index].Get()
+					: nullptr;
+			const float GrowthTop = GrowthComponent
+				? GrowthComponent->GetRelativeLocation().Z +
+					GrowthComponent->GetDrawSize().Y *
+					SlotGrowthWidgetScale *
+					(1.0f - GrowthComponent->GetPivot().Y)
+				: BaseLocation.Z;
+			const float AlertBelowPivot =
+				AlertComponent->GetDrawSize().Y * 0.16f *
+				AlertComponent->GetPivot().Y;
+			AlertComponent->SetRelativeLocation(FVector(
+				BaseLocation.X, BaseLocation.Y,
+				GrowthTop + AlertBelowPivot + 6.0f));
 			if (!AlertComponent->GetWidget())
 			{
 				AlertComponent->InitWidget();
@@ -1370,6 +1465,13 @@ void ABotanicusMultiPlantPotActor::ConfigureAsLocalPreview(
 	bool bIsValid)
 {
 	ABotanicusPlaceableItemActor::ConfigureAsLocalPreview(bIsValid);
+	for (UWidgetComponent* GrowthWidget : SlotGrowthWidgets)
+	{
+		if (GrowthWidget)
+		{
+			GrowthWidget->SetVisibility(false);
+		}
+	}
 	if (MultiStatusText)
 	{
 		MultiStatusText->SetVisibility(false);

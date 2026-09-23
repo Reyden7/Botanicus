@@ -64,7 +64,7 @@ struct BOTANICUS_API FBotanicusIllegalPlanterLevelDefinition
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Planter", meta=(ClampMin="1"))
 	int32 Level = 1;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Planter", meta=(ClampMin="1", ClampMax="12"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Planter", meta=(ClampMin="4", ClampMax="4"))
 	int32 SlotCount = 4;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Planter", meta=(ClampMin="1"))

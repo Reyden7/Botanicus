@@ -34,6 +34,19 @@ namespace
 	{
 		return Progress >= 0.70f ? 3 : Progress >= 0.30f ? 2 : 1;
 	}
+
+	float GetGrowthVisualHeight(
+		const FBotanicusIllegalPlantDefinition* Plant, float Progress)
+	{
+		const float MinimumHeight = Plant
+			? FMath::Max(0.1f, Plant->MinimumGrowthVisualHeight) : 8.0f;
+		const float MatureHeight = Plant
+			? FMath::Max(MinimumHeight, Plant->MatureGrowthVisualHeight)
+			: 70.0f;
+		return FMath::Lerp(
+			MinimumHeight, MatureHeight,
+			FMath::Clamp(Progress, 0.0f, 1.0f));
+	}
 }
 
 ABotanicusIllegalPlanterActor::ABotanicusIllegalPlanterActor()
@@ -158,11 +171,7 @@ void ABotanicusIllegalPlanterActor::ApplyItemDefinition()
 
 void ABotanicusIllegalPlanterActor::EnsureSlotCount()
 {
-	const UBotanicusIllegalTradeSettings* Settings = GetDefault<UBotanicusIllegalTradeSettings>();
-	const int32 SlotCount = Settings
-		? FMath::Clamp(Settings->GetPlanterLevel(PlanterLevel).SlotCount, 1, MaximumVisualSlots)
-		: 4;
-	PlantSlots.SetNum(SlotCount);
+	PlantSlots.SetNum(4);
 }
 
 float ABotanicusIllegalPlanterActor::GetPlantSlotSpacing() const
@@ -733,16 +742,10 @@ void ABotanicusIllegalPlanterActor::RefreshVisuals()
 		if (StageMesh)
 		{
 			const FBox Bounds = StageMesh->GetBoundingBox();
-			const float MinimumHeight = Plant
-				? FMath::Max(0.1f, Plant->MinimumGrowthVisualHeight) : 8.0f;
-			const float MatureHeight = Plant
-				? FMath::Max(MinimumHeight, Plant->MatureGrowthVisualHeight)
-				: 70.0f;
 			// Normalizing each mesh to the same progress-based height avoids a
 			// size jump when the skin changes at 30% and 70%.
-			const float DesiredHeight = FMath::Lerp(
-				MinimumHeight, MatureHeight,
-				FMath::Clamp(Slot.GrowthProgress, 0.0f, 1.0f));
+			const float DesiredHeight =
+				GetGrowthVisualHeight(Plant, Slot.GrowthProgress);
 			const float Scale = DesiredHeight /
 				FMath::Max(0.01f, Bounds.GetSize().Z);
 			const FVector Centre = Bounds.GetCenter();
@@ -773,6 +776,11 @@ void ABotanicusIllegalPlanterActor::RefreshGrowthWidgets()
 		Settings->GetPlanterLevel(PlanterLevel);
 	const float Spacing = GetPlantSlotSpacing();
 	const float Start = -0.5f * Spacing * (PlantSlots.Num() - 1);
+	const float PlanterRimHeight = Mesh
+		? GetActorTransform().InverseTransformPosition(
+			Mesh->Bounds.Origin +
+			FVector::UpVector * Mesh->Bounds.BoxExtent.Z).Z
+		: SoilBottomHeight + SoilVolumeHeight;
 	const APlayerController* LocalPlayerController =
 		GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
 	const APlayerCameraManager* CameraManager = LocalPlayerController
@@ -789,10 +797,6 @@ void ABotanicusIllegalPlanterActor::RefreshGrowthWidgets()
 
 		const bool bOccupied = PlantSlots.IsValidIndex(Index) &&
 			!PlantSlots[Index].PlantId.IsNone();
-		GrowthComponent->SetRelativeLocation(FVector(
-			Start + Spacing * Index,
-			0.0f,
-			PlantGrowthWidgetHeight));
 		GrowthComponent->SetRelativeScale3D(
 			FVector(PlantGrowthWidgetScale));
 		GrowthComponent->SetVisibility(
@@ -802,6 +806,20 @@ void ABotanicusIllegalPlanterActor::RefreshGrowthWidgets()
 		{
 			continue;
 		}
+		const FBotanicusIllegalPlantSlotState& Slot = PlantSlots[Index];
+		const FBotanicusIllegalPlantDefinition* Definition =
+			Settings->FindPlant(Slot.PlantId);
+		const float PlantTopHeight =
+			SoilBottomHeight + SoilVolumeHeight +
+			GetGrowthVisualHeight(Definition, Slot.GrowthProgress);
+		const float WidgetBelowPivot =
+			GrowthComponent->GetDrawSize().Y * PlantGrowthWidgetScale *
+			GrowthComponent->GetPivot().Y;
+		GrowthComponent->SetRelativeLocation(FVector(
+			Start + Spacing * Index,
+			0.0f,
+			FMath::Max(PlantTopHeight, PlanterRimHeight) +
+			PlantGrowthWidgetClearance + WidgetBelowPivot));
 
 		if (CameraManager)
 		{
@@ -813,9 +831,6 @@ void ABotanicusIllegalPlanterActor::RefreshGrowthWidgets()
 		if (UBotanicusPlantGrowthWidget* Widget =
 				Cast<UBotanicusPlantGrowthWidget>(GrowthComponent->GetWidget()))
 		{
-			const FBotanicusIllegalPlantSlotState& Slot = PlantSlots[Index];
-			const FBotanicusIllegalPlantDefinition* Definition =
-				Settings->FindPlant(Slot.PlantId);
 			const FText PlantName = Definition && !Definition->DisplayName.IsEmpty()
 				? Definition->DisplayName
 				: FText::FromName(Slot.PlantId);

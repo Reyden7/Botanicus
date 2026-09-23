@@ -221,8 +221,7 @@ ABotanicusPlantPotActor::ABotanicusPlantPotActor()
 	PlantGrowthWidget->SetWidgetSpace(EWidgetSpace::World);
 	PlantGrowthWidget->SetDrawSize(FVector2D(360.0f, 180.0f));
 	PlantGrowthWidget->SetPivot(FVector2D(0.5f, 0.5f));
-	PlantGrowthWidget->SetRelativeLocation(
-		FVector(0.0f, 0.0f, PlantGrowthWidgetHeight));
+	PlantGrowthWidget->SetRelativeLocation(FVector::ZeroVector);
 	PlantGrowthWidget->SetRelativeScale3D(FVector(PlantGrowthWidgetScale));
 	PlantGrowthWidget->SetTintColorAndOpacity(FLinearColor(
 		PlantGrowthWidgetBrightness, PlantGrowthWidgetBrightness,
@@ -337,8 +336,6 @@ void ABotanicusPlantPotActor::OnConstruction(const FTransform& Transform)
 	RefreshSoilVisual();
 	if (PlantGrowthWidget)
 	{
-		PlantGrowthWidget->SetRelativeLocation(
-			FVector(0.0f, 0.0f, PlantGrowthWidgetHeight));
 		PlantGrowthWidget->SetRelativeScale3D(
 			FVector(PlantGrowthWidgetScale));
 		PlantGrowthWidget->SetTintColorAndOpacity(FLinearColor(
@@ -2146,38 +2143,47 @@ void ABotanicusPlantPotActor::RefreshVisuals()
 			}
 		}
 	}
+	// Keep the panel close to a seedling without letting it sink into the pot.
+	const float PotRimHeight = Mesh && Mesh->IsRegistered()
+		? GetActorTransform().InverseTransformPosition(
+			Mesh->Bounds.Origin +
+			FVector::UpVector * Mesh->Bounds.BoxExtent.Z).Z
+		: ConfiguredPlantBaseHeight;
+	const float HighestVisiblePoint =
+		FMath::Max(FoliageTop, PotRimHeight);
 	if (PlantGrowthWidget)
 	{
-		const float WidgetHalfHeight =
+		const float WidgetBelowPivot =
 			PlantGrowthWidget->GetDrawSize().Y *
-			PlantGrowthWidgetScale * 0.5f;
-		const float AdaptiveHeight = FoliageTop +
-			PlantGrowthWidgetClearance + WidgetHalfHeight;
+			PlantGrowthWidgetScale * PlantGrowthWidget->GetPivot().Y;
 		PlantGrowthWidget->SetRelativeLocation(FVector(
 			0.0f, 0.0f,
-			FMath::Max(PlantGrowthWidgetHeight, AdaptiveHeight)));
+			HighestVisiblePoint + PlantGrowthWidgetClearance +
+			WidgetBelowPivot));
 	}
 	if (EnvironmentAlertWidget)
 	{
-		const float AlertHalfHeight =
+		const float AlertBelowPivot =
 			EnvironmentAlertWidget->GetDrawSize().Y *
-			EnvironmentAlertWidgetScale * 0.5f;
-		float AlertHeight = FoliageTop +
-			PlantGrowthWidgetClearance + AlertHalfHeight;
+			EnvironmentAlertWidgetScale *
+			EnvironmentAlertWidget->GetPivot().Y;
+		float AlertHeight = HighestVisiblePoint +
+			PlantGrowthWidgetClearance + AlertBelowPivot;
 		if (PlantGrowthWidget)
 		{
-			const float GrowthHalfHeight =
+			const float GrowthAbovePivot =
 				PlantGrowthWidget->GetDrawSize().Y *
-				PlantGrowthWidgetScale * 0.5f;
+				PlantGrowthWidgetScale *
+				(1.0f - PlantGrowthWidget->GetPivot().Y);
 			AlertHeight = FMath::Max(
 				AlertHeight,
 				PlantGrowthWidget->GetRelativeLocation().Z +
-					GrowthHalfHeight + AlertHalfHeight + 6.0f);
+					GrowthAbovePivot + AlertBelowPivot + 6.0f);
 		}
 		EnvironmentAlertWidget->SetRelativeLocation(FVector(
 			0.0f,
 			0.0f,
-			FMath::Max(PlantGrowthWidgetHeight, AlertHeight)));
+			AlertHeight));
 		UBotanicusPlantEnvironmentAlertWidget* AlertWidget =
 			Cast<UBotanicusPlantEnvironmentAlertWidget>(
 				EnvironmentAlertWidget->GetWidget());
