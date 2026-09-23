@@ -42,10 +42,16 @@ ABotanicusIllegalPlanterActor::ABotanicusIllegalPlanterActor()
 	PrimaryActorTick.bStartWithTickEnabled = true;
 	PrimaryActorTick.TickInterval = 0.25f;
 
-	// The inherited mesh is the bottom of the planter. Four separate wall
-	// components leave the centre open so the rising soil surface stays visible.
-	Mesh->SetRelativeLocation(FVector(0.0f, 0.0f, 4.0f));
-	Mesh->SetRelativeScale3D(FVector(2.4f, 0.75f, 0.08f));
+	// The imported planter is the visible container. Keep the inherited Mesh
+	// editable in BP_Item_IllegalPlanter for future art adjustments.
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> PlanterFinder(
+		TEXT("/Game/Botanicus/Items/itemsMesh/Trafic/jardinière/Untitled.Untitled"));
+	if (PlanterFinder.Succeeded())
+	{
+		Mesh->SetStaticMesh(PlanterFinder.Object);
+	}
+	Mesh->SetRelativeLocation(FVector::ZeroVector);
+	Mesh->SetRelativeScale3D(FVector::OneVector);
 	Mesh->SetCollisionProfileName(TEXT("BlockAllDynamic"));
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(
@@ -62,13 +68,14 @@ ABotanicusIllegalPlanterActor::ABotanicusIllegalPlanterActor()
 		Wall->SetRelativeLocation(Location);
 		Wall->SetRelativeScale3D(Scale);
 		Wall->SetCollisionProfileName(TEXT("BlockAllDynamic"));
+		Wall->SetVisibility(false);
 		if (CubeMesh) Wall->SetStaticMesh(CubeMesh);
 		return Wall;
 	};
-	LeftWallVisual = CreateWall(TEXT("LeftWallVisual"), FVector(0.0f, -33.5f, 22.0f), FVector(2.4f, 0.08f, 0.30f));
-	RightWallVisual = CreateWall(TEXT("RightWallVisual"), FVector(0.0f, 33.5f, 22.0f), FVector(2.4f, 0.08f, 0.30f));
-	FrontWallVisual = CreateWall(TEXT("FrontWallVisual"), FVector(116.0f, 0.0f, 22.0f), FVector(0.08f, 0.60f, 0.30f));
-	BackWallVisual = CreateWall(TEXT("BackWallVisual"), FVector(-116.0f, 0.0f, 22.0f), FVector(0.08f, 0.60f, 0.30f));
+	LeftWallVisual = CreateWall(TEXT("LeftWallVisual"), FVector(0.0f, -53.0f, 44.0f), FVector(1.9f, 0.06f, 0.88f));
+	RightWallVisual = CreateWall(TEXT("RightWallVisual"), FVector(0.0f, 53.0f, 44.0f), FVector(1.9f, 0.06f, 0.88f));
+	FrontWallVisual = CreateWall(TEXT("FrontWallVisual"), FVector(92.0f, 0.0f, 44.0f), FVector(0.06f, 1.06f, 0.88f));
+	BackWallVisual = CreateWall(TEXT("BackWallVisual"), FVector(-92.0f, 0.0f, 44.0f), FVector(0.06f, 1.06f, 0.88f));
 
 	SoilShapeVisual = CreateDefaultSubobject<UChildActorComponent>(TEXT("SoilShapeVisual"));
 	SoilShapeVisual->SetupAttachment(SceneRoot);
@@ -144,8 +151,8 @@ void ABotanicusIllegalPlanterActor::ApplyItemDefinition()
 	Super::ApplyItemDefinition();
 	if (!UsesBlueprintAppearance())
 	{
-		Mesh->SetRelativeLocation(FVector(0.0f, 0.0f, 4.0f));
-		Mesh->SetRelativeScale3D(FVector(2.4f, 0.75f, 0.08f));
+		Mesh->SetRelativeLocation(FVector::ZeroVector);
+		Mesh->SetRelativeScale3D(FVector::OneVector);
 	}
 }
 
@@ -156,6 +163,14 @@ void ABotanicusIllegalPlanterActor::EnsureSlotCount()
 		? FMath::Clamp(Settings->GetPlanterLevel(PlanterLevel).SlotCount, 1, MaximumVisualSlots)
 		: 4;
 	PlantSlots.SetNum(SlotCount);
+}
+
+float ABotanicusIllegalPlanterActor::GetPlantSlotSpacing() const
+{
+	return FMath::Clamp(
+		(2.0f * SoilHalfExtent.X - 20.0f) /
+		FMath::Max(1, PlantSlots.Num() - 1),
+		1.0f, 52.0f);
 }
 
 float ABotanicusIllegalPlanterActor::GetWaterAmount() const
@@ -684,15 +699,16 @@ void ABotanicusIllegalPlanterActor::RefreshVisuals()
 			true,
 			AverageWaterRatio);
 	}
-	const float Spacing = 52.0f;
+	const float Spacing = GetPlantSlotSpacing();
 	const float Start = -0.5f * Spacing * (PlantSlots.Num() - 1);
+	const float PlantBaseHeight = SoilBottomHeight + SoilVolumeHeight;
 	int32 MatureCount = 0;
 	for (int32 Index = 0; Index < PlantVisuals.Num(); ++Index)
 	{
 		UStaticMeshComponent* Visual = PlantVisuals[Index];
 		const bool bOccupied = PlantSlots.IsValidIndex(Index) && !PlantSlots[Index].PlantId.IsNone();
 		Visual->SetVisibility(bOccupied, true);
-		Visual->SetRelativeLocation(FVector(Start + Spacing * Index, 0.0f, 31.0f));
+		Visual->SetRelativeLocation(FVector(Start + Spacing * Index, 0.0f, PlantBaseHeight));
 		if (!bOccupied) continue;
 		const FBotanicusIllegalPlantSlotState& Slot = PlantSlots[Index];
 		const int32 Stage = GetGrowthStage(Slot.GrowthProgress);
@@ -734,7 +750,7 @@ void ABotanicusIllegalPlanterActor::RefreshVisuals()
 			Visual->SetRelativeLocation(FVector(
 				Start + Spacing * Index - Centre.X * Scale,
 				-Centre.Y * Scale,
-				31.0f - Bounds.Min.Z * Scale));
+				PlantBaseHeight - Bounds.Min.Z * Scale));
 		}
 	}
 	const int32 WaterPercent = FMath::RoundToInt(100.0f * AverageWaterRatio);
@@ -755,7 +771,7 @@ void ABotanicusIllegalPlanterActor::RefreshGrowthWidgets()
 
 	const FBotanicusIllegalPlanterLevelDefinition& Level =
 		Settings->GetPlanterLevel(PlanterLevel);
-	const float Spacing = 52.0f;
+	const float Spacing = GetPlantSlotSpacing();
 	const float Start = -0.5f * Spacing * (PlantSlots.Num() - 1);
 	const APlayerController* LocalPlayerController =
 		GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
@@ -829,7 +845,7 @@ int32 ABotanicusIllegalPlanterActor::ResolveAimedSlot(AActor* Interactor) const
 		TargetLocation = Hit.ImpactPoint;
 	}
 	const float LocalX = GetActorTransform().InverseTransformPosition(TargetLocation).X;
-	const float Spacing = 52.0f;
+	const float Spacing = GetPlantSlotSpacing();
 	const float Start = -0.5f * Spacing * (PlantSlots.Num() - 1);
 	return FMath::Clamp(FMath::RoundToInt((LocalX - Start) / Spacing), 0, PlantSlots.Num() - 1);
 }

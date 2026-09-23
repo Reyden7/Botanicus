@@ -8,13 +8,13 @@ UBotanicusIllegalTradeSettings::UBotanicusIllegalTradeSettings()
 {
 	FBotanicusIllegalPlantDefinition& Noctiflore = Plants.AddDefaulted_GetRef();
 	const FString MeshRoot =
-		TEXT("/Game/Botanicus/Items/itemsMesh/plantes/normal/AuréliaDouce/");
+		TEXT("/Game/Botanicus/Items/itemsMesh/Trafic/plantes/");
 	Noctiflore.SeedlingMesh = TSoftObjectPtr<UStaticMesh>(
-		FSoftObjectPath(MeshRoot + TEXT("niv1/niv1.niv1")));
+		FSoftObjectPath(MeshRoot + TEXT("1/1.1")));
 	Noctiflore.YoungMesh = TSoftObjectPtr<UStaticMesh>(
-		FSoftObjectPath(MeshRoot + TEXT("niv2/niv2.niv2")));
+		FSoftObjectPath(MeshRoot + TEXT("2/2.2")));
 	Noctiflore.MatureMesh = TSoftObjectPtr<UStaticMesh>(
-		FSoftObjectPath(MeshRoot + TEXT("niv4/niv4.niv4")));
+		FSoftObjectPath(MeshRoot + TEXT("3/3.3")));
 	PlanterLevels.AddDefaulted();
 	CustomerClass = TSoftClassPtr<ABotanicusIllegalCustomerCharacter>(FSoftClassPath(
 		TEXT("/Game/Botanicus/blueprints/BP_IllegalCustomer.BP_IllegalCustomer_C")));

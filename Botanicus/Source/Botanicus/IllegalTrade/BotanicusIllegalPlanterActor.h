@@ -84,6 +84,7 @@ private:
 	void OnRep_PlanterState();
 
 	void EnsureSlotCount();
+	float GetPlantSlotSpacing() const;
 	void RefreshVisuals();
 	void RefreshGrowthWidgets();
 	void ScheduleAutosave();
@@ -117,19 +118,19 @@ private:
 
 	/** Interior dimensions of the soil surface. Editable on BP_Item_IllegalPlanter. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Botanicus|Illegal Planter|Visuals", meta=(AllowPrivateAccess="true", ClampMin="1.0", Units="cm"))
-	FVector2D SoilHalfExtent = FVector2D(108.0f, 27.0f);
+	FVector2D SoilHalfExtent = FVector2D(84.0f, 44.0f);
 
 	/** Height of a completely filled soil volume. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Botanicus|Illegal Planter|Visuals", meta=(AllowPrivateAccess="true", ClampMin="1.0", Units="cm"))
-	float SoilVolumeHeight = 27.0f;
+	float SoilVolumeHeight = 65.0f;
 
 	/** Local Z at the bottom of the interior planter volume. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Botanicus|Illegal Planter|Visuals", meta=(AllowPrivateAccess="true", Units="cm"))
-	float SoilBottomHeight = 8.0f;
+	float SoilBottomHeight = 15.0f;
 
 	/** Height of each plant information widget above its planter slot. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Botanicus|Illegal Planter|UI", meta=(AllowPrivateAccess="true", Units="cm"))
-	float PlantGrowthWidgetHeight = 135.0f;
+	float PlantGrowthWidgetHeight = 175.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Botanicus|Illegal Planter|UI", meta=(AllowPrivateAccess="true", ClampMin="0.01", ClampMax="1.0"))
 	float PlantGrowthWidgetScale = 0.12f;

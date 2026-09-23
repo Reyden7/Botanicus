@@ -1067,8 +1067,8 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	IllegalPlanter.CatalogTabs =
 		static_cast<int32>(EBotanicusCatalogTab::GardeningTools);
 	IllegalPlanter.WorldMesh = TSoftObjectPtr<UStaticMesh>(
-		FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube.Cube")));
-	IllegalPlanter.WorldScale = FVector(2.4f, 0.75f, 0.35f);
+		FSoftObjectPath(TEXT("/Game/Botanicus/Items/itemsMesh/Trafic/jardinière/Untitled.Untitled")));
+	IllegalPlanter.WorldScale = FVector::OneVector;
 	IllegalPlanter.WorldActorClass = TSoftClassPtr<AActor>(
 		FSoftObjectPath(TEXT(
 			"/Game/Botanicus/blueprints/BP_Item_IllegalPlanter.BP_Item_IllegalPlanter_C")));
@@ -1077,7 +1077,7 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	IllegalPlanter.Price = 300;
 	IllegalPlanter.DeliveryQuantity = 1;
 	IllegalPlanter.DeliveryDelaySeconds = 4.0f;
-	IllegalPlanter.CollisionHalfExtentOverride = FVector(120.0f, 38.0f, 18.0f);
+	IllegalPlanter.CollisionHalfExtentOverride = FVector(95.0f, 56.0f, 44.0f);
 
 	FBotanicusItemDefinition& NoctifloreSeeds =
 		NativeFallbackItems.AddDefaulted_GetRef();
