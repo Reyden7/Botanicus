@@ -121,6 +121,10 @@ ABotanicusCashRegisterActor::ABotanicusCashRegisterActor()
 void ABotanicusCashRegisterActor::BeginPlay()
 {
 	Super::BeginPlay();
+	if (HasAuthority() && GetItemKey().IsNone())
+	{
+		InitializePlacedItem(TEXT("CashRegister"), 1);
+	}
 	InitializeVisualMaterials();
 }
 

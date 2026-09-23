@@ -16,7 +16,6 @@ class USlider;
 class USizeBox;
 class UTextBlock;
 class UVerticalBox;
-class UBotanicusBuildingCatalogRowWidget;
 
 enum class EBotanicusCommandPanelTab : uint8
 {
@@ -269,9 +268,6 @@ private:
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UBotanicusOrderItemRowWidget>> ItemRows;
-
-	UPROPERTY(Transient)
-	TArray<TObjectPtr<UBotanicusBuildingCatalogRowWidget>> BuildingRows;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusMainShopUpgradeRowWidget> MainShopUpgradeRow;

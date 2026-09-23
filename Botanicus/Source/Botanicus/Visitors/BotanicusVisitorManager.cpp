@@ -205,8 +205,7 @@ bool ABotanicusVisitorManager::BuildVisitorCircuit(
 		 PathIt;
 		 ++PathIt)
 	{
-		if (!PathIt->IsVisitorRoute() ||
-			PathIt->IsPreviewPath())
+		if (!PathIt->IsVisitorRoute())
 		{
 			continue;
 		}

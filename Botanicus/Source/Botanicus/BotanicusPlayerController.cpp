@@ -1,6 +1,5 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
-
 #include "BotanicusPlayerController.h"
 #include "BotanicusCharacter.h"
 #include "QuickBar/BotanicusQuickBarComponent.h"
@@ -12,9 +11,7 @@
 #include "Preparation/BotanicusPreparationWorkbenchActor.h"
 #include "Preparation/BotanicusWorkSurfaceActor.h"
 #include "Preparation/BotanicusComputerActor.h"
-#include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
-#include "Components/ActorComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -32,7 +29,6 @@
 #include "GameFramework/PlayerState.h"
 #include "InputMappingContext.h"
 #include "InputKeyEventArgs.h"
-#include "LandscapeProxy.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "TimerManager.h"
@@ -41,10 +37,6 @@
 #include "Botanicus.h"
 #include "BotanicusGameMode.h"
 #include "BotanicusGameState.h"
-#include "Building/BotanicusCatalogBuildingActor.h"
-#include "Building/BotanicusCommunicationDoorActor.h"
-#include "Building/BotanicusElementalGreenhouseActor.h"
-#include "Catalog/BotanicusBuildingCatalogSubsystem.h"
 #include "Catalog/BotanicusItemCatalogSubsystem.h"
 #include "Delivery/BotanicusDeliveryParcelActor.h"
 #include "Delivery/BotanicusDeliveryZoneActor.h"
@@ -52,7 +44,6 @@
 #include "Delivery/BotanicusPlaceableItemActor.h"
 #include "Decoration/BotanicusBrokenFlowerPotActor.h"
 #include "DrawDebugHelpers.h"
-#include "Economy/BotanicusRefundZoneActor.h"
 #include "Environment/BotanicusClimateDeviceActor.h"
 #include "Growing/BotanicusPlantPotActor.h"
 #include "Growing/BotanicusPlantCatalog.h"
@@ -64,11 +55,9 @@
 #include "IllegalTrade/BotanicusIllegalCustomerCharacter.h"
 #include "Interaction/BotanicusInteractable.h"
 #include "Online/BotanicusMultiplayerSubsystem.h"
-#include "Path/BotanicusPathActor.h"
 #include "Ping/BotanicusPingMarker.h"
 #include "UI/BotanicusQuickBarWidget.h"
 #include "UI/BotanicusCarryProgressWidget.h"
-#include "UI/BotanicusBuildingCatalogWidget.h"
 #include "UI/BotanicusOrderCatalogWidget.h"
 #include "UI/BotanicusWorkbenchUpgradeWidget.h"
 #include "UI/BotanicusDevelopmentPanelWidget.h"
@@ -83,19 +72,12 @@
 #include "UI/BotanicusHudMessageWidget.h"
 #include "UI/BotanicusHudLayoutWidget.h"
 #include "UI/BotanicusThrowPowerWidget.h"
-#include "UI/BotanicusTopDownToolbarWidget.h"
-#include "Visitors/BotanicusVisitorZoneActor.h"
 #include "Net/UnrealNetwork.h"
-#include "UObject/ConstructorHelpers.h"
-#include "UObject/StructOnScope.h"
-#include "UObject/UnrealType.h"
 #include "UObject/UObjectIterator.h"
 #include "Widgets/Input/SVirtualJoystick.h"
 
 namespace
 {
-	const FName PlayerPurchasedBuildingTag(
-		TEXT("BotanicusPurchasedBuilding"));
 	constexpr int32 PottingSoilGroundStackLimit = 5;
 
 	bool IsSeedPacketItemKey(FName ItemKey)
@@ -265,33 +247,6 @@ namespace
 		}
 	}
 
-	void ConfigurePurchasedActorForNetworking(AActor* Actor)
-	{
-		if (!IsValid(Actor))
-		{
-			return;
-		}
-
-		// Marketplace building actors were not authored as runtime network
-		// spawns. Override their default ownership/relevancy so every client
-		// receives both the spawn and subsequent placement transforms.
-		Actor->SetOwner(nullptr);
-		Actor->bOnlyRelevantToOwner = false;
-		Actor->bAlwaysRelevant = true;
-		Actor->SetNetUpdateFrequency(30.0f);
-		Actor->SetMinNetUpdateFrequency(10.0f);
-		Actor->SetReplicates(true);
-		Actor->SetReplicateMovement(true);
-		Actor->SetNetDormancy(DORM_Awake);
-		Actor->FlushNetDormancy();
-		Actor->ForceNetUpdate();
-	}
-
-	TMap<
-		TWeakObjectPtr<AActor>,
-		TWeakObjectPtr<ABotanicusPlayerController>>
-		ActiveBuildingEditLocks;
-
 	const FBotanicusItemDefinition* FindItemDefinition(
 		const UObject* Context,
 		FName ItemKey)
@@ -305,21 +260,6 @@ namespace
 					UBotanicusItemCatalogSubsystem>()
 				: nullptr;
 		return Catalog ? Catalog->FindItem(ItemKey) : nullptr;
-	}
-
-	const FBotanicusBuildingDefinition* FindBuildingDefinition(
-		const UObject* Context,
-		FName BuildingKey)
-	{
-		const UWorld* World = Context ? Context->GetWorld() : nullptr;
-		UGameInstance* GameInstance =
-			World ? World->GetGameInstance() : nullptr;
-		const UBotanicusBuildingCatalogSubsystem* Catalog =
-			GameInstance
-				? GameInstance->GetSubsystem<
-					UBotanicusBuildingCatalogSubsystem>()
-				: nullptr;
-		return Catalog ? Catalog->FindBuilding(BuildingKey) : nullptr;
 	}
 
 	FVector GetItemAlignmentExtent(const AActor* Actor)
@@ -490,23 +430,6 @@ ABotanicusPlayerController::ABotanicusPlayerController()
 	PlayerCameraManagerClass = ABotanicusCameraManager::StaticClass();
 	PrimaryActorTick.bCanEverTick = true;
 
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface>
-		ValidPlacementMaterialFinder(
-			TEXT("/Game/Botanicus/Materials/Silhouette/M_Silhouette_Hologram_Blue.M_Silhouette_Hologram_Blue"));
-	if (ValidPlacementMaterialFinder.Succeeded())
-	{
-		ValidBuildingPlacementMaterial =
-			ValidPlacementMaterialFinder.Object;
-	}
-
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface>
-		InvalidPlacementMaterialFinder(
-			TEXT("/Game/EasyBuildingSystem/Materials/Instances/Dummy/MI_CanNot_Build.MI_CanNot_Build"));
-	if (InvalidPlacementMaterialFinder.Succeeded())
-	{
-		InvalidBuildingPlacementMaterial =
-			InvalidPlacementMaterialFinder.Object;
-	}
 }
 
 void ABotanicusPlayerController::GetLifetimeReplicatedProps(
@@ -622,112 +545,6 @@ void ABotanicusPlayerController::BotanicusOrder(FName ItemKey)
 			ServerPlaceCatalogOrder(ItemKey);
 		}
 	}
-}
-
-void ABotanicusPlayerController::BotanicusTestBuildingGrouping()
-{
-	UActorComponent* BuildingComponent = nullptr;
-	const bool bBuildModeActive =
-		IsEbsConstructionModeActive(BuildingComponent);
-	UE_LOG(
-		LogBotanicus,
-		Display,
-		TEXT("EBS left-click binding test: component=%s GetBuildingMode=%s TryBuild=%s activeBuildMode=%s"),
-		BuildingComponent
-			? *BuildingComponent->GetClass()->GetName()
-			: TEXT("<missing>"),
-		BuildingComponent &&
-			BuildingComponent->FindFunction(TEXT("GetBuildingMode"))
-				? TEXT("found")
-				: TEXT("missing"),
-		BuildingComponent &&
-			BuildingComponent->FindFunction(TEXT("TryBuild"))
-				? TEXT("found")
-				: TEXT("missing"),
-		bBuildModeActive ? TEXT("true") : TEXT("false"));
-
-	for (TActorIterator<AActor> ActorIt(GetWorld()); ActorIt; ++ActorIt)
-	{
-		AActor* Actor = *ActorIt;
-		if (!IsStructuralBuildingActor(Actor))
-		{
-			continue;
-		}
-
-		const TArray<AActor*> Group = BuildCompleteBuildingGroup(Actor);
-		int32 StructuralCount = 0;
-		int32 SaveableCount = 0;
-		for (AActor* BuildingActor : Group)
-		{
-			StructuralCount += IsStructuralBuildingActor(BuildingActor) ? 1 : 0;
-			SaveableCount +=
-				BuildingActor &&
-				BuildingActor->FindFunction(
-					TEXT("SaveData_BPI"))
-					? 1
-					: 0;
-		}
-
-		FString SaveFunctions;
-		for (TFieldIterator<UFunction> FunctionIt(
-			 Actor->GetClass(),
-			 EFieldIterationFlags::IncludeSuper);
-			 FunctionIt;
-			 ++FunctionIt)
-		{
-			const FString FunctionName = FunctionIt->GetName();
-			if (FunctionName.Contains(
-				TEXT("Save"),
-				ESearchCase::IgnoreCase))
-			{
-				if (!SaveFunctions.IsEmpty())
-				{
-					SaveFunctions += TEXT(",");
-				}
-				SaveFunctions += FunctionName;
-			}
-		}
-
-		const FVector Pivot = CalculateBuildingGroupPivot(Group);
-		float LandscapeHeight = 0.0f;
-		const bool bLandscapeFound = FindLandscapeHeight(
-			FVector2D(Pivot.X, Pivot.Y),
-			LandscapeHeight);
-
-		ServerBuildingGroup.Reset(Group.Num());
-		for (AActor* BuildingActor : Group)
-		{
-			ServerBuildingGroup.Add(BuildingActor);
-		}
-		const bool bPlacementValid =
-			bLandscapeFound && IsServerBuildingGroupPlacementValid();
-		ServerBuildingGroup.Reset();
-
-		UE_LOG(
-			LogBotanicus,
-			Display,
-			TEXT("Whole-building grouping test: seed=%s total=%d structural=%d contents=%d saveable=%d landscape=%s groundOffset=%.1f placement=%s"),
-			*Actor->GetName(),
-			Group.Num(),
-			StructuralCount,
-			Group.Num() - StructuralCount,
-			SaveableCount,
-			bLandscapeFound ? TEXT("found") : TEXT("missing"),
-			bLandscapeFound ? Pivot.Z - LandscapeHeight : 0.0f,
-			bPlacementValid ? TEXT("valid") : TEXT("blocked"));
-		UE_LOG(
-			LogBotanicus,
-			Display,
-			TEXT("EBS save functions on %s: %s"),
-			*Actor->GetClass()->GetName(),
-			SaveFunctions.IsEmpty() ? TEXT("<none>") : *SaveFunctions);
-		return;
-	}
-
-	UE_LOG(
-		LogBotanicus,
-		Warning,
-		TEXT("Whole-building grouping test found no EBS structural actor."));
 }
 
 void ABotanicusPlayerController::BotanicusTestPing()
@@ -895,20 +712,6 @@ void ABotanicusPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReaso
 	LocalEquippedQuickBarSource.Reset();
 	CancelDeliveryParcelPlacement();
 	CancelLargeEquipmentPlacement();
-	CancelPathPlacement();
-	CancelPathDeletion();
-	CancelVisitorZonePlacement();
-	if (IsValid(CommunicationDoorPreviewActor))
-	{
-		CommunicationDoorPreviewActor->Destroy();
-		CommunicationDoorPreviewActor = nullptr;
-	}
-
-	if (TopDownToolbarWidget)
-	{
-		TopDownToolbarWidget->RemoveFromParent();
-		TopDownToolbarWidget = nullptr;
-	}
 
 	if (OrderCatalogWidget)
 	{
@@ -924,11 +727,6 @@ void ABotanicusPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReaso
 	{
 		DevelopmentPanelWidget->RemoveFromParent();
 		DevelopmentPanelWidget = nullptr;
-	}
-	if (BuildingCatalogWidget)
-	{
-		BuildingCatalogWidget->RemoveFromParent();
-		BuildingCatalogWidget = nullptr;
 	}
 
 	if (HasAuthority())
@@ -996,16 +794,6 @@ void ABotanicusPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReaso
 	{
 		CarryProgressWidget->RemoveFromParent();
 		CarryProgressWidget = nullptr;
-	}
-
-	SetBuildingGroupHighlighted(false);
-	RestoreTopDownRoofVisibility();
-	ClearServerBuildingGroupMove();
-
-	if (IsValid(BuildingCameraActor))
-	{
-		BuildingCameraActor->Destroy();
-		BuildingCameraActor = nullptr;
 	}
 
 	Super::EndPlay(EndPlayReason);
@@ -1081,15 +869,6 @@ void ABotanicusPlayerController::PlayerTick(float DeltaTime)
 			InteractionHighlightRefreshAccumulator = 0.0f;
 			RefreshInteractionTargetHighlight();
 		}
-		if (bBuildingTopDownViewActive)
-		{
-			TopDownRoofRefreshAccumulator += DeltaTime;
-			if (TopDownRoofRefreshAccumulator >= 0.25f)
-			{
-				TopDownRoofRefreshAccumulator = 0.0f;
-				RefreshTopDownRoofVisibility();
-			}
-		}
 
 		const float AzertyForward =
 			(bAzertyForwardPressed ? 1.0f : 0.0f) -
@@ -1097,32 +876,15 @@ void ABotanicusPlayerController::PlayerTick(float DeltaTime)
 		const float AzertyRight =
 			(bAzertyRightPressed ? 1.0f : 0.0f) -
 			(bAzertyLeftPressed ? 1.0f : 0.0f);
-		if (bBuildingTopDownViewActive)
-		{
-			if (bBuildingCameraOrbitActive &&
-				LocalBuildingGroup.Num() == 0)
-			{
-				EndBuildingCameraOrbit();
-			}
-			UpdateBuildingCameraOrbit();
-			UpdateBuildingCameraFreeLook();
-			MoveBuildingCameraForward(AzertyForward);
-			MoveBuildingCameraRight(AzertyRight);
-		}
-		else if (APawn* ControlledPawn = GetPawn())
+		if (APawn* ControlledPawn = GetPawn())
 		{
 			ControlledPawn->AddMovementInput(
-				ControlledPawn->GetActorForwardVector(),
-				AzertyForward);
+				ControlledPawn->GetActorForwardVector(), AzertyForward);
 			ControlledPawn->AddMovementInput(
-				ControlledPawn->GetActorRightVector(),
-				AzertyRight);
+				ControlledPawn->GetActorRightVector(), AzertyRight);
 		}
 	}
 
-	UpdateBuildingGroupPreview(DeltaTime);
-	UpdateCommunicationDoorPreview();
-	UpdatePathPreview();
 	UpdateEquipmentCarryCharge(DeltaTime);
 	UpdatePlaceableItemMoveCharge(DeltaTime);
 	UpdateDisplayedSalePotPickup(DeltaTime);
@@ -1172,15 +934,6 @@ void ABotanicusPlayerController::PlayerTick(float DeltaTime)
 void ABotanicusPlayerController::SetupInputComponent()
 {
 	Super::SetupInputComponent();
-
-	InputComponent->BindAxis(
-		TEXT("MoveForward"),
-		this,
-		&ABotanicusPlayerController::MoveBuildingCameraForward);
-	InputComponent->BindAxis(
-		TEXT("MoveRight"),
-		this,
-		&ABotanicusPlayerController::MoveBuildingCameraRight);
 
 	// only add IMCs for local player controllers
 	if (IsLocalPlayerController())
@@ -1297,16 +1050,6 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		return true;
 	}
 
-	if (BuildingCatalogWidget &&
-		BuildingCatalogWidget->GetVisibility() == ESlateVisibility::Visible)
-	{
-		if (Params.Key == EKeys::Escape && Params.Event == IE_Pressed)
-		{
-			ToggleBuildingCatalog();
-		}
-		return true;
-	}
-
 	if (OrderCatalogWidget &&
 		OrderCatalogWidget->GetVisibility() == ESlateVisibility::Visible)
 	{
@@ -1379,7 +1122,7 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 
 	if (Params.Key == EKeys::LeftShift &&
 		Params.Event == IE_Pressed &&
-		!bBuildingTopDownViewActive &&
+
 		!IsValid(LocalLargeEquipmentPlacement) &&
 		!IsValid(LocalQuickBarItemPreview) &&
 		!IsValid(LocalParcelMovePreview))
@@ -1392,8 +1135,7 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 	}
 
 	if (Params.Key == EKeys::C &&
-		Params.Event == IE_Pressed &&
-		!bBuildingTopDownViewActive)
+		Params.Event == IE_Pressed)
 	{
 		if (ABotanicusCharacter* BotanicusCharacter =
 				Cast<ABotanicusCharacter>(GetPawn()))
@@ -1457,33 +1199,9 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		return true;
 	}
 
-	// T replaces EBS' radial/square-menu shortcut and is the sole top-down
-	// camera toggle. Consume every T event so the original Blueprint binding
-	// cannot also execute.
+	// Old Blueprint input mappings cannot re-enable construction.
 	if (Params.Key == EKeys::T)
 	{
-		if (Params.Event == IE_Pressed)
-		{
-			if (IsValid(LocalLargeEquipmentPlacement))
-			{
-				CancelLargeEquipmentPlacement();
-			}
-			if (IsValid(LocalQuickBarItemPreview) ||
-				IsValid(LocalMovedPlaceableItem))
-			{
-				CancelQuickBarItemPlacement();
-			}
-			if (IsValid(LocalParcelMovePreview))
-			{
-				CancelDeliveryParcelPlacement();
-			}
-			if (bBuildingTopDownViewActive && LocalBuildingGroup.Num() > 0)
-			{
-				CancelBuildingGroupMove();
-			}
-			ToggleBuildingTopDownView();
-		}
-
 		return true;
 	}
 
@@ -1515,7 +1233,7 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 
 	if (Params.Key == EKeys::E &&
 		Params.Event == IE_Pressed &&
-		!bBuildingTopDownViewActive &&
+
 		!bFurnitureMoveModeActive)
 	{
 		if (ABotanicusIllegalCustomerCharacter* Customer =
@@ -1542,7 +1260,7 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 
 	if (Params.Key == EKeys::E &&
 		Params.Event == IE_Pressed &&
-		!bBuildingTopDownViewActive &&
+
 		(TryOpenNearbyWorkbenchUpgrade() ||
 		 TryUseNearbyComputer() ||
 		 TryPlacePlantOnNearbySalesDisplay() ||
@@ -1554,8 +1272,7 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		return true;
 	}
 
-	if (IsValid(LocalLargeEquipmentPlacement) &&
-		!bBuildingTopDownViewActive)
+	if (IsValid(LocalLargeEquipmentPlacement))
 	{
 		if (Params.Event == IE_Pressed &&
 			(Params.Key == EKeys::MouseScrollUp ||
@@ -1582,8 +1299,7 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		}
 	}
 
-	if (IsValid(LocalQuickBarItemPreview) &&
-		!bBuildingTopDownViewActive)
+	if (IsValid(LocalQuickBarItemPreview))
 	{
 		if (Params.Event == IE_Pressed &&
 			(Params.Key == EKeys::MouseScrollUp ||
@@ -1664,8 +1380,7 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		}
 	}
 
-	if (IsValid(LocalParcelMovePreview) &&
-		!bBuildingTopDownViewActive)
+	if (IsValid(LocalParcelMovePreview))
 	{
 		if (Params.Event == IE_Pressed &&
 			(Params.Key == EKeys::MouseScrollUp ||
@@ -1695,7 +1410,7 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 	if (Params.Key == EKeys::A)
 	{
 		if (Params.Event == IE_Pressed &&
-			!bBuildingTopDownViewActive &&
+
 			!IsValid(LocalLargeEquipmentPlacement) &&
 			!IsValid(LocalQuickBarItemPreview) &&
 			!IsValid(LocalParcelMovePreview))
@@ -1716,8 +1431,7 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 	// until A starts its ground-placement preview. Right click/Escape returns
 	// it to its original position; other item-use clicks are consumed.
 	if (IsValid(LocalMovedPlaceableItem) &&
-		!IsValid(LocalQuickBarItemPreview) &&
-		!bBuildingTopDownViewActive)
+		!IsValid(LocalQuickBarItemPreview))
 	{
 		if (Params.Key == EKeys::LeftMouseButton &&
 			Params.Event == IE_Pressed)
@@ -1746,250 +1460,7 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		return true;
 	}
 
-	if (bBuildingTopDownViewActive)
-	{
-		if (Params.Key == EKeys::LeftShift)
-		{
-			if (Params.Event == IE_Pressed &&
-				LocalBuildingGroup.Num() > 0)
-			{
-				BeginBuildingCameraOrbit();
-			}
-			else if (Params.Event == IE_Released &&
-				bBuildingCameraOrbitActive)
-			{
-				EndBuildingCameraOrbit();
-			}
-			return true;
-		}
-
-		if (bBuildingCameraOrbitActive &&
-			(Params.Key == EKeys::LeftMouseButton ||
-			 Params.Key == EKeys::RightMouseButton))
-		{
-			return true;
-		}
-
-		if (bDoorEditSelectionActive)
-		{
-			if (Params.Key == EKeys::LeftMouseButton &&
-				Params.Event == IE_Pressed)
-			{
-				if (!IsCursorOverTopDownToolbar())
-				{
-					FHitResult DoorHit;
-					if (TraceTopDownCursor(DoorHit) &&
-						IsValid(DoorHit.GetActor()) &&
-						(DoorHit.GetActor()->IsA<
-							 ABotanicusCommunicationDoorActor>() ||
-						 IsEbsBuildingActor(DoorHit.GetActor())))
-					{
-						bDoorEditSelectionActive = false;
-						RefreshTopDownToolbar();
-						ServerBeginManualDoorPlacement(
-							DoorHit.GetActor());
-					}
-					else
-					{
-						ClientMessage(
-							TEXT("Cliquez sur un bâtiment ou une porte existante."));
-					}
-				}
-				return true;
-			}
-			if ((Params.Key == EKeys::RightMouseButton ||
-				 Params.Key == EKeys::Escape) &&
-				Params.Event == IE_Pressed)
-			{
-				CancelDoorEditing();
-				return true;
-			}
-		}
-
-		if (PendingVisitorZoneType != INDEX_NONE)
-		{
-			if (Params.Key == EKeys::LeftMouseButton &&
-				Params.Event == IE_Pressed)
-			{
-				if (!IsCursorOverTopDownToolbar())
-				{
-					PlaceVisitorZoneAtCursor();
-				}
-				return true;
-			}
-
-			if ((Params.Key == EKeys::RightMouseButton ||
-				 Params.Key == EKeys::Escape) &&
-				Params.Event == IE_Pressed)
-			{
-				CancelVisitorZonePlacement();
-				return true;
-			}
-		}
-
-		if (bCommunicationDoorPlacementActive)
-		{
-			if (Params.Key == EKeys::LeftMouseButton &&
-				Params.Event == IE_Pressed)
-			{
-				if (!IsCursorOverTopDownToolbar() &&
-					LocalCommunicationDoorCandidateIndex != INDEX_NONE)
-				{
-					ServerConfirmCommunicationDoor(
-						LocalCommunicationDoorCandidateIndex);
-				}
-				return true;
-			}
-
-			if ((Params.Key == EKeys::RightMouseButton ||
-				 Params.Key == EKeys::Escape) &&
-				Params.Event == IE_Pressed)
-			{
-				ServerCancelCommunicationDoor();
-				return true;
-			}
-		}
-
-		if (bPathPlacementActive)
-		{
-			if (Params.Key == EKeys::LeftMouseButton &&
-				Params.Event == IE_Pressed)
-			{
-				if (!IsCursorOverTopDownToolbar())
-				{
-					bPathStrokeActive = true;
-					AddPathPointAtCursor();
-				}
-				return true;
-			}
-			if (Params.Key == EKeys::LeftMouseButton &&
-				Params.Event == IE_Released)
-			{
-				if (bPathStrokeActive && !IsCursorOverTopDownToolbar())
-				{
-					AddPathPointAtCursor();
-				}
-				bPathStrokeActive = false;
-				return true;
-			}
-
-			if (Params.Key == EKeys::RightMouseButton &&
-				Params.Event == IE_Pressed)
-			{
-				RemoveLastPathPoint();
-				return true;
-			}
-
-			if (Params.Key == EKeys::Escape &&
-				Params.Event == IE_Pressed)
-			{
-				CancelPathPlacement();
-				return true;
-			}
-		}
-
-		if (bPathDeletionActive)
-		{
-			if (Params.Key == EKeys::LeftMouseButton &&
-				Params.Event == IE_Pressed)
-			{
-				if (!IsCursorOverTopDownToolbar())
-				{
-					TryDeletePathSegmentAtCursor();
-				}
-				return true;
-			}
-
-			if ((Params.Key == EKeys::RightMouseButton ||
-				 Params.Key == EKeys::Escape) &&
-				Params.Event == IE_Pressed)
-			{
-				CancelPathDeletion();
-				return true;
-			}
-		}
-
-		if (Params.Key == EKeys::RightMouseButton &&
-			LocalBuildingGroup.Num() == 0 &&
-			PendingVisitorZoneType == INDEX_NONE &&
-			!bCommunicationDoorPlacementActive &&
-			!bPathPlacementActive &&
-			!bPathDeletionActive)
-		{
-			if (Params.Event == IE_Pressed)
-			{
-				BeginBuildingCameraFreeLook();
-			}
-			else if (Params.Event == IE_Released)
-			{
-				EndBuildingCameraFreeLook();
-			}
-			return true;
-		}
-
-		if (bBuildingCameraFreeLookActive &&
-			Params.Key == EKeys::LeftMouseButton)
-		{
-			return true;
-		}
-
-		if (Params.Event == IE_Pressed &&
-			(Params.Key == EKeys::MouseScrollUp ||
-			 Params.Key == EKeys::MouseScrollDown))
-		{
-			const float Direction =
-				Params.Key == EKeys::MouseScrollUp ? 1.0f : -1.0f;
-
-			// Wheel rotates the selected building. Ctrl + wheel always zooms.
-			const bool bZoomRequested =
-				LocalBuildingGroup.Num() == 0 ||
-				IsInputKeyDown(EKeys::LeftControl) ||
-				IsInputKeyDown(EKeys::RightControl);
-			if (!bZoomRequested)
-			{
-				RotateBuildingGroup(Direction);
-			}
-			else
-			{
-				ZoomBuildingCamera(Direction);
-			}
-			return true;
-		}
-
-		if (Params.Key == EKeys::LeftMouseButton && Params.Event == IE_Pressed)
-		{
-			if (LocalBuildingGroup.Num() > 0)
-			{
-				ConfirmBuildingGroupMove();
-			}
-			else
-			{
-				TrySelectBuildingGroup();
-			}
-			return true;
-		}
-
-		if (Params.Key == EKeys::E &&
-			Params.Event == IE_Pressed &&
-			LocalBuildingGroup.Num() > 0)
-		{
-			ConfirmBuildingGroupMove();
-			return true;
-		}
-
-		if ((Params.Key == EKeys::RightMouseButton ||
-			 Params.Key == EKeys::Escape) &&
-			Params.Event == IE_Pressed &&
-			LocalBuildingGroup.Num() > 0)
-		{
-			CancelBuildingGroupMove();
-			return true;
-		}
-
-	}
-
-	if (!bBuildingTopDownViewActive &&
-		Params.Key == EKeys::LeftMouseButton)
+	if (Params.Key == EKeys::LeftMouseButton)
 	{
 		if (Params.Event == IE_Pressed &&
 			(TryStoreSelectedQuickBarItemOnAimedShelf() ||
@@ -2047,8 +1518,7 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 	{
 		return true;
 	}
-	if (!bBuildingTopDownViewActive &&
-		Params.Key == EKeys::RightMouseButton &&
+	if (Params.Key == EKeys::RightMouseButton &&
 		Params.Event == IE_Pressed &&
 		TryTogglePlantInspection())
 	{
@@ -2064,27 +1534,9 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 	return Super::InputKey(Params);
 }
 
-void ABotanicusPlayerController::ToggleBuildingTopDownView()
-{
-	if (!IsLocalPlayerController())
-	{
-		return;
-	}
-
-	if (bBuildingTopDownViewActive)
-	{
-		ExitBuildingTopDownView();
-	}
-	else
-	{
-		EnterBuildingTopDownView();
-	}
-}
-
 bool ABotanicusPlayerController::IsQuickBarInputBlocked() const
 {
-	return bBuildingTopDownViewActive ||
-		bQuickBarReorganizationMode ||
+	return bQuickBarReorganizationMode ||
 		IsValid(LocalQuickBarItemPreview) ||
 		IsValid(LocalParcelMovePreview) ||
 		IsValid(LocalMovedPlaceableItem) ||
@@ -2128,6 +1580,7 @@ bool ABotanicusPlayerController::IsFurnitureActor(
 	const AActor* Actor) const
 {
 	if (!IsValid(Actor) ||
+		Actor->IsA<ABotanicusCashRegisterActor>() ||
 		Actor->ActorHasTag(TEXT("BotanicusPlacementPreview")))
 	{
 		return false;
@@ -2334,16 +1787,13 @@ void ABotanicusPlayerController::RefreshInteractionTargetHighlight()
 	AActor* NewTarget = nullptr;
 	const bool bInteractionViewBlocked =
 		bFurnitureMoveModeActive ||
-		bBuildingTopDownViewActive ||
+
 		IsValid(LocalLargeEquipmentPlacement) ||
 		IsValid(LocalMovedPlaceableItem) ||
 		IsValid(LocalQuickBarItemPreview) ||
 		IsValid(LocalParcelMovePreview) ||
 		(DevelopmentPanelWidget &&
 		 DevelopmentPanelWidget->GetVisibility() ==
-			 ESlateVisibility::Visible) ||
-		(BuildingCatalogWidget &&
-		 BuildingCatalogWidget->GetVisibility() ==
 			 ESlateVisibility::Visible) ||
 		(OrderCatalogWidget &&
 		 OrderCatalogWidget->GetVisibility() ==
@@ -2968,152 +2418,6 @@ void ABotanicusPlayerController::RequestSetClimateDevicePower(
 	}
 }
 
-void ABotanicusPlayerController::EnterBuildingTopDownView()
-{
-	APawn* ControlledPawn = GetPawn();
-	UWorld* World = GetWorld();
-	if (!ControlledPawn || !World)
-	{
-		return;
-	}
-
-	// Older controller Blueprints may have serialized the former 5000-unit
-	// limit. Keep the expanded building overview available in those maps.
-	MaximumBuildingCameraHeight =
-		FMath::Max(MaximumBuildingCameraHeight, 25000.0f);
-	// Keep the overview/detail transition consistent even for controller
-	// Blueprints that serialized the former 15000-unit value.
-	BuildingDetailViewDistance = 10000.0f;
-
-	if (!IsValid(BuildingCameraActor))
-	{
-		FActorSpawnParameters SpawnParameters;
-		SpawnParameters.Owner = this;
-		SpawnParameters.ObjectFlags |= RF_Transient;
-
-		BuildingCameraActor = World->SpawnActor<ACameraActor>(
-			ControlledPawn->GetActorLocation(),
-			FRotator(-90.0f, 0.0f, 0.0f),
-			SpawnParameters);
-	}
-
-	if (!IsValid(BuildingCameraActor))
-	{
-		UE_LOG(LogBotanicus, Error, TEXT("Could not create the top-down building camera."));
-		return;
-	}
-
-	const FVector CameraLocation =
-		ControlledPawn->GetActorLocation() + FVector(0.0f, 0.0f, BuildingCameraHeight);
-	BuildingCameraActor->SetActorLocationAndRotation(
-		CameraLocation,
-		FRotator(-90.0f, 0.0f, 0.0f));
-	bBuildingCameraOrbitActive = false;
-	bBuildingCameraOrbitInitialized = false;
-	bBuildingCameraFreeLookActive = false;
-
-	if (UCameraComponent* Camera = BuildingCameraActor->GetCameraComponent())
-	{
-		Camera->SetProjectionMode(ECameraProjectionMode::Perspective);
-		Camera->SetFieldOfView(60.0f);
-	}
-
-	// Advance EBS from first-person to its top-down/cursor-trace state.
-	AdvanceEbsViewMode();
-	bBuildingTopDownViewActive = true;
-	TopDownRoofRefreshAccumulator = 0.0f;
-	RefreshTopDownRoofVisibility();
-	InitializeTopDownToolbarWidget();
-	if (TopDownToolbarWidget)
-	{
-		TopDownToolbarWidget->SetVisibility(ESlateVisibility::Visible);
-	}
-
-	SetIgnoreMoveInput(true);
-	SetIgnoreLookInput(true);
-	bShowMouseCursor = true;
-	bEnableClickEvents = true;
-	bEnableMouseOverEvents = true;
-
-	FInputModeGameAndUI InputMode;
-	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-	InputMode.SetHideCursorDuringCapture(false);
-	SetInputMode(InputMode);
-
-	SetViewTargetWithBlend(
-		BuildingCameraActor,
-		BuildingCameraBlendTime,
-		EViewTargetBlendFunction::VTBlend_Cubic);
-
-	UE_LOG(
-		LogBotanicus,
-		Display,
-		TEXT("Building top-down view enabled. Character movement locked; camera pan active."));
-}
-
-void ABotanicusPlayerController::ExitBuildingTopDownView()
-{
-	APawn* ControlledPawn = GetPawn();
-
-	if (bBuildingCameraOrbitActive)
-	{
-		EndBuildingCameraOrbit();
-	}
-	if (bBuildingCameraFreeLookActive)
-	{
-		EndBuildingCameraFreeLook();
-	}
-	CancelPathPlacement();
-	CancelPathDeletion();
-	CancelVisitorZonePlacement();
-	bDoorEditSelectionActive = false;
-	if (bCommunicationDoorPlacementActive)
-	{
-		ServerCancelCommunicationDoor();
-	}
-	if (TopDownToolbarWidget)
-	{
-		TopDownToolbarWidget->SetVisibility(ESlateVisibility::Collapsed);
-	}
-	if (OrderCatalogWidget)
-	{
-		OrderCatalogWidget->SetVisibility(ESlateVisibility::Collapsed);
-	}
-	if (BuildingCatalogWidget)
-	{
-		BuildingCatalogWidget->SetVisibility(ESlateVisibility::Collapsed);
-	}
-
-	if (LocalBuildingGroup.Num() > 0)
-	{
-		CancelBuildingGroupMove();
-	}
-
-	// EBS cycles top down -> third person -> first person. Advancing twice
-	// returns its internal state directly to first person.
-	AdvanceEbsViewMode();
-	AdvanceEbsViewMode();
-	bBuildingTopDownViewActive = false;
-	RestoreTopDownRoofVisibility();
-
-	SetIgnoreMoveInput(false);
-	SetIgnoreLookInput(false);
-	bShowMouseCursor = false;
-	bEnableClickEvents = false;
-	bEnableMouseOverEvents = false;
-	SetInputMode(FInputModeGameOnly());
-
-	if (ControlledPawn)
-	{
-		ForceFirstPersonView();
-	}
-
-	UE_LOG(
-		LogBotanicus,
-		Display,
-		TEXT("Building top-down view disabled. Returned directly to first person."));
-}
-
 void ABotanicusPlayerController::ForceFirstPersonView()
 {
 	ABotanicusCharacter* BotanicusCharacter =
@@ -3149,7 +2453,7 @@ void ABotanicusPlayerController::ForceFirstPersonView()
 	{
 		SetViewTargetWithBlend(
 			BotanicusCharacter,
-			BuildingCameraBlendTime,
+			ComputerCameraExitBlendTime,
 			EViewTargetBlendFunction::VTBlend_Cubic);
 
 		UE_LOG(
@@ -3251,21 +2555,11 @@ void ABotanicusPlayerController::
 			  ESlateVisibility::Visible) ||
 		 (OrderCatalogWidget &&
 		  OrderCatalogWidget->GetVisibility() ==
-			  ESlateVisibility::Visible) ||
-		 (BuildingCatalogWidget &&
-		  BuildingCatalogWidget->GetVisibility() ==
 			  ESlateVisibility::Visible)))
 	{
 		ClientMessage(
 			TEXT(
 				"Fermez le panneau ouvert avant de reorganiser la hotbar."));
-		return;
-	}
-	if (bOpening && bBuildingTopDownViewActive)
-	{
-		ClientMessage(
-			TEXT(
-				"Quittez la vue construction avant de reorganiser la hotbar."));
 		return;
 	}
 
@@ -3518,11 +2812,9 @@ void ABotanicusPlayerController::SetHudCursorMode(bool bEnabled)
 	{
 		const bool bAnotherUiOwnsInput =
 			bQuickBarReorganizationMode ||
-			bBuildingTopDownViewActive ||
+
 			(DevelopmentPanelWidget &&
 			 DevelopmentPanelWidget->GetVisibility() == ESlateVisibility::Visible) ||
-			(BuildingCatalogWidget &&
-			 BuildingCatalogWidget->GetVisibility() == ESlateVisibility::Visible) ||
 			(OrderCatalogWidget &&
 			 OrderCatalogWidget->GetVisibility() == ESlateVisibility::Visible) ||
 			(WorkbenchUpgradeWidget &&
@@ -3546,11 +2838,9 @@ void ABotanicusPlayerController::SetHudCursorMode(bool bEnabled)
 		bHudCursorModeActive = false;
 		const bool bAnotherUiOwnsInput =
 			bQuickBarReorganizationMode ||
-			bBuildingTopDownViewActive ||
+
 			(DevelopmentPanelWidget &&
 			 DevelopmentPanelWidget->GetVisibility() == ESlateVisibility::Visible) ||
-			(BuildingCatalogWidget &&
-			 BuildingCatalogWidget->GetVisibility() == ESlateVisibility::Visible) ||
 			(OrderCatalogWidget &&
 			 OrderCatalogWidget->GetVisibility() == ESlateVisibility::Visible) ||
 			(WorkbenchUpgradeWidget &&
@@ -3562,30 +2852,6 @@ void ABotanicusPlayerController::SetHudCursorMode(bool bEnabled)
 		bShowMouseCursor = false;
 		SetInputMode(FInputModeGameOnly());
 	}
-}
-
-void ABotanicusPlayerController::InitializeTopDownToolbarWidget()
-{
-	if (!IsLocalPlayerController() || TopDownToolbarWidget)
-	{
-		return;
-	}
-
-	TopDownToolbarWidget =
-		CreateWidget<UBotanicusTopDownToolbarWidget>(
-			this,
-			UBotanicusTopDownToolbarWidget::StaticClass());
-	if (!TopDownToolbarWidget)
-	{
-		UE_LOG(
-			LogBotanicus,
-			Error,
-			TEXT("Could not create the top-down planning toolbar."));
-		return;
-	}
-
-	TopDownToolbarWidget->InitializeWithController(this);
-	TopDownToolbarWidget->AddToPlayerScreen(20);
 }
 
 void ABotanicusPlayerController::InitializeOrderCatalogWidget()
@@ -3681,31 +2947,6 @@ void ABotanicusPlayerController::
 		ESlateVisibility::Collapsed);
 }
 
-void ABotanicusPlayerController::InitializeBuildingCatalogWidget()
-{
-	if (!IsLocalPlayerController() || BuildingCatalogWidget)
-	{
-		return;
-	}
-
-	BuildingCatalogWidget =
-		CreateWidget<UBotanicusBuildingCatalogWidget>(
-			this,
-			UBotanicusBuildingCatalogWidget::StaticClass());
-	if (!BuildingCatalogWidget)
-	{
-		UE_LOG(
-			LogBotanicus,
-			Error,
-			TEXT("Could not create the building catalogue screen."));
-		return;
-	}
-
-	BuildingCatalogWidget->InitializeWithController(this);
-	BuildingCatalogWidget->AddToPlayerScreen(30);
-	BuildingCatalogWidget->SetVisibility(ESlateVisibility::Collapsed);
-}
-
 void ABotanicusPlayerController::HideEbsDemoHud()
 {
 	if (bEbsDemoHudHidden)
@@ -3738,7 +2979,7 @@ void ABotanicusPlayerController::HideEbsDemoHud()
 
 void ABotanicusPlayerController::HideLegacyWorldGuidance()
 {
-	if (!GetWorld() || bBuildingTopDownViewActive)
+	if (!GetWorld())
 	{
 		return;
 	}
@@ -3753,384 +2994,6 @@ void ABotanicusPlayerController::HideLegacyWorldGuidance()
 				TextComponent->SetVisibility(false, true);
 			}
 		}
-	}
-}
-
-void ABotanicusPlayerController::RefreshTopDownRoofVisibility()
-{
-	if (!IsLocalPlayerController() || !bBuildingTopDownViewActive)
-	{
-		return;
-	}
-
-	const bool bShowBuildingOverview =
-		GetTopDownBuildingViewDistance() >=
-			BuildingDetailViewDistance;
-	RefreshTopDownBuildingLabels(bShowBuildingOverview);
-	if (bShowBuildingOverview)
-	{
-		// At long range, complete silhouettes make buildings easier to read.
-		for (const TWeakObjectPtr<UPrimitiveComponent>& Component :
-			 TopDownHiddenRoofComponents)
-		{
-			if (Component.IsValid())
-			{
-				Component->SetVisibility(true, false);
-			}
-		}
-		TopDownHiddenRoofComponents.Reset();
-		return;
-	}
-
-	for (auto ComponentIt = TopDownHiddenRoofComponents.CreateIterator();
-		 ComponentIt;
-		 ++ComponentIt)
-	{
-		if (!ComponentIt->IsValid())
-		{
-			ComponentIt.RemoveCurrent();
-		}
-	}
-
-	for (TActorIterator<AActor> ActorIt(GetWorld()); ActorIt; ++ActorIt)
-	{
-		AActor* Actor = *ActorIt;
-		if (!IsEbsBuildingActor(Actor))
-		{
-			continue;
-		}
-
-		const bool bRoofActor =
-			Actor->GetClass()->GetName().Contains(
-				TEXT("Roof"),
-				ESearchCase::IgnoreCase);
-		TInlineComponentArray<UPrimitiveComponent*> RoofComponents(Actor);
-		for (UPrimitiveComponent* RoofComponent : RoofComponents)
-		{
-			if (!IsValid(RoofComponent))
-			{
-				continue;
-			}
-			const bool bRoofComponent =
-				bRoofActor ||
-				RoofComponent->GetName().Contains(
-					TEXT("Roof"),
-					ESearchCase::IgnoreCase);
-			if (!bRoofComponent ||
-				TopDownHiddenRoofComponents.Contains(RoofComponent) ||
-				!RoofComponent->IsVisible())
-			{
-				continue;
-			}
-
-			// Component visibility is local and is not part of the saved or
-			// replicated actor state. First-person players therefore keep
-			// their roofs while this client gets an open-building view.
-			RoofComponent->SetVisibility(false, false);
-			TopDownHiddenRoofComponents.Add(RoofComponent);
-		}
-	}
-}
-
-void ABotanicusPlayerController::RestoreTopDownRoofVisibility()
-{
-	for (const TWeakObjectPtr<UPrimitiveComponent>& Component :
-		 TopDownHiddenRoofComponents)
-	{
-		if (Component.IsValid())
-		{
-			Component->SetVisibility(true, false);
-		}
-	}
-	TopDownHiddenRoofComponents.Reset();
-	HideTopDownBuildingLabels();
-	TopDownRoofRefreshAccumulator = 0.0f;
-}
-
-void ABotanicusPlayerController::RefreshTopDownBuildingLabels(
-	bool bShowLabels)
-{
-	for (auto It = TopDownBuildingLabels.CreateIterator(); It; ++It)
-	{
-		if (!It.Key().IsValid() || !It.Value().IsValid())
-		{
-			It.RemoveCurrent();
-			continue;
-		}
-		It.Value()->SetVisibility(bShowLabels);
-	}
-	if (!bShowLabels || !IsValid(BuildingCameraActor))
-	{
-		return;
-	}
-
-	for (TActorIterator<ABotanicusCatalogBuildingActor> It(GetWorld());
-		 It;
-		 ++It)
-	{
-		ABotanicusCatalogBuildingActor* Building = *It;
-		if (!IsValid(Building))
-		{
-			continue;
-		}
-
-		UTextRenderComponent* Label = nullptr;
-		if (const TWeakObjectPtr<UTextRenderComponent>* Found =
-			TopDownBuildingLabels.Find(Building))
-		{
-			Label = Found->Get();
-		}
-		if (!IsValid(Label))
-		{
-			Label = NewObject<UTextRenderComponent>(
-				Building,
-				MakeUniqueObjectName(
-					Building,
-					UTextRenderComponent::StaticClass(),
-					TEXT("BotanicusTopDownBuildingLabel")));
-			if (!Label)
-			{
-				continue;
-			}
-			Label->RegisterComponent();
-			Label->AttachToComponent(
-				Building->GetRootComponent(),
-				FAttachmentTransformRules::KeepWorldTransform);
-			Label->SetMobility(EComponentMobility::Movable);
-			Label->SetUsingAbsoluteRotation(true);
-			Label->SetHorizontalAlignment(EHTA_Center);
-			Label->SetVerticalAlignment(EVRTA_TextCenter);
-			Label->SetWorldSize(180.0f);
-			Label->SetTextRenderColor(FColor(255, 225, 80));
-			Label->SetCollisionEnabled(
-				ECollisionEnabled::NoCollision);
-			Label->SetIsReplicated(false);
-			Label->SetText(ResolveTopDownBuildingName(Building));
-			TopDownBuildingLabels.Add(Building, Label);
-		}
-
-		FBox BuildingBounds(EForceInit::ForceInit);
-		TInlineComponentArray<UPrimitiveComponent*> Components(Building);
-		for (UPrimitiveComponent* Component : Components)
-		{
-			if (IsValid(Component) &&
-				Component != Label &&
-				!Component->IsA<UTextRenderComponent>())
-			{
-				BuildingBounds += Component->Bounds.GetBox();
-			}
-		}
-		const FVector BoundsOrigin =
-			BuildingBounds.IsValid
-				? BuildingBounds.GetCenter()
-				: Building->GetActorLocation();
-		const FVector BoundsExtent =
-			BuildingBounds.IsValid
-				? BuildingBounds.GetExtent()
-				: FVector(0.0f, 0.0f, 300.0f);
-		const FVector LabelLocation =
-			BoundsOrigin +
-			FVector(
-				0.0f,
-				0.0f,
-				BoundsExtent.Z + 350.0f);
-		Label->SetWorldLocation(LabelLocation);
-		Label->SetUsingAbsoluteRotation(true);
-		const FVector FacingCamera =
-			-BuildingCameraActor->GetActorForwardVector();
-		const FVector CameraRight =
-			BuildingCameraActor->GetActorRightVector();
-		Label->SetWorldRotation(
-			FRotationMatrix::MakeFromXY(
-				FacingCamera,
-				-CameraRight).Rotator());
-		Label->SetVisibility(true);
-	}
-}
-
-void ABotanicusPlayerController::HideTopDownBuildingLabels()
-{
-	for (const TPair<
-			 TWeakObjectPtr<AActor>,
-			 TWeakObjectPtr<UTextRenderComponent>>& Pair :
-		 TopDownBuildingLabels)
-	{
-		if (Pair.Value.IsValid())
-		{
-			Pair.Value->SetVisibility(false);
-		}
-	}
-}
-
-float ABotanicusPlayerController::
-	GetTopDownBuildingViewDistance() const
-{
-	if (!IsValid(BuildingCameraActor))
-	{
-		return 0.0f;
-	}
-	if (LocalBuildingGroup.Num() > 0 &&
-		bBuildingCameraOrbitInitialized)
-	{
-		return BuildingCameraOrbitDistance;
-	}
-
-	const FVector CameraLocation =
-		BuildingCameraActor->GetActorLocation();
-	float GroundHeight = 0.0f;
-	if (!FindLandscapeHeight(
-			FVector2D(CameraLocation.X, CameraLocation.Y),
-			GroundHeight))
-	{
-		if (const APawn* ControlledPawn = GetPawn())
-		{
-			GroundHeight = ControlledPawn->GetActorLocation().Z;
-		}
-	}
-	return FMath::Abs(CameraLocation.Z - GroundHeight);
-}
-
-FText ABotanicusPlayerController::ResolveTopDownBuildingName(
-	AActor* BuildingActor) const
-{
-	const UGameInstance* GameInstance = GetGameInstance();
-	const UBotanicusBuildingCatalogSubsystem* Catalog =
-		GameInstance
-			? GameInstance->GetSubsystem<
-				UBotanicusBuildingCatalogSubsystem>()
-			: nullptr;
-	if (Catalog && IsValid(BuildingActor))
-	{
-		for (const FBotanicusBuildingDefinition& Definition :
-			 Catalog->GetAllBuildings())
-		{
-			UClass* BuildingClass =
-				Definition.FallbackPrefabClass.LoadSynchronous();
-			if (BuildingClass &&
-				BuildingActor->IsA(BuildingClass))
-			{
-				return Definition.DisplayName;
-			}
-		}
-	}
-	return IsValid(BuildingActor)
-		? FText::FromString(BuildingActor->GetClass()->GetName().Replace(
-			TEXT("_C"), TEXT("")))
-		: FText::GetEmpty();
-}
-
-void ABotanicusPlayerController::AdvanceEbsViewMode()
-{
-	UFunction* ChangeViewModeFunction = FindFunction(TEXT("ChangeViewMode"));
-	if (!ChangeViewModeFunction)
-	{
-		UE_LOG(
-			LogBotanicus,
-			Warning,
-			TEXT("EBS ChangeViewMode function was not found on %s."),
-			*GetClass()->GetName());
-		return;
-	}
-
-	TArray<uint8, TInlineAllocator<64>> Parameters;
-	Parameters.SetNumZeroed(ChangeViewModeFunction->ParmsSize);
-	ProcessEvent(
-		ChangeViewModeFunction,
-		Parameters.Num() > 0 ? Parameters.GetData() : nullptr);
-}
-
-void ABotanicusPlayerController::MoveBuildingCameraForward(float AxisValue)
-{
-	if (!bBuildingTopDownViewActive ||
-		!IsValid(BuildingCameraActor) ||
-		bBuildingCameraOrbitActive ||
-		FMath::IsNearlyZero(AxisValue))
-	{
-		return;
-	}
-
-	const float DeltaSeconds = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.0f;
-	FVector CameraForward =
-		BuildingCameraActor->GetActorForwardVector();
-	CameraForward.Z = 0.0f;
-	if (!CameraForward.Normalize())
-	{
-		// The initial view looks straight down, so its projected forward
-		// vector has no length. Preserve the historical world-forward axis.
-		CameraForward = FVector::ForwardVector;
-	}
-	BuildingCameraActor->AddActorWorldOffset(
-		CameraForward *
-			(AxisValue * BuildingCameraPanSpeed * DeltaSeconds));
-}
-
-void ABotanicusPlayerController::MoveBuildingCameraRight(float AxisValue)
-{
-	if (!bBuildingTopDownViewActive ||
-		!IsValid(BuildingCameraActor) ||
-		bBuildingCameraOrbitActive ||
-		FMath::IsNearlyZero(AxisValue))
-	{
-		return;
-	}
-
-	const float DeltaSeconds = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.0f;
-	FVector CameraRight =
-		BuildingCameraActor->GetActorRightVector();
-	CameraRight.Z = 0.0f;
-	if (!CameraRight.Normalize())
-	{
-		CameraRight = FVector::RightVector;
-	}
-	BuildingCameraActor->AddActorWorldOffset(
-		CameraRight *
-			(AxisValue * BuildingCameraPanSpeed * DeltaSeconds));
-}
-
-void ABotanicusPlayerController::ZoomBuildingCamera(float Direction)
-{
-	if (!bBuildingTopDownViewActive ||
-		!IsValid(BuildingCameraActor) ||
-		FMath::IsNearlyZero(Direction))
-	{
-		return;
-	}
-
-	FVector CameraLocation = BuildingCameraActor->GetActorLocation();
-	float GroundHeight = 0.0f;
-	if (!FindLandscapeHeight(
-		FVector2D(CameraLocation.X, CameraLocation.Y),
-		GroundHeight))
-	{
-		if (const APawn* ControlledPawn = GetPawn())
-		{
-			GroundHeight = ControlledPawn->GetActorLocation().Z;
-		}
-	}
-
-	const float MinimumHeight =
-		FMath::Min(MinimumBuildingCameraHeight, MaximumBuildingCameraHeight);
-	const float MaximumHeight =
-		FMath::Max(MinimumBuildingCameraHeight, MaximumBuildingCameraHeight);
-	const float CurrentHeight = CameraLocation.Z - GroundHeight;
-	const float NewHeight = FMath::Clamp(
-		CurrentHeight - Direction * BuildingCameraZoomStep,
-		MinimumHeight,
-		MaximumHeight);
-
-	CameraLocation.Z = GroundHeight + NewHeight;
-	BuildingCameraActor->SetActorLocation(CameraLocation);
-
-	// Zoom always changes height only. When a building is selected, rebuild
-	// the orbit parameters from this unchanged X/Y position so a later orbit
-	// gesture starts smoothly without pulling the camera toward the building.
-	if (LocalBuildingGroup.Num() > 0)
-	{
-		InitializeBuildingCameraOrbitFromCurrentView();
-	}
-	else
-	{
-		bBuildingCameraOrbitInitialized = false;
 	}
 }
 
@@ -4159,560 +3022,6 @@ void ABotanicusPlayerController::InitializeBotanistNotebookWidget()
 	BotanistNotebookWidget->SetVisibility(ESlateVisibility::Collapsed);
 }
 
-void ABotanicusPlayerController::BeginBuildingCameraOrbit()
-{
-	if (!bBuildingTopDownViewActive ||
-		LocalBuildingGroup.Num() == 0 ||
-		!IsValid(BuildingCameraActor) ||
-		bBuildingCameraOrbitActive)
-	{
-		return;
-	}
-
-	GetMousePosition(
-		BuildingOrbitSavedMouseX,
-		BuildingOrbitSavedMouseY);
-	InitializeBuildingCameraOrbitFromCurrentView();
-	bBuildingCameraOrbitActive = true;
-	bShowMouseCursor = false;
-	bEnableClickEvents = false;
-	bEnableMouseOverEvents = false;
-	SetInputMode(FInputModeGameOnly());
-}
-
-void ABotanicusPlayerController::EndBuildingCameraOrbit()
-{
-	if (!bBuildingCameraOrbitActive)
-	{
-		return;
-	}
-
-	bBuildingCameraOrbitActive = false;
-	bShowMouseCursor = true;
-	bEnableClickEvents = true;
-	bEnableMouseOverEvents = true;
-	FInputModeGameAndUI InputMode;
-	InputMode.SetLockMouseToViewportBehavior(
-		EMouseLockMode::DoNotLock);
-	InputMode.SetHideCursorDuringCapture(false);
-	SetInputMode(InputMode);
-	SetMouseLocation(
-		FMath::RoundToInt(BuildingOrbitSavedMouseX),
-		FMath::RoundToInt(BuildingOrbitSavedMouseY));
-}
-
-void ABotanicusPlayerController::UpdateBuildingCameraOrbit()
-{
-	if (!bBuildingCameraOrbitActive ||
-		!IsValid(BuildingCameraActor) ||
-		LocalBuildingGroup.Num() == 0)
-	{
-		return;
-	}
-
-	float MouseDeltaX = 0.0f;
-	float MouseDeltaY = 0.0f;
-	GetInputMouseDelta(MouseDeltaX, MouseDeltaY);
-	if (FMath::IsNearlyZero(MouseDeltaX) &&
-		FMath::IsNearlyZero(MouseDeltaY))
-	{
-		return;
-	}
-
-	BuildingCameraOrbitYaw =
-		FMath::UnwindDegrees(
-			BuildingCameraOrbitYaw +
-				MouseDeltaX * BuildingCameraOrbitSensitivity);
-	BuildingCameraOrbitPitch = FMath::Clamp(
-		BuildingCameraOrbitPitch +
-			MouseDeltaY * BuildingCameraOrbitSensitivity,
-		MinimumBuildingCameraOrbitPitch,
-		MaximumBuildingCameraOrbitPitch);
-	ApplyBuildingCameraOrbit();
-}
-
-void ABotanicusPlayerController::
-	InitializeBuildingCameraOrbitFromCurrentView()
-{
-	if (!IsValid(BuildingCameraActor) ||
-		LocalBuildingGroup.Num() == 0)
-	{
-		return;
-	}
-
-	FVector Offset =
-		BuildingCameraActor->GetActorLocation() -
-		LocalBuildingPivot;
-	const float MinimumDistance =
-		FMath::Min(
-			MinimumBuildingCameraHeight,
-			MaximumBuildingCameraHeight);
-	BuildingCameraOrbitDistance =
-		FMath::Max(MinimumDistance, Offset.Size());
-	if (Offset.IsNearlyZero())
-	{
-		Offset = FVector(0.0f, 0.0f, BuildingCameraOrbitDistance);
-	}
-	BuildingCameraOrbitYaw =
-		FMath::RadiansToDegrees(
-			FMath::Atan2(Offset.Y, Offset.X));
-	BuildingCameraOrbitPitch = FMath::Clamp(
-		FMath::RadiansToDegrees(
-			FMath::Asin(
-				FMath::Clamp(
-					Offset.Z / BuildingCameraOrbitDistance,
-					-1.0f,
-					1.0f))),
-		MinimumBuildingCameraOrbitPitch,
-		MaximumBuildingCameraOrbitPitch);
-	bBuildingCameraOrbitInitialized = true;
-}
-
-void ABotanicusPlayerController::ApplyBuildingCameraOrbit()
-{
-	if (!bBuildingCameraOrbitInitialized ||
-		!IsValid(BuildingCameraActor) ||
-		LocalBuildingGroup.Num() == 0)
-	{
-		return;
-	}
-
-	const float YawRadians =
-		FMath::DegreesToRadians(BuildingCameraOrbitYaw);
-	const float PitchRadians =
-		FMath::DegreesToRadians(BuildingCameraOrbitPitch);
-	const float HorizontalDistance =
-		BuildingCameraOrbitDistance * FMath::Cos(PitchRadians);
-	const FVector Offset(
-		HorizontalDistance * FMath::Cos(YawRadians),
-		HorizontalDistance * FMath::Sin(YawRadians),
-		BuildingCameraOrbitDistance * FMath::Sin(PitchRadians));
-	const FVector CameraLocation =
-		LocalBuildingPivot + Offset;
-	BuildingCameraActor->SetActorLocationAndRotation(
-		CameraLocation,
-		(LocalBuildingPivot - CameraLocation).Rotation());
-}
-
-void ABotanicusPlayerController::BeginBuildingCameraFreeLook()
-{
-	if (!bBuildingTopDownViewActive ||
-		LocalBuildingGroup.Num() > 0 ||
-		!IsValid(BuildingCameraActor) ||
-		bBuildingCameraFreeLookActive)
-	{
-		return;
-	}
-
-	GetMousePosition(
-		BuildingOrbitSavedMouseX,
-		BuildingOrbitSavedMouseY);
-	bBuildingCameraFreeLookActive = true;
-	bShowMouseCursor = false;
-	bEnableClickEvents = false;
-	bEnableMouseOverEvents = false;
-	SetInputMode(FInputModeGameOnly());
-}
-
-void ABotanicusPlayerController::EndBuildingCameraFreeLook()
-{
-	if (!bBuildingCameraFreeLookActive)
-	{
-		return;
-	}
-
-	bBuildingCameraFreeLookActive = false;
-	bShowMouseCursor = true;
-	bEnableClickEvents = true;
-	bEnableMouseOverEvents = true;
-	FInputModeGameAndUI InputMode;
-	InputMode.SetLockMouseToViewportBehavior(
-		EMouseLockMode::DoNotLock);
-	InputMode.SetHideCursorDuringCapture(false);
-	SetInputMode(InputMode);
-	SetMouseLocation(
-		FMath::RoundToInt(BuildingOrbitSavedMouseX),
-		FMath::RoundToInt(BuildingOrbitSavedMouseY));
-}
-
-void ABotanicusPlayerController::UpdateBuildingCameraFreeLook()
-{
-	if (!bBuildingCameraFreeLookActive ||
-		!IsValid(BuildingCameraActor) ||
-		LocalBuildingGroup.Num() > 0)
-	{
-		return;
-	}
-
-	float MouseDeltaX = 0.0f;
-	float MouseDeltaY = 0.0f;
-	GetInputMouseDelta(MouseDeltaX, MouseDeltaY);
-	if (FMath::IsNearlyZero(MouseDeltaX) &&
-		FMath::IsNearlyZero(MouseDeltaY))
-	{
-		return;
-	}
-
-	FRotator CameraRotation =
-		BuildingCameraActor->GetActorRotation();
-	CameraRotation.Yaw = FMath::UnwindDegrees(
-		CameraRotation.Yaw +
-			MouseDeltaX * BuildingCameraOrbitSensitivity);
-	CameraRotation.Pitch = FMath::Clamp(
-		CameraRotation.Pitch +
-			MouseDeltaY * BuildingCameraOrbitSensitivity,
-		MinimumBuildingCameraFreeLookPitch,
-		MaximumBuildingCameraFreeLookPitch);
-	CameraRotation.Roll = 0.0f;
-	BuildingCameraActor->SetActorRotation(CameraRotation);
-}
-
-void ABotanicusPlayerController::BeginPathPlacement()
-{
-	BeginPathPlacementInternal(EBotanicusPathType::Standard);
-}
-
-void ABotanicusPlayerController::BeginDoorEditing()
-{
-	if (!bBuildingTopDownViewActive ||
-		!IsLocalPlayerController())
-	{
-		return;
-	}
-	if (bDoorEditSelectionActive ||
-		bCommunicationDoorPlacementActive)
-	{
-		CancelDoorEditing();
-		return;
-	}
-
-	CancelPathPlacement();
-	CancelPathDeletion();
-	CancelVisitorZonePlacement();
-	if (LocalBuildingGroup.Num() > 0)
-	{
-		CancelBuildingGroupMove();
-	}
-	bDoorEditSelectionActive = true;
-	RefreshTopDownToolbar();
-	ClientMessage(
-		TEXT("PORTES : cliquez sur un bâtiment pour ajouter une porte, ou sur une porte existante pour la déplacer."));
-}
-
-void ABotanicusPlayerController::CancelDoorEditing()
-{
-	bDoorEditSelectionActive = false;
-	if (bCommunicationDoorPlacementActive)
-	{
-		ServerCancelCommunicationDoor();
-	}
-	RefreshTopDownToolbar();
-}
-
-void ABotanicusPlayerController::BeginVisitorRoutePlacement()
-{
-	BeginPathPlacementInternal(EBotanicusPathType::VisitorRoute);
-}
-
-void ABotanicusPlayerController::BeginPathPlacementInternal(
-	EBotanicusPathType PathType)
-{
-	if (!bBuildingTopDownViewActive || !IsLocalPlayerController())
-	{
-		return;
-	}
-
-	CancelPathDeletion();
-	CancelVisitorZonePlacement();
-	CancelDoorEditing();
-	if (LocalBuildingGroup.Num() > 0)
-	{
-		CancelBuildingGroupMove();
-	}
-
-	if (bPathPlacementActive)
-	{
-		PendingPathPoints.Reset();
-	}
-	bPathPlacementActive = true;
-	bPathStrokeActive = false;
-	PendingPathType = PathType;
-
-	if (!IsValid(PathPreviewActor))
-	{
-		FActorSpawnParameters SpawnParameters;
-		SpawnParameters.Owner = this;
-		SpawnParameters.ObjectFlags |= RF_Transient;
-		PathPreviewActor = GetWorld()->SpawnActor<ABotanicusPathActor>(
-			FVector::ZeroVector,
-			FRotator::ZeroRotator,
-			SpawnParameters);
-		if (PathPreviewActor)
-		{
-			PathPreviewActor->SetReplicates(false);
-		}
-	}
-
-	if (PathPreviewActor)
-	{
-		PathPreviewActor->SetPreviewPath(
-			PendingPathPoints,
-			PendingPathType);
-	}
-	RefreshTopDownToolbar();
-}
-
-void ABotanicusPlayerController::ConfirmPathPlacement()
-{
-	if (!bPathPlacementActive || PendingPathPoints.Num() < 2)
-	{
-		return;
-	}
-
-	TArray<FVector_NetQuantize10> RequestedPoints;
-	RequestedPoints.Reserve(PendingPathPoints.Num());
-	for (const FVector& Point : PendingPathPoints)
-	{
-		RequestedPoints.Add(FVector_NetQuantize10(Point));
-	}
-
-	ServerCreatePath(
-		RequestedPoints,
-		static_cast<uint8>(PendingPathType));
-	CancelPathPlacement();
-}
-
-void ABotanicusPlayerController::CancelPathPlacement()
-{
-	bPathPlacementActive = false;
-	bPathStrokeActive = false;
-	PendingPathType = EBotanicusPathType::Standard;
-	PendingPathPoints.Reset();
-	if (IsValid(PathPreviewActor))
-	{
-		PathPreviewActor->Destroy();
-		PathPreviewActor = nullptr;
-	}
-	RefreshTopDownToolbar();
-}
-
-void ABotanicusPlayerController::BeginVisitorParkingPlacement()
-{
-	BeginVisitorZonePlacement(
-		static_cast<int32>(
-			EBotanicusVisitorZoneType::Parking));
-}
-
-void ABotanicusPlayerController::BeginVisitorSalesAreaPlacement()
-{
-	BeginVisitorZonePlacement(
-		static_cast<int32>(
-			EBotanicusVisitorZoneType::SalesArea));
-}
-
-void ABotanicusPlayerController::BeginVisitorCheckoutPlacement()
-{
-	BeginVisitorZonePlacement(
-		static_cast<int32>(
-			EBotanicusVisitorZoneType::Checkout));
-}
-
-void ABotanicusPlayerController::BeginRefundZonePlacement()
-{
-	BeginVisitorZonePlacement(3);
-}
-
-void ABotanicusPlayerController::BeginDeliveryZonePlacement()
-{
-	BeginVisitorZonePlacement(4);
-}
-
-void ABotanicusPlayerController::BeginVisitorZonePlacement(
-	int32 ZoneType)
-{
-	if (!bBuildingTopDownViewActive ||
-		!IsLocalPlayerController() ||
-		ZoneType < 0 ||
-		ZoneType > 4)
-	{
-		return;
-	}
-
-	CancelPathPlacement();
-	CancelPathDeletion();
-	CancelDoorEditing();
-	PendingVisitorZoneType = ZoneType;
-	RefreshTopDownToolbar();
-	if (ZoneType == 3)
-	{
-		ClientMessage(
-			TEXT(
-				"Placement remboursement : cliquez sur un sol, clic droit pour annuler."));
-	}
-	else if (ZoneType == 4)
-	{
-		ClientMessage(
-			TEXT(
-				"Placement livraison : cliquez sur un sol, clic droit pour annuler."));
-	}
-	else
-	{
-		ClientMessage(
-			TEXT(
-				"Placement zone PNJ : cliquez sur un sol, clic droit pour annuler."));
-	}
-}
-
-void ABotanicusPlayerController::CancelVisitorZonePlacement()
-{
-	if (PendingVisitorZoneType == INDEX_NONE)
-	{
-		return;
-	}
-	PendingVisitorZoneType = INDEX_NONE;
-	RefreshTopDownToolbar();
-}
-
-void ABotanicusPlayerController::PlaceVisitorZoneAtCursor()
-{
-	if (PendingVisitorZoneType == INDEX_NONE)
-	{
-		return;
-	}
-
-	FHitResult CursorHit;
-	if (!TraceTopDownCursor(CursorHit))
-	{
-		return;
-	}
-
-	const FVector_NetQuantize10 RequestedLocation(
-		CursorHit.ImpactPoint);
-	if (PendingVisitorZoneType == 3)
-	{
-		ServerCreateRefundZone(RequestedLocation);
-	}
-	else if (PendingVisitorZoneType == 4)
-	{
-		ServerCreateDeliveryZone(RequestedLocation);
-	}
-	else
-	{
-		ServerCreateVisitorZone(
-			RequestedLocation,
-			static_cast<uint8>(PendingVisitorZoneType));
-	}
-	CancelVisitorZonePlacement();
-}
-
-void ABotanicusPlayerController::BeginPathDeletion()
-{
-	if (!bBuildingTopDownViewActive || !IsLocalPlayerController())
-	{
-		return;
-	}
-	CancelDoorEditing();
-
-	if (bPathDeletionActive)
-	{
-		CancelPathDeletion();
-		return;
-	}
-
-	CancelPathPlacement();
-	if (LocalBuildingGroup.Num() > 0)
-	{
-		CancelBuildingGroupMove();
-	}
-	bPathDeletionActive = true;
-	RefreshTopDownToolbar();
-	ClientMessage(
-		TEXT("Suppression de route : cliquez sur la portion a retirer."));
-}
-
-void ABotanicusPlayerController::CancelPathDeletion()
-{
-	if (!bPathDeletionActive)
-	{
-		return;
-	}
-
-	bPathDeletionActive = false;
-	RefreshTopDownToolbar();
-}
-
-void ABotanicusPlayerController::ToggleBuildingCatalog()
-{
-	if (!bBuildingTopDownViewActive || !IsLocalPlayerController())
-	{
-		return;
-	}
-
-	InitializeOrderCatalogWidget();
-	if (!OrderCatalogWidget)
-	{
-		return;
-	}
-	OrderCatalogWidget->ShowBuildingTab();
-	OrderCatalogWidget->SetVisibility(ESlateVisibility::Visible);
-	if (BuildingCatalogWidget)
-	{
-		BuildingCatalogWidget->SetVisibility(ESlateVisibility::Collapsed);
-	}
-	bAzertyForwardPressed = false;
-	bAzertyBackwardPressed = false;
-	bAzertyLeftPressed = false;
-	bAzertyRightPressed = false;
-	OrderCatalogWidget->Refresh();
-}
-
-void ABotanicusPlayerController::PurchaseCatalogBuilding(
-	FName BuildingKey)
-{
-	if (!IsLocalPlayerController() ||
-		BuildingKey.IsNone())
-	{
-		return;
-	}
-	if (!bBuildingTopDownViewActive &&
-		bOrderCatalogOpenedFromComputer)
-	{
-		ToggleOrderCatalog();
-		EnterBuildingTopDownView();
-	}
-	if (!bBuildingTopDownViewActive)
-	{
-		return;
-	}
-	if (bCommunicationDoorPlacementActive)
-	{
-		ClientMessage(
-			TEXT("Terminez d'abord le placement de la porte de communication."));
-		return;
-	}
-
-	CancelPathPlacement();
-	CancelPathDeletion();
-	if (LocalBuildingGroup.Num() > 0)
-	{
-		CancelBuildingGroupMove();
-	}
-	if (BuildingCatalogWidget)
-	{
-		BuildingCatalogWidget->SetVisibility(ESlateVisibility::Collapsed);
-	}
-	if (OrderCatalogWidget)
-	{
-		OrderCatalogWidget->SetVisibility(ESlateVisibility::Collapsed);
-	}
-	UE_LOG(
-		LogBotanicus,
-		Display,
-		TEXT("Client requested building purchase %s."),
-		*BuildingKey.ToString());
-	ServerPurchaseCatalogBuilding(BuildingKey);
-}
-
 void ABotanicusPlayerController::ToggleOrderCatalog()
 {
 	if (!IsLocalPlayerController())
@@ -4734,20 +3043,12 @@ void ABotanicusPlayerController::ToggleOrderCatalog()
 		CloseOrderCatalogFromComputer();
 		return;
 	}
-	if (bOpening && !bBuildingTopDownViewActive)
-	{
-		return;
-	}
 	OrderCatalogWidget->SetVisibility(
 		bOpening
 			? ESlateVisibility::Visible
 			: ESlateVisibility::Collapsed);
 	if (bOpening)
 	{
-		if (BuildingCatalogWidget)
-		{
-			BuildingCatalogWidget->SetVisibility(ESlateVisibility::Collapsed);
-		}
 		bAzertyForwardPressed = false;
 		bAzertyBackwardPressed = false;
 		bAzertyLeftPressed = false;
@@ -4782,11 +3083,6 @@ void ABotanicusPlayerController::ToggleDevelopmentPanel()
 			OrderCatalogWidget->SetVisibility(
 				ESlateVisibility::Collapsed);
 		}
-		if (BuildingCatalogWidget)
-		{
-			BuildingCatalogWidget->SetVisibility(
-				ESlateVisibility::Collapsed);
-		}
 		bOrderCatalogOpenedFromComputer = false;
 		bAzertyForwardPressed = false;
 		bAzertyBackwardPressed = false;
@@ -4801,15 +3097,6 @@ void ABotanicusPlayerController::ToggleDevelopmentPanel()
 			DevelopmentPanelWidget->TakeWidget());
 		SetInputMode(InputMode);
 		DevelopmentPanelWidget->SetKeyboardFocus();
-	}
-	else if (bBuildingTopDownViewActive)
-	{
-		bShowMouseCursor = true;
-		FInputModeGameAndUI InputMode;
-		InputMode.SetHideCursorDuringCapture(false);
-		InputMode.SetLockMouseToViewportBehavior(
-			EMouseLockMode::DoNotLock);
-		SetInputMode(InputMode);
 	}
 	else
 	{
@@ -4835,11 +3122,6 @@ ClientOpenOrderCatalogFromComputer_Implementation(
 	bOrderCatalogOpenedFromComputer = true;
 	ActiveComputerView = Computer;
 	OrderCatalogWidget->SetVisibility(ESlateVisibility::Collapsed);
-	if (BuildingCatalogWidget)
-	{
-		BuildingCatalogWidget->SetVisibility(
-			ESlateVisibility::Collapsed);
-	}
 	bAzertyForwardPressed = false;
 	bAzertyBackwardPressed = false;
 	bAzertyLeftPressed = false;
@@ -4910,14 +3192,6 @@ void ABotanicusPlayerController::ToggleBotanistNotebook()
 		SetInputMode(InputMode);
 		BotanistNotebookWidget->SetKeyboardFocus();
 	}
-	else if (bBuildingTopDownViewActive)
-	{
-		bShowMouseCursor = true;
-		FInputModeGameAndUI InputMode;
-		InputMode.SetHideCursorDuringCapture(false);
-		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-		SetInputMode(InputMode);
-	}
 	else
 	{
 		bShowMouseCursor = false;
@@ -4980,16 +3254,8 @@ void ABotanicusPlayerController::CloseOrderCatalogFromComputer()
 void ABotanicusPlayerController::FinishCloseOrderCatalogFromComputer()
 {
 	ActiveComputerView.Reset();
-	// Opening the computer catalog adds its own move/look input lock before the
-	// top-down view adds another one. Always release the computer lock, including
-	// when a purchase transitioned directly to top-down; otherwise leaving
-	// top-down only removes one lock and the character remains unable to walk.
 	SetIgnoreMoveInput(false);
 	SetIgnoreLookInput(false);
-	if (bBuildingTopDownViewActive)
-	{
-		return;
-	}
 	bShowMouseCursor = false;
 	SetInputMode(FInputModeGameOnly());
 }
@@ -5012,11 +3278,6 @@ void ABotanicusPlayerController::
 	if (OrderCatalogWidget)
 	{
 		OrderCatalogWidget->SetVisibility(
-			ESlateVisibility::Collapsed);
-	}
-	if (BuildingCatalogWidget)
-	{
-		BuildingCatalogWidget->SetVisibility(
 			ESlateVisibility::Collapsed);
 	}
 	if (DevelopmentPanelWidget)
@@ -5079,8 +3340,7 @@ RequestPreparationWorkbenchLevel(
 void ABotanicusPlayerController::PlaceCatalogOrder(FName ItemKey)
 {
 	if (IsLocalPlayerController() &&
-		(bBuildingTopDownViewActive ||
-		 bOrderCatalogOpenedFromComputer) &&
+		( bOrderCatalogOpenedFromComputer) &&
 		!ItemKey.IsNone())
 	{
 		ServerPlaceCatalogOrder(ItemKey);
@@ -5290,8 +3550,7 @@ bool ABotanicusPlayerController::CanUpgradeMainShop() const
 
 void ABotanicusPlayerController::UpgradeMainShop()
 {
-	if (IsLocalPlayerController() &&
-		bBuildingTopDownViewActive)
+	if (IsLocalPlayerController())
 	{
 		ServerUpgradeMainShop();
 	}
@@ -5358,10 +3617,6 @@ void ABotanicusPlayerController::RefreshOrderCatalog()
 void ABotanicusPlayerController::OnRep_OrderState()
 {
 	RefreshOrderCatalog();
-	if (BuildingCatalogWidget)
-	{
-		BuildingCatalogWidget->Refresh();
-	}
 }
 
 void ABotanicusPlayerController::RestoreCatalogOrderState(
@@ -5473,24 +3728,6 @@ void ABotanicusPlayerController::CreditPlantSale(
 	{
 		GameMode->ScheduleInventoryAutosave();
 	}
-}
-
-void ABotanicusPlayerController::CancelPendingBuildingPurchaseForLogout()
-{
-	if (!HasAuthority() || !bServerBuildingPurchasePlacement)
-	{
-		return;
-	}
-
-	for (AActor* Actor : ServerBuildingGroup)
-	{
-		if (IsValid(Actor))
-		{
-			Actor->Destroy();
-		}
-	}
-	RefundPendingBuildingPurchase();
-	ClearServerBuildingGroupMove();
 }
 
 bool ABotanicusPlayerController::TryHandleNearbyLargeEquipment()
@@ -5898,7 +4135,7 @@ void ABotanicusPlayerController::UpdateLargeEquipmentPlacement(
 	float DeltaTime)
 {
 	if (!IsLocalPlayerController() ||
-		bBuildingTopDownViewActive ||
+
 		!IsValid(LocalLargeEquipmentPlacement))
 	{
 		return;
@@ -6698,7 +4935,7 @@ void ABotanicusPlayerController::UpdateEquippedQuickBarItem()
 	const bool bCanDisplayEquippedItem =
 		QuickBar &&
 		BotanicusCharacter &&
-		!bBuildingTopDownViewActive &&
+
 		!IsValid(LocalQuickBarItemPreview) &&
 		!IsValid(LocalMovedPlaceableItem);
 	if (!bCanDisplayEquippedItem)
@@ -7390,7 +5627,7 @@ bool ABotanicusPlayerController::TryPlaceHeldSalePotOnWorkbench()
 void ABotanicusPlayerController::UpdateHeldWorldItemPreview()
 {
 	if (!IsLocalPlayerController() || !GetPawn() ||
-		bBuildingTopDownViewActive ||
+
 		!IsValid(LocalMovedPlaceableItem) ||
 		!IsValid(LocalInspectedQuickBarItem))
 	{
@@ -7436,7 +5673,7 @@ void ABotanicusPlayerController::UpdateQuickBarItemPlacement(
 	float DeltaTime)
 {
 	if (!IsLocalPlayerController() ||
-		bBuildingTopDownViewActive ||
+
 		!IsValid(LocalQuickBarItemPreview) ||
 		!GetPawn())
 	{
@@ -7858,7 +6095,7 @@ bool ABotanicusPlayerController::
 	TryStoreSelectedQuickBarItemOnAimedShelf()
 {
 	if (!IsLocalPlayerController() || !GetPawn() ||
-		bBuildingTopDownViewActive ||
+
 		IsValid(LocalQuickBarItemPreview))
 	{
 		return false;
@@ -8765,7 +7002,7 @@ void ABotanicusPlayerController::UpdateDeliveryParcelPlacement(
 	float DeltaTime)
 {
 	if (!IsLocalPlayerController() ||
-		bBuildingTopDownViewActive ||
+
 		!IsValid(LocalParcelMovePreview) ||
 		!IsValid(LocalMovedDeliveryParcel) ||
 		!GetPawn())
@@ -9187,6 +7424,8 @@ bool ABotanicusPlayerController::TryMoveNearbyPlaceableItem()
 			Cast<ABotanicusPlaceableItemActor>(
 				LocalInteractionHighlightActor.Get());
 		if (IsValid(HighlightedItem) &&
+			HighlightedItem->GetItemKey() != TEXT("CashRegister") &&
+			!HighlightedItem->IsA<ABotanicusCashRegisterActor>() &&
 			!HighlightedItem->ActorHasTag(
 				TEXT("BotanicusPlacementPreview")) &&
 			!IsFurnitureActor(HighlightedItem) &&
@@ -9209,7 +7448,9 @@ bool ABotanicusPlayerController::TryMoveNearbyPlaceableItem()
 		{
 			break;
 		}
-		if (ItemIt->ActorHasTag(TEXT("BotanicusPlacementPreview")))
+		if (ItemIt->GetItemKey() == TEXT("CashRegister") ||
+			ItemIt->IsA<ABotanicusCashRegisterActor>() ||
+			ItemIt->ActorHasTag(TEXT("BotanicusPlacementPreview")))
 		{
 			continue;
 		}
@@ -10549,373 +8790,6 @@ float ABotanicusPlayerController::GetMoveHoldDurationForActor(
 		: DefaultDuration;
 }
 
-void ABotanicusPlayerController::TryDeletePathSegmentAtCursor()
-{
-	FHitResult CursorHit;
-	if (!TraceTopDownCursor(CursorHit))
-	{
-		return;
-	}
-
-	ABotanicusPathActor* Path = nullptr;
-	int32 SegmentIndex = INDEX_NONE;
-	FVector ClosestPoint = FVector::ZeroVector;
-	float BestDistance = ExistingPathSnapDistance;
-	for (TActorIterator<ABotanicusPathActor> PathIt(GetWorld());
-		 PathIt;
-		 ++PathIt)
-	{
-		ABotanicusPathActor* Candidate = *PathIt;
-		if (!IsValid(Candidate) || Candidate->IsPreviewPath())
-		{
-			continue;
-		}
-
-		int32 CandidateSegment = INDEX_NONE;
-		FVector CandidatePoint = FVector::ZeroVector;
-		float CandidateDistance = 0.0f;
-		if (Candidate->FindClosestSegment(
-				CursorHit.ImpactPoint,
-				CandidateSegment,
-				CandidatePoint,
-				CandidateDistance) &&
-			CandidateDistance <= BestDistance)
-		{
-			Path = Candidate;
-			SegmentIndex = CandidateSegment;
-			ClosestPoint = CandidatePoint;
-			BestDistance = CandidateDistance;
-		}
-	}
-
-	if (!IsValid(Path))
-	{
-		ClientMessage(TEXT("Cliquez pres d'une portion de route."));
-		return;
-	}
-
-	ServerDeletePathSegment(
-		Path,
-		SegmentIndex,
-		FVector_NetQuantize10(ClosestPoint));
-}
-
-void ABotanicusPlayerController::AddPathPointAtCursor()
-{
-	FVector Point;
-	if (!GetPathCursorPoint(Point))
-	{
-		return;
-	}
-
-	if (PendingPathPoints.Num() > 0 &&
-		FVector::Dist2D(PendingPathPoints.Last(), Point) < 50.0f)
-	{
-		return;
-	}
-
-	PendingPathPoints.Add(Point);
-	if (PathPreviewActor)
-	{
-		PathPreviewActor->SetPreviewPath(
-			PendingPathPoints,
-			PendingPathType);
-	}
-	RefreshTopDownToolbar();
-}
-
-void ABotanicusPlayerController::RemoveLastPathPoint()
-{
-	if (PendingPathPoints.Num() == 0)
-	{
-		CancelPathPlacement();
-		return;
-	}
-
-	PendingPathPoints.Pop();
-	if (PathPreviewActor)
-	{
-		PathPreviewActor->SetPreviewPath(
-			PendingPathPoints,
-			PendingPathType);
-	}
-	RefreshTopDownToolbar();
-}
-
-void ABotanicusPlayerController::UpdatePathPreview()
-{
-	if (!bPathPlacementActive ||
-		!IsValid(PathPreviewActor) ||
-		PendingPathPoints.Num() == 0)
-	{
-		return;
-	}
-
-	FVector CursorPoint;
-	if (!GetPathCursorPoint(CursorPoint))
-	{
-		return;
-	}
-	if (bPathStrokeActive &&
-		FVector::Dist2D(PendingPathPoints.Last(), CursorPoint) >= 140.0f &&
-		PendingPathPoints.Num() < 63)
-	{
-		PendingPathPoints.Add(CursorPoint);
-	}
-
-	TArray<FVector> PreviewPoints = PendingPathPoints;
-	if (FVector::Dist2D(PreviewPoints.Last(), CursorPoint) >= 25.0f)
-	{
-		PreviewPoints.Add(CursorPoint);
-	}
-	PathPreviewActor->SetPreviewPath(
-		PreviewPoints,
-		PendingPathType);
-}
-
-void ABotanicusPlayerController::RefreshTopDownToolbar()
-{
-	if (TopDownToolbarWidget)
-	{
-		TopDownToolbarWidget->RefreshPathState(
-			bPathPlacementActive,
-			PendingPathPoints.Num() >= 2,
-			bPathDeletionActive,
-			PendingPathType ==
-				EBotanicusPathType::VisitorRoute,
-			PendingVisitorZoneType,
-			bDoorEditSelectionActive ||
-				bCommunicationDoorPlacementActive);
-	}
-}
-
-bool ABotanicusPlayerController::GetPathCursorPoint(
-	FVector& OutPoint) const
-{
-	FHitResult CursorHit;
-	if (!TraceTopDownCursor(CursorHit))
-	{
-		return false;
-	}
-
-	if (PendingPathType == EBotanicusPathType::VisitorRoute)
-	{
-		const FVector RawPoint =
-			CursorHit.ImpactPoint + FVector(0.0f, 0.0f, 4.0f);
-		ABotanicusPathActor* ConnectedPath = nullptr;
-		if (!SnapPathPoint(
-				RawPoint, OutPoint, ConnectedPath, PendingPathType))
-		{
-			OutPoint = RawPoint;
-		}
-		return true;
-	}
-
-	float LandscapeHeight = 0.0f;
-	if (!FindLandscapeHeight(
-		FVector2D(CursorHit.ImpactPoint.X, CursorHit.ImpactPoint.Y),
-		LandscapeHeight))
-	{
-		return false;
-	}
-	const FVector RawPoint(
-		CursorHit.ImpactPoint.X,
-		CursorHit.ImpactPoint.Y,
-		LandscapeHeight + 8.0f);
-	ABotanicusPathActor* ConnectedPath = nullptr;
-	if (!SnapPathPoint(
-			RawPoint, OutPoint, ConnectedPath, PendingPathType))
-	{
-		OutPoint = RawPoint;
-	}
-	return true;
-}
-
-bool ABotanicusPlayerController::SnapPathPoint(
-	const FVector& RawPoint,
-	FVector& OutSnappedPoint,
-	ABotanicusPathActor*& OutConnectedPath,
-	EBotanicusPathType DesiredPathType) const
-{
-	OutConnectedPath = nullptr;
-	if (FindNearestBuildingEntrance(RawPoint, OutSnappedPoint))
-	{
-		return true;
-	}
-
-	OutConnectedPath =
-		FindNearestExistingPath(
-			RawPoint, OutSnappedPoint, DesiredPathType);
-	return OutConnectedPath != nullptr;
-}
-
-bool ABotanicusPlayerController::FindNearestBuildingEntrance(
-	const FVector& RawPoint,
-	FVector& OutEntrancePoint) const
-{
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		return false;
-	}
-
-	float BestDistanceSquared =
-		FMath::Square(BuildingEntranceSnapDistance);
-	bool bFoundEntrance = false;
-	for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
-	{
-		AActor* Actor = *ActorIt;
-		if (!IsValid(Actor))
-		{
-			continue;
-		}
-
-		const FString ClassPath = Actor->GetClass()->GetPathName();
-		if (!ClassPath.Contains(TEXT("BP_EBS_Building_Door")))
-		{
-			continue;
-		}
-
-		const FVector ActorLocation = Actor->GetActorLocation();
-		const float DistanceSquared =
-			FVector::DistSquared2D(RawPoint, ActorLocation);
-		if (DistanceSquared > BestDistanceSquared)
-		{
-			continue;
-		}
-
-		float LandscapeHeight = 0.0f;
-		if (!FindLandscapeHeight(
-			FVector2D(ActorLocation.X, ActorLocation.Y),
-			LandscapeHeight))
-		{
-			continue;
-		}
-
-		BestDistanceSquared = DistanceSquared;
-		OutEntrancePoint = FVector(
-			ActorLocation.X,
-			ActorLocation.Y,
-			LandscapeHeight + 8.0f);
-		bFoundEntrance = true;
-	}
-
-	return bFoundEntrance;
-}
-
-ABotanicusPathActor*
-	ABotanicusPlayerController::FindNearestExistingPath(
-		const FVector& RawPoint,
-		FVector& OutPathPoint,
-		EBotanicusPathType DesiredPathType) const
-{
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		return nullptr;
-	}
-
-	ABotanicusPathActor* BestPath = nullptr;
-	float BestDistance = ExistingPathSnapDistance;
-	for (TActorIterator<ABotanicusPathActor> PathIt(World);
-		 PathIt;
-		 ++PathIt)
-	{
-		ABotanicusPathActor* Path = *PathIt;
-		if (!IsValid(Path) || Path->IsPreviewPath() ||
-			Path->GetPathType() != DesiredPathType)
-		{
-			continue;
-		}
-
-		FVector ClosestPoint;
-		float Distance = 0.0f;
-		if (Path->FindClosestPoint(RawPoint, ClosestPoint, Distance) &&
-			Distance <= BestDistance)
-		{
-			BestDistance = Distance;
-			BestPath = Path;
-			OutPathPoint = ClosestPoint;
-		}
-	}
-
-	return BestPath;
-}
-
-bool ABotanicusPlayerController::IsCursorOverTopDownToolbar() const
-{
-	if (BuildingCatalogWidget &&
-		BuildingCatalogWidget->GetVisibility() == ESlateVisibility::Visible)
-	{
-		return true;
-	}
-
-	if (OrderCatalogWidget &&
-		OrderCatalogWidget->GetVisibility() == ESlateVisibility::Visible)
-	{
-		return true;
-	}
-
-	float MouseX = 0.0f;
-	float MouseY = 0.0f;
-	int32 ViewportX = 0;
-	int32 ViewportY = 0;
-	if (!GetMousePosition(MouseX, MouseY))
-	{
-		return false;
-	}
-	GetViewportSize(ViewportX, ViewportY);
-	return MouseY <= 170.0f &&
-		FMath::Abs(MouseX - ViewportX * 0.5f) <= 620.0f;
-}
-
-void ABotanicusPlayerController::TrySelectBuildingGroup()
-{
-	FHitResult CursorHit;
-	if (!TraceTopDownCursor(CursorHit) || !IsValid(CursorHit.GetActor()))
-	{
-		return;
-	}
-
-	ServerBeginBuildingGroupMove(CursorHit.GetActor());
-}
-
-void ABotanicusPlayerController::ConfirmBuildingGroupMove()
-{
-	if (LocalBuildingGroup.Num() > 0)
-	{
-		if (!bLocalBuildingPlacementValid)
-		{
-			ClientMessage(
-				TEXT("Placement impossible : déplacez le bâtiment vers une zone verte."));
-			return;
-		}
-
-		ServerConfirmBuildingGroupMove();
-	}
-}
-
-void ABotanicusPlayerController::CancelBuildingGroupMove()
-{
-	if (LocalBuildingGroup.Num() > 0)
-	{
-		ServerCancelBuildingGroupMove();
-	}
-}
-
-void ABotanicusPlayerController::RotateBuildingGroup(float Direction)
-{
-	if (LocalBuildingGroup.Num() == 0 || FMath::IsNearlyZero(Direction))
-	{
-		return;
-	}
-
-	LocalBuildingYaw = FMath::UnwindDegrees(
-		LocalBuildingYaw + Direction * BuildingRotationStep);
-	BuildingPreviewUpdateAccumulator =
-		1.0f / FMath::Max(BuildingPreviewUpdatesPerSecond, 1.0f);
-}
-
 bool ABotanicusPlayerController::TryPlacePing()
 {
 	if (!IsLocalPlayerController())
@@ -10924,921 +8798,22 @@ bool ABotanicusPlayerController::TryPlacePing()
 	}
 
 	FHitResult Hit;
-	if (bBuildingTopDownViewActive)
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	GetPlayerViewPoint(ViewLocation, ViewRotation);
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(BotanicusPingTrace), true);
+	QueryParams.AddIgnoredActor(GetPawn());
+	if (!GetWorld() ||
+		!GetWorld()->LineTraceSingleByChannel(
+			Hit, ViewLocation,
+			ViewLocation + ViewRotation.Vector() * MaximumPingDistance,
+			ECC_Visibility, QueryParams))
 	{
-		if (!TraceTopDownCursor(Hit))
-		{
-			return false;
-		}
-	}
-	else
-	{
-		FVector ViewLocation;
-		FRotator ViewRotation;
-		GetPlayerViewPoint(ViewLocation, ViewRotation);
-
-		FCollisionQueryParams QueryParams(
-			SCENE_QUERY_STAT(BotanicusPingTrace),
-			true);
-		QueryParams.AddIgnoredActor(GetPawn());
-
-		if (!GetWorld() ||
-			!GetWorld()->LineTraceSingleByChannel(
-				Hit,
-				ViewLocation,
-				ViewLocation +
-					ViewRotation.Vector() * MaximumPingDistance,
-				ECC_Visibility,
-				QueryParams))
-		{
-			return false;
-		}
+		return false;
 	}
 
 	ServerPlacePing(Hit.ImpactPoint);
 	return true;
-}
-
-bool ABotanicusPlayerController::IsEbsConstructionModeActive(
-	UActorComponent*& OutBuildingComponent) const
-{
-	OutBuildingComponent = nullptr;
-
-	TInlineComponentArray<UActorComponent*> Components(
-		const_cast<ABotanicusPlayerController*>(this));
-	for (UActorComponent* Component : Components)
-	{
-		if (!IsValid(Component) ||
-			!Component->GetClass()->GetPathName().Contains(
-				TEXT("/Game/EasyBuildingSystem/Blueprints/Components/BP_EBS_BuildingComponent")))
-		{
-			continue;
-		}
-
-		OutBuildingComponent = Component;
-		UFunction* GetModeFunction =
-			Component->FindFunction(TEXT("GetBuildingMode"));
-		if (!GetModeFunction)
-		{
-			return false;
-		}
-
-		FStructOnScope Parameters(GetModeFunction);
-		void* ParameterMemory = Parameters.GetStructMemory();
-		Component->ProcessEvent(GetModeFunction, ParameterMemory);
-
-		for (TFieldIterator<FProperty> PropertyIt(GetModeFunction);
-			 PropertyIt;
-			 ++PropertyIt)
-		{
-			FProperty* Property = *PropertyIt;
-			if (!Property->HasAnyPropertyFlags(
-				CPF_OutParm | CPF_ReturnParm))
-			{
-				continue;
-			}
-
-			if (FEnumProperty* EnumProperty =
-				CastField<FEnumProperty>(Property))
-			{
-				const void* ValueAddress =
-					EnumProperty->ContainerPtrToValuePtr<void>(
-						ParameterMemory);
-				const int64 Value =
-					EnumProperty->GetUnderlyingProperty()
-						->GetSignedIntPropertyValue(ValueAddress);
-				const FString ModeName =
-					EnumProperty->GetEnum()
-						->GetDisplayNameTextByValue(Value)
-						.ToString();
-				return ModeName.Equals(
-					TEXT("Build"),
-					ESearchCase::IgnoreCase);
-			}
-
-			if (FByteProperty* ByteProperty =
-				CastField<FByteProperty>(Property))
-			{
-				const uint8 Value =
-					ByteProperty->GetPropertyValue_InContainer(
-						ParameterMemory);
-				const FString ModeName = ByteProperty->Enum
-					? ByteProperty->Enum
-						->GetDisplayNameTextByValue(Value)
-						.ToString()
-					: FString();
-				return ModeName.Equals(
-					TEXT("Build"),
-					ESearchCase::IgnoreCase);
-			}
-		}
-
-		return false;
-	}
-
-	return false;
-}
-
-void ABotanicusPlayerController::UpdateBuildingGroupPreview(float DeltaTime)
-{
-	if (!IsLocalPlayerController() ||
-		!bBuildingTopDownViewActive ||
-		LocalBuildingGroup.Num() == 0 ||
-		bBuildingCameraOrbitActive)
-	{
-		return;
-	}
-
-	FHitResult CursorHit;
-	bool bCursorOnLandscape = false;
-	if (!TraceTopDownCursor(CursorHit, &bCursorOnLandscape))
-	{
-		return;
-	}
-
-	LocalBuildingPivot = CursorHit.ImpactPoint;
-	if (!bCursorOnLandscape)
-	{
-		bLocalBuildingPlacementValid = false;
-		UpdateBuildingGroupPlacementVisual(false);
-	}
-
-	const FQuat DeltaRotation =
-		FRotator(0.0f, LocalBuildingYaw, 0.0f).Quaternion();
-	const auto ApplyLocalPreviewTransform = [this, &DeltaRotation]()
-	{
-		for (int32 Index = 0;
-			 Index < LocalBuildingGroup.Num() &&
-			 Index < LocalBuildingOriginalTransforms.Num();
-			 ++Index)
-		{
-			AActor* Actor = LocalBuildingGroup[Index];
-			if (!IsValid(Actor))
-			{
-				continue;
-			}
-
-			const FTransform& Original =
-				LocalBuildingOriginalTransforms[Index];
-			const FVector RelativeLocation =
-				Original.GetLocation() - LocalBuildingOriginalPivot;
-			FTransform PreviewTransform = Original;
-			PreviewTransform.SetLocation(
-				LocalBuildingPivot +
-				DeltaRotation.RotateVector(RelativeLocation));
-			PreviewTransform.SetRotation(
-				DeltaRotation * Original.GetRotation());
-			Actor->SetActorTransform(
-				PreviewTransform,
-				false,
-				nullptr,
-				ETeleportType::TeleportPhysics);
-		}
-	};
-
-	ApplyLocalPreviewTransform();
-
-	FVector SnapCorrection = FVector::ZeroVector;
-	AActor* SnappedMovingWall = nullptr;
-	AActor* SnappedExistingWall = nullptr;
-	if (FindBuildingConnectionSnap(
-			LocalBuildingGroup,
-			SnapCorrection,
-			SnappedMovingWall,
-			SnappedExistingWall))
-	{
-		LocalBuildingPivot += SnapCorrection;
-		ApplyLocalPreviewTransform();
-	}
-
-	BuildingPreviewUpdateAccumulator += DeltaTime;
-	const float UpdateInterval =
-		1.0f / FMath::Max(BuildingPreviewUpdatesPerSecond, 1.0f);
-	if (BuildingPreviewUpdateAccumulator >= UpdateInterval)
-	{
-		BuildingPreviewUpdateAccumulator = 0.0f;
-		ServerUpdateBuildingGroupMove(LocalBuildingPivot, LocalBuildingYaw);
-	}
-}
-
-void ABotanicusPlayerController::UpdateCommunicationDoorPreview()
-{
-	if (!bCommunicationDoorPlacementActive ||
-		!IsValid(CommunicationDoorPreviewActor) ||
-		LocalDoorCandidateLocations.Num() == 0)
-	{
-		return;
-	}
-
-	FHitResult CursorHit;
-	if (!TraceTopDownCursor(CursorHit))
-	{
-		return;
-	}
-
-	int32 BestIndex = INDEX_NONE;
-	float BestDistanceSquared = TNumericLimits<float>::Max();
-	for (int32 Index = 0;
-		 Index < LocalDoorCandidateLocations.Num();
-		 ++Index)
-	{
-		const float DistanceSquared = FVector::DistSquared2D(
-			CursorHit.ImpactPoint,
-			FVector(LocalDoorCandidateLocations[Index]));
-		if (DistanceSquared < BestDistanceSquared)
-		{
-			BestDistanceSquared = DistanceSquared;
-			BestIndex = Index;
-		}
-	}
-
-	if (BestIndex == INDEX_NONE ||
-		!LocalDoorCandidateYaws.IsValidIndex(BestIndex))
-	{
-		return;
-	}
-
-	LocalCommunicationDoorCandidateIndex = BestIndex;
-	CommunicationDoorPreviewActor->SetActorLocationAndRotation(
-		FVector(LocalDoorCandidateLocations[BestIndex]),
-		FRotator(0.0f, LocalDoorCandidateYaws[BestIndex], 0.0f));
-}
-
-void ABotanicusPlayerController::SetBuildingGroupHighlighted(bool bHighlighted)
-{
-	if (!bHighlighted && !BuildingPreviewMaterialMeshes.IsEmpty())
-	{
-		int32 MaterialOffset = 0;
-		for (int32 MeshIndex = 0;
-			 MeshIndex < BuildingPreviewMaterialMeshes.Num();
-			 ++MeshIndex)
-		{
-			UMeshComponent* Mesh = BuildingPreviewMaterialMeshes[MeshIndex];
-			const int32 MaterialCount =
-				BuildingPreviewMaterialCounts.IsValidIndex(MeshIndex)
-					? BuildingPreviewMaterialCounts[MeshIndex]
-					: 0;
-			if (Mesh)
-			{
-				for (int32 Index = 0; Index < MaterialCount; ++Index)
-				{
-					if (BuildingPreviewOriginalMaterials.IsValidIndex(
-						MaterialOffset + Index))
-					{
-						Mesh->SetMaterial(
-							Index,
-							BuildingPreviewOriginalMaterials[
-								MaterialOffset + Index]);
-					}
-				}
-				Mesh->SetOverlayMaterial(nullptr);
-			}
-			MaterialOffset += MaterialCount;
-		}
-		BuildingPreviewMaterialMeshes.Reset();
-		BuildingPreviewOriginalMaterials.Reset();
-		BuildingPreviewMaterialCounts.Reset();
-	}
-
-	for (AActor* Actor : LocalBuildingGroup)
-	{
-		if (!IsValid(Actor))
-		{
-			continue;
-		}
-
-		TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents(Actor);
-		for (UPrimitiveComponent* Primitive : PrimitiveComponents)
-		{
-			if (Primitive)
-			{
-				Primitive->SetRenderCustomDepth(bHighlighted);
-				Primitive->SetCustomDepthStencilValue(bHighlighted ? 1 : 0);
-				if (!bHighlighted)
-				{
-					if (UMeshComponent* Mesh =
-						Cast<UMeshComponent>(Primitive))
-					{
-						Mesh->SetOverlayMaterial(nullptr);
-					}
-				}
-			}
-		}
-	}
-}
-
-void ABotanicusPlayerController::UpdateBuildingGroupPlacementVisual(
-	bool bPlacementValid)
-{
-	UMaterialInterface* SilhouetteMaterial =
-		bPlacementValid
-			? ValidBuildingPlacementMaterial
-			: InvalidBuildingPlacementMaterial;
-
-	if (BuildingPreviewMaterialMeshes.IsEmpty())
-	{
-		for (AActor* Actor : LocalBuildingGroup)
-		{
-			if (!IsValid(Actor))
-			{
-				continue;
-			}
-			TInlineComponentArray<UMeshComponent*> MeshComponents(Actor);
-			for (UMeshComponent* Mesh : MeshComponents)
-			{
-				if (!Mesh)
-				{
-					continue;
-				}
-				const int32 MaterialCount = Mesh->GetNumMaterials();
-				BuildingPreviewMaterialMeshes.Add(Mesh);
-				BuildingPreviewMaterialCounts.Add(MaterialCount);
-				for (int32 Index = 0; Index < MaterialCount; ++Index)
-				{
-					BuildingPreviewOriginalMaterials.Add(Mesh->GetMaterial(Index));
-				}
-			}
-		}
-	}
-
-	for (AActor* Actor : LocalBuildingGroup)
-	{
-		if (!IsValid(Actor))
-		{
-			continue;
-		}
-
-		TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents(Actor);
-		for (UPrimitiveComponent* Primitive : PrimitiveComponents)
-		{
-			if (Primitive)
-			{
-				Primitive->SetRenderCustomDepth(true);
-				Primitive->SetCustomDepthStencilValue(
-					bPlacementValid ? 1 : 2);
-				if (UMeshComponent* Mesh =
-					Cast<UMeshComponent>(Primitive))
-				{
-					for (int32 Index = 0;
-						 Index < Mesh->GetNumMaterials();
-						 ++Index)
-					{
-						Mesh->SetMaterial(Index, SilhouetteMaterial);
-					}
-					Mesh->SetOverlayMaterial(nullptr);
-				}
-			}
-		}
-	}
-}
-
-bool ABotanicusPlayerController::TraceTopDownCursor(
-	FHitResult& OutHit,
-	bool* bOutOnLandscape) const
-{
-	if (bOutOnLandscape)
-	{
-		*bOutOnLandscape = false;
-	}
-
-	float MouseX = 0.0f;
-	float MouseY = 0.0f;
-	FVector WorldOrigin;
-	FVector WorldDirection;
-	if (!GetMousePosition(MouseX, MouseY) ||
-		!DeprojectScreenPositionToWorld(
-			MouseX,
-			MouseY,
-			WorldOrigin,
-			WorldDirection))
-	{
-		return false;
-	}
-
-	// While a whole building is being moved, the cursor ray is projected onto
-	// the Landscape itself rather than using the first visibility collision.
-	// Trees, roofs and foliage can otherwise pull the building into the air.
-	if (LocalBuildingGroup.Num() > 0 &&
-		!FMath::IsNearlyZero(WorldDirection.Z))
-	{
-		float SurfaceZ =
-			LocalBuildingOriginalPivot.Z - LocalBuildingGroundOffset;
-		FVector SurfacePoint = LocalBuildingOriginalPivot;
-		bool bFoundLandscape = false;
-
-		// Perspective rays change X/Y with height. A few iterations converge
-		// the cursor position onto sloped Landscape terrain.
-		for (int32 Iteration = 0; Iteration < 4; ++Iteration)
-		{
-			const float DistanceAlongRay =
-				(SurfaceZ - WorldOrigin.Z) / WorldDirection.Z;
-			if (DistanceAlongRay < 0.0f)
-			{
-				return false;
-			}
-
-			SurfacePoint =
-				WorldOrigin + WorldDirection * DistanceAlongRay;
-			float LandscapeZ = 0.0f;
-			if (!FindLandscapeHeight(
-				FVector2D(SurfacePoint.X, SurfacePoint.Y),
-				LandscapeZ))
-			{
-				bFoundLandscape = false;
-				break;
-			}
-
-			SurfaceZ = LandscapeZ;
-			bFoundLandscape = true;
-		}
-
-		if (bFoundLandscape)
-		{
-			SurfacePoint.Z = SurfaceZ + LocalBuildingGroundOffset;
-			OutHit = FHitResult();
-			OutHit.bBlockingHit = true;
-			OutHit.Location = SurfacePoint;
-			OutHit.ImpactPoint = SurfacePoint;
-			if (bOutOnLandscape)
-			{
-				*bOutOnLandscape = true;
-			}
-			return true;
-		}
-
-		// Keep X/Y controllable beyond the Landscape edge so the preview can
-		// turn red instead of freezing at the last valid point.
-		const float FallbackPlaneZ = LocalBuildingPivot.Z;
-		const float DistanceAlongRay =
-			(FallbackPlaneZ - WorldOrigin.Z) / WorldDirection.Z;
-		if (DistanceAlongRay >= 0.0f)
-		{
-			const FVector FallbackPoint =
-				WorldOrigin + WorldDirection * DistanceAlongRay;
-			OutHit = FHitResult();
-			OutHit.bBlockingHit = true;
-			OutHit.Location = FallbackPoint;
-			OutHit.ImpactPoint = FallbackPoint;
-			return true;
-		}
-	}
-
-	FCollisionQueryParams QueryParams(
-		SCENE_QUERY_STAT(BotanicusTopDownBuildingTrace),
-		true);
-	QueryParams.AddIgnoredActor(GetPawn());
-	for (AActor* Actor : LocalBuildingGroup)
-	{
-		QueryParams.AddIgnoredActor(Actor);
-	}
-	if (bBuildingTopDownViewActive)
-	{
-		for (const TWeakObjectPtr<UPrimitiveComponent>& RoofComponent :
-			 TopDownHiddenRoofComponents)
-		{
-			if (RoofComponent.IsValid())
-			{
-				// A native catalogue building owns its floor, walls and roof
-				// in one actor. Ignoring the owner would make the complete
-				// building unselectable while its roof is hidden.
-				QueryParams.AddIgnoredComponent(
-					RoofComponent.Get());
-			}
-		}
-	}
-
-	return GetWorld() &&
-		GetWorld()->LineTraceSingleByChannel(
-			OutHit,
-			WorldOrigin,
-			WorldOrigin + WorldDirection * 1000000.0f,
-			ECC_Visibility,
-			QueryParams);
-}
-
-bool ABotanicusPlayerController::FindLandscapeHeight(
-	const FVector2D& WorldXY,
-	float& OutHeight) const
-{
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		return false;
-	}
-
-	for (TActorIterator<ALandscapeProxy> LandscapeIt(World);
-		 LandscapeIt;
-		 ++LandscapeIt)
-	{
-		const TOptional<float> Height =
-			LandscapeIt->GetHeightAtLocation(
-				FVector(WorldXY.X, WorldXY.Y, 0.0f));
-		if (Height.IsSet())
-		{
-			OutHeight = Height.GetValue();
-			return true;
-		}
-	}
-
-	return false;
-}
-
-void ABotanicusPlayerController::ServerBeginBuildingGroupMove_Implementation(
-	AActor* HitActor)
-{
-	if (!IsValid(HitActor) || ServerBuildingGroup.Num() > 0)
-	{
-		return;
-	}
-
-	TArray<AActor*> Group = BuildCompleteBuildingGroup(HitActor);
-	if (Group.Num() == 0)
-	{
-		ClientMessage(
-			TEXT("Aucun bâtiment structurel n'a été trouvé pour cette sélection."));
-		return;
-	}
-
-	AActor* OwnershipAnchor = nullptr;
-	for (AActor* Actor : Group)
-	{
-		if (IsStructuralBuildingActor(Actor))
-		{
-			OwnershipAnchor = Actor;
-			break;
-		}
-	}
-
-	if (!OwnershipAnchor || !IsBuildingOwnedByThisPlayer(OwnershipAnchor))
-	{
-		ClientMessage(TEXT("Vous ne pouvez déplacer que vos propres bâtiments."));
-		return;
-	}
-
-	if (!TryAcquireBuildingGroupLock(Group))
-	{
-		ClientMessage(
-			TEXT("Ce bâtiment est déjà en cours de modification par un autre joueur."));
-		return;
-	}
-
-	ServerBuildingGroup.Reset(Group.Num());
-	ServerBuildingOriginalTransforms.Reset(Group.Num());
-	for (AActor* Actor : Group)
-	{
-		if (!IsValid(Actor))
-		{
-			continue;
-		}
-
-		ServerBuildingGroup.Add(Actor);
-		ServerBuildingOriginalTransforms.Add(Actor->GetActorTransform());
-		Actor->SetReplicates(true);
-		Actor->SetReplicateMovement(true);
-		Actor->ForceNetUpdate();
-	}
-
-	ServerBuildingOriginalPivot =
-		CalculateBuildingGroupPivot(Group);
-	ServerBuildingInitialYaw = 0.0f;
-	float InitialLandscapeHeight = ServerBuildingOriginalPivot.Z;
-	ServerBuildingGroundOffset =
-		FindLandscapeHeight(
-			FVector2D(
-				ServerBuildingOriginalPivot.X,
-				ServerBuildingOriginalPivot.Y),
-			InitialLandscapeHeight)
-			? ServerBuildingOriginalPivot.Z - InitialLandscapeHeight
-			: 0.0f;
-	bServerBuildingPlacementValid = true;
-
-	ClientBeginBuildingGroupMove(
-		Group,
-		ServerBuildingOriginalPivot,
-		ServerBuildingInitialYaw);
-}
-
-void ABotanicusPlayerController::ServerPurchaseCatalogBuilding_Implementation(
-	FName BuildingKey)
-{
-	UWorld* World = GetWorld();
-	if (!World || ServerBuildingGroup.Num() > 0 || BuildingKey.IsNone())
-	{
-		return;
-	}
-	UE_LOG(
-		LogBotanicus,
-		Display,
-		TEXT("Server received building purchase %s with %d credits."),
-		*BuildingKey.ToString(),
-		GetAvailableFunds());
-
-	const FBotanicusBuildingDefinition* Definition =
-		FindBuildingDefinition(this, BuildingKey);
-	if (!Definition || !Definition->bUnlockedByDefault)
-	{
-		ClientMessage(TEXT("Ce bâtiment n'est pas disponible."));
-		UE_LOG(
-			LogBotanicus,
-			Warning,
-			TEXT("Rejected building purchase for unknown or locked key %s."),
-			*BuildingKey.ToString());
-		return;
-	}
-	if (BuildingKey == TEXT("Greenhouse"))
-	{
-		for (TActorIterator<ABotanicusGreenhouseActor> It(World);
-			 It;
-			 ++It)
-		{
-			bool bIsTemplate = false;
-			for (const FName Tag : It->Tags)
-			{
-				bIsTemplate |= Tag.ToString().StartsWith(
-					TEXT("BotanicusTemplate_"));
-			}
-			if (!bIsTemplate &&
-				!It->ActorHasTag(TEXT("BotanicusPlacementPreview")))
-			{
-				ClientMessage(
-					TEXT("La pepiniere possede deja sa serre principale."));
-				return;
-			}
-		}
-	}
-	const int32 RequiredLevel =
-		FMath::Max(1, Definition->RequiredDevelopmentLevel);
-	if (BuildingProgressionLevel < RequiredLevel)
-	{
-		ClientMessage(
-			*FString::Printf(
-				TEXT("Bâtiment verrouillé : niveau %d requis."),
-				RequiredLevel));
-		UE_LOG(
-			LogBotanicus,
-			Display,
-			TEXT("Rejected building purchase %s: level %d/%d."),
-			*BuildingKey.ToString(),
-			BuildingProgressionLevel,
-			RequiredLevel);
-		return;
-	}
-	const int32 Price = FMath::Max(0, Definition->Price);
-	if (GetAvailableFunds() < Price)
-	{
-		ClientMessage(TEXT("Crédits insuffisants pour ce bâtiment."));
-		return;
-	}
-
-	AActor* TemplateSeed = nullptr;
-	for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
-	{
-		AActor* Candidate = *ActorIt;
-		if (IsStructuralBuildingActor(Candidate) &&
-			!Candidate->ActorHasTag(PlayerPurchasedBuildingTag) &&
-			Candidate->ActorHasTag(Definition->TemplateTag))
-		{
-			TemplateSeed = Candidate;
-			break;
-		}
-	}
-
-	// Older versions of the test map spawn their EBS references at runtime
-	// and therefore cannot carry saved actor tags. Keep those maps usable by
-	// resolving distinct complete groups in proximity order.
-	const bool bSupportsLegacyBuildingTemplate =
-		BuildingKey == TEXT("Greenhouse");
-	if (!TemplateSeed && bSupportsLegacyBuildingTemplate)
-	{
-		TSet<TWeakObjectPtr<AActor>> VisitedTemplateActors;
-		TArray<TPair<AActor*, float>> LegacyTemplateSeeds;
-		const FVector ReferenceLocation =
-			GetPawn()
-				? GetPawn()->GetActorLocation()
-				: FVector::ZeroVector;
-		for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
-		{
-			AActor* Candidate = *ActorIt;
-			if (!IsStructuralBuildingActor(Candidate) ||
-				Candidate->ActorHasTag(PlayerPurchasedBuildingTag) ||
-				VisitedTemplateActors.Contains(Candidate))
-			{
-				continue;
-			}
-
-			const TArray<AActor*> CandidateGroup =
-				BuildCompleteBuildingGroup(Candidate);
-			if (CandidateGroup.Num() == 0)
-			{
-				continue;
-			}
-			for (AActor* TemplateGroupActor : CandidateGroup)
-			{
-				VisitedTemplateActors.Add(TemplateGroupActor);
-			}
-			const float DistanceSquared = FVector::DistSquared2D(
-				ReferenceLocation,
-				CalculateBuildingGroupPivot(CandidateGroup));
-			LegacyTemplateSeeds.Emplace(Candidate, DistanceSquared);
-		}
-
-		LegacyTemplateSeeds.Sort(
-			[](const TPair<AActor*, float>& A,
-			   const TPair<AActor*, float>& B)
-			{
-				return A.Value < B.Value;
-			});
-		if (LegacyTemplateSeeds.IsValidIndex(
-				Definition->LegacyTemplateGroupIndex))
-		{
-			TemplateSeed =
-				LegacyTemplateSeeds[
-					Definition->LegacyTemplateGroupIndex].Key;
-		}
-	}
-
-	const TArray<AActor*> TemplateGroup =
-		BuildCompleteBuildingGroup(TemplateSeed);
-
-	TSubclassOf<ABotanicusCatalogBuildingActor> FallbackPrefabClass =
-		Definition->FallbackPrefabClass.LoadSynchronous();
-	if (!FallbackPrefabClass)
-	{
-		FallbackPrefabClass = ABotanicusGreenhouseActor::StaticClass();
-	}
-	if (TemplateGroup.Num() == 0 && !FallbackPrefabClass)
-	{
-		ClientMessage(
-			TEXT("Aucun modèle disponible pour ce bâtiment."));
-		UE_LOG(
-			LogBotanicus,
-			Error,
-			TEXT("Building purchase %s has neither an EBS template nor a prefab."),
-			*BuildingKey.ToString());
-		return;
-	}
-
-	const FVector InitialOffset = Definition->PreviewOffset;
-	if (!TrySpendSharedFunds(this, Price))
-	{
-		ClientMessage(TEXT("Crédits insuffisants pour ce bâtiment."));
-		return;
-	}
-	ServerPendingBuildingPurchasePrice = Price;
-	ServerPendingBuildingPurchaseKey = BuildingKey;
-	ForceNetUpdate();
-	OnRep_OrderState();
-	TArray<AActor*> PurchasedGroup;
-	FVector PurchasedPivot = FVector::ZeroVector;
-	if (TemplateGroup.Num() == 0)
-	{
-		FVector PrefabSpawnLocation =
-			GetPawn()
-				? GetPawn()->GetActorLocation() +
-					FVector(900.0f, 0.0f, 0.0f)
-				: FVector::ZeroVector;
-		float LandscapeHeight = PrefabSpawnLocation.Z;
-		if (FindLandscapeHeight(
-				FVector2D(
-					PrefabSpawnLocation.X,
-					PrefabSpawnLocation.Y),
-				LandscapeHeight))
-		{
-			PrefabSpawnLocation.Z = LandscapeHeight;
-		}
-
-		FActorSpawnParameters SpawnParameters;
-		SpawnParameters.SpawnCollisionHandlingOverride =
-			ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		ABotanicusCatalogBuildingActor* PurchasedPrefab =
-			World->SpawnActor<ABotanicusCatalogBuildingActor>(
-			FallbackPrefabClass,
-			PrefabSpawnLocation,
-			FRotator::ZeroRotator,
-			SpawnParameters);
-		if (PurchasedPrefab)
-		{
-			PurchasedPrefab->Tags.AddUnique(PlayerPurchasedBuildingTag);
-			ConfigurePurchasedActorForNetworking(PurchasedPrefab);
-			PurchasedGroup.Add(PurchasedPrefab);
-			PurchasedPivot = PrefabSpawnLocation;
-		}
-	}
-	else
-	{
-		PurchasedGroup.Reserve(TemplateGroup.Num());
-		PurchasedPivot =
-			CalculateBuildingGroupPivot(TemplateGroup) + InitialOffset;
-		for (AActor* TemplateActor : TemplateGroup)
-		{
-			if (!IsValid(TemplateActor))
-			{
-				continue;
-			}
-
-			FTransform SpawnTransform = TemplateActor->GetActorTransform();
-			SpawnTransform.AddToTranslation(InitialOffset);
-			FActorSpawnParameters SpawnParameters;
-			SpawnParameters.SpawnCollisionHandlingOverride =
-				ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-			AActor* PurchasedActor = World->SpawnActor<AActor>(
-				TemplateActor->GetClass(),
-				SpawnTransform,
-				SpawnParameters);
-			if (!PurchasedActor)
-			{
-				for (AActor* SpawnedActor : PurchasedGroup)
-				{
-					if (IsValid(SpawnedActor))
-					{
-						SpawnedActor->Destroy();
-					}
-				}
-				RefundPendingBuildingPurchase();
-				ClientMessage(TEXT("Impossible de créer le bâtiment."));
-				return;
-			}
-
-			PurchasedActor->Tags = TemplateActor->Tags;
-			PurchasedActor->Tags.Remove(Definition->TemplateTag);
-			PurchasedActor->Tags.AddUnique(PlayerPurchasedBuildingTag);
-			ConfigurePurchasedActorForNetworking(PurchasedActor);
-			PurchasedGroup.Add(PurchasedActor);
-		}
-	}
-
-	if (PurchasedGroup.Num() == 0 ||
-		!TryAcquireBuildingGroupLock(PurchasedGroup))
-	{
-		for (AActor* SpawnedActor : PurchasedGroup)
-		{
-			if (IsValid(SpawnedActor))
-			{
-				SpawnedActor->Destroy();
-			}
-		}
-		RefundPendingBuildingPurchase();
-		ClientMessage(TEXT("Impossible de réserver ce bâtiment."));
-		return;
-	}
-
-	// The purchased actors are the live replicated preview. Ignore Pawns on
-	// every machine until placement is confirmed so moving walls and floors
-	// cannot depenetrate or teleport players while following the cursor.
-	SetPurchasedBuildingPawnCollisionForAllPlayers(
-		PurchasedGroup,
-		false);
-	for (AActor* PurchasedActor : PurchasedGroup)
-	{
-		if (IsValid(PurchasedActor))
-		{
-			PurchasedActor->Tags.AddUnique(
-				TEXT("BotanicusPlacementPreview"));
-		}
-	}
-
-	ServerBuildingGroup.Reset(PurchasedGroup.Num());
-	ServerBuildingOriginalTransforms.Reset(PurchasedGroup.Num());
-	for (AActor* PurchasedActor : PurchasedGroup)
-	{
-		ServerBuildingGroup.Add(PurchasedActor);
-		ServerBuildingOriginalTransforms.Add(
-			PurchasedActor->GetActorTransform());
-	}
-
-	ServerBuildingOriginalPivot = PurchasedPivot;
-	ServerBuildingInitialYaw = 0.0f;
-	float InitialLandscapeHeight = ServerBuildingOriginalPivot.Z;
-	ServerBuildingGroundOffset =
-		FindLandscapeHeight(
-			FVector2D(
-				ServerBuildingOriginalPivot.X,
-				ServerBuildingOriginalPivot.Y),
-			InitialLandscapeHeight)
-			? ServerBuildingOriginalPivot.Z - InitialLandscapeHeight
-			: 0.0f;
-	bServerBuildingPlacementValid = false;
-	bServerBuildingPurchasePlacement = true;
-
-	ClientBeginBuildingGroupMove(
-		PurchasedGroup,
-		ServerBuildingOriginalPivot,
-		ServerBuildingInitialYaw);
-	ClientMessage(
-		*FString::Printf(
-			TEXT("%s acheté pour %d crédits : choisissez son emplacement."),
-			*Definition->DisplayName.ToString(),
-			Price));
-	BroadcastPurchasedBuildingSnapshot(true);
-	UE_LOG(
-		LogBotanicus,
-		Display,
-		TEXT(
-			"Server purchased building %s for %d credits with %d replicated actors for %s."),
-		*BuildingKey.ToString(),
-		Price,
-		PurchasedGroup.Num(),
-		PlayerState ? *PlayerState->GetPlayerName() : TEXT("UnknownPlayer"));
 }
 
 void ABotanicusPlayerController::ServerOrderTestDelivery_Implementation()
@@ -11868,30 +8843,7 @@ void ABotanicusPlayerController::ServerOrderTestDelivery_Implementation()
 
 	if (!DeliveryZone)
 	{
-		FVector ZoneLocation =
-			ControlledPawn->GetActorLocation() +
-			ControlledPawn->GetActorForwardVector() * 600.0f;
-		float GroundHeight = ZoneLocation.Z;
-		if (FindLandscapeHeight(
-				FVector2D(ZoneLocation.X, ZoneLocation.Y),
-				GroundHeight))
-		{
-			ZoneLocation.Z = GroundHeight;
-		}
-
-		FActorSpawnParameters ZoneSpawnParameters;
-		ZoneSpawnParameters.SpawnCollisionHandlingOverride =
-			ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-		DeliveryZone =
-			World->SpawnActor<ABotanicusDeliveryZoneActor>(
-				ZoneLocation,
-				FRotator::ZeroRotator,
-				ZoneSpawnParameters);
-	}
-
-	if (!DeliveryZone)
-	{
-		ClientMessage(TEXT("Impossible de créer la zone de livraison."));
+		ClientMessage(TEXT("Aucune zone de livraison dans le niveau."));
 		return;
 	}
 
@@ -11936,7 +8888,7 @@ void ABotanicusPlayerController::ServerOrderTestDelivery_Implementation()
 		FVector(0.0f, 0.0f, Parcel->GetParcelHalfExtent().Z));
 	ClientMessage(
 		TEXT(
-			"Commande livrée : quittez la vue top-down et récupérez le colis avec E."));
+			"Commande livrée : récupérez le colis avec E."));
 }
 
 void ABotanicusPlayerController::
@@ -11979,30 +8931,7 @@ void ABotanicusPlayerController::SpawnTestLargeEquipment(
 
 	if (!DeliveryZone)
 	{
-		FVector ZoneLocation =
-			ControlledPawn->GetActorLocation() +
-			ControlledPawn->GetActorForwardVector() * 600.0f;
-		float GroundHeight = ZoneLocation.Z;
-		if (FindLandscapeHeight(
-				FVector2D(ZoneLocation.X, ZoneLocation.Y),
-				GroundHeight))
-		{
-			ZoneLocation.Z = GroundHeight;
-		}
-
-		FActorSpawnParameters ZoneSpawnParameters;
-		ZoneSpawnParameters.SpawnCollisionHandlingOverride =
-			ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-		DeliveryZone =
-			World->SpawnActor<ABotanicusDeliveryZoneActor>(
-				ZoneLocation,
-				FRotator::ZeroRotator,
-				ZoneSpawnParameters);
-	}
-
-	if (!DeliveryZone)
-	{
-		ClientMessage(TEXT("Impossible de creer la zone de livraison."));
+		ClientMessage(TEXT("Aucune zone de livraison dans le niveau."));
 		return;
 	}
 
@@ -12384,7 +9313,7 @@ void ABotanicusPlayerController::ServerUseComputer_Implementation(
 }
 
 ABotanicusDeliveryZoneActor*
-ABotanicusPlayerController::FindOrCreateDeliveryZone()
+ABotanicusPlayerController::FindDeliveryZone()
 {
 	check(HasAuthority());
 	UWorld* World = GetWorld();
@@ -12409,29 +9338,7 @@ ABotanicusPlayerController::FindOrCreateDeliveryZone()
 			DeliveryZone = *ZoneIt;
 		}
 	}
-	if (DeliveryZone)
-	{
-		return DeliveryZone;
-	}
-
-	FVector ZoneLocation =
-		ControlledPawn->GetActorLocation() +
-		ControlledPawn->GetActorForwardVector() * 600.0f;
-	float GroundHeight = ZoneLocation.Z;
-	if (FindLandscapeHeight(
-			FVector2D(ZoneLocation.X, ZoneLocation.Y),
-			GroundHeight))
-	{
-		ZoneLocation.Z = GroundHeight;
-	}
-
-	FActorSpawnParameters SpawnParameters;
-	SpawnParameters.SpawnCollisionHandlingOverride =
-		ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-	return World->SpawnActor<ABotanicusDeliveryZoneActor>(
-		ZoneLocation,
-		FRotator::ZeroRotator,
-		SpawnParameters);
+	return DeliveryZone;
 }
 
 bool ABotanicusPlayerController::DeliverCatalogItem(
@@ -12443,7 +9350,7 @@ bool ABotanicusPlayerController::DeliverCatalogItem(
 	const FBotanicusItemDefinition* Definition =
 		FindItemDefinition(this, ItemKey);
 	ABotanicusDeliveryZoneActor* DeliveryZone =
-		FindOrCreateDeliveryZone();
+		FindDeliveryZone();
 	if (!World || !Definition || !DeliveryZone)
 	{
 		return false;
@@ -13499,6 +10406,13 @@ void ABotanicusPlayerController::
 	ServerBeginPlaceableItemMove_Implementation(
 		ABotanicusPlaceableItemActor* WorldItem)
 {
+	if (WorldItem &&
+		(WorldItem->GetItemKey() == TEXT("CashRegister") ||
+		 WorldItem->IsA<ABotanicusCashRegisterActor>()))
+	{
+		ClientEndPlaceableItemHold();
+		return;
+	}
 	if (IsValid(WorldItem) &&
 		IsFurnitureActor(WorldItem) &&
 		!bServerFurnitureMoveModeActive)
@@ -13738,6 +10652,8 @@ void ABotanicusPlayerController::
 		float RequestedYaw)
 {
 	if (!IsValid(WorldItem) ||
+		WorldItem->GetItemKey() == TEXT("CashRegister") ||
+		WorldItem->IsA<ABotanicusCashRegisterActor>() ||
 		ServerMovedPlaceableItem != WorldItem)
 	{
 		ClientMessage(TEXT("Deplacement refuse : objet non reserve."));
@@ -13829,53 +10745,11 @@ void ABotanicusPlayerController::
 		return;
 	}
 
-	ABotanicusCashRegisterActor* CashRegister =
-		Cast<ABotanicusCashRegisterActor>(WorldItem);
-	TArray<ABotanicusSelfCheckoutActor*> MountedCheckouts;
-	TArray<int32> MountedCheckoutSlots;
-	if (CashRegister)
-	{
-		for (TActorIterator<ABotanicusSelfCheckoutActor>
-				 CheckoutIt(GetWorld());
-			 CheckoutIt;
-			 ++CheckoutIt)
-		{
-			const int32 SlotIndex =
-				CashRegister->FindSelfCheckoutSlotIndex(
-					CheckoutIt->GetActorLocation());
-			if (SlotIndex != INDEX_NONE)
-			{
-				MountedCheckouts.Add(*CheckoutIt);
-				MountedCheckoutSlots.Add(SlotIndex);
-			}
-		}
-	}
-
 	WorldItem->SetActorTransform(
 		PlacementTransform,
 		false,
 		nullptr,
 		ETeleportType::TeleportPhysics);
-	if (CashRegister)
-	{
-		for (int32 MountedIndex = 0;
-			 MountedCheckouts.IsValidIndex(MountedIndex) &&
-			 MountedCheckoutSlots.IsValidIndex(MountedIndex);
-			 ++MountedIndex)
-		{
-			if (IsValid(MountedCheckouts[MountedIndex]))
-			{
-				MountedCheckouts[MountedIndex]->SetActorTransform(
-					CashRegister->
-						GetSelfCheckoutSlotTransform(
-							MountedCheckoutSlots[MountedIndex]),
-					false,
-					nullptr,
-					ETeleportType::TeleportPhysics);
-				MountedCheckouts[MountedIndex]->ForceNetUpdate();
-			}
-		}
-	}
 	WorldItem->SetNetDormancy(DORM_Awake);
 	WorldItem->FlushNetDormancy();
 	WorldItem->ForceNetUpdate();
@@ -14629,567 +11503,6 @@ void ABotanicusPlayerController::
 	CashRegister->HandleCheckoutAction(ControlledPawn);
 }
 
-void ABotanicusPlayerController::
-	ServerBeginManualDoorPlacement_Implementation(AActor* SelectedActor)
-{
-	if (!IsValid(SelectedActor) ||
-		(!SelectedActor->IsA<ABotanicusCommunicationDoorActor>() &&
-		 !IsEbsBuildingActor(SelectedActor)))
-	{
-		ClientMessage(TEXT("Sélection de porte invalide."));
-		return;
-	}
-
-	ServerManualDoorToMove =
-		Cast<ABotanicusCommunicationDoorActor>(SelectedActor);
-	bServerManualDoorPlacement = true;
-	if (!BuildManualDoorCandidates(SelectedActor))
-	{
-		bServerManualDoorPlacement = false;
-		ServerManualDoorToMove = nullptr;
-		ClientMessage(
-			TEXT("Aucun emplacement de porte compatible trouvé."));
-		ClientEndCommunicationDoorPlacement(false);
-		return;
-	}
-	ClientBeginCommunicationDoorPlacement(
-		ServerDoorCandidateLocations,
-		ServerDoorCandidateYaws);
-}
-
-void ABotanicusPlayerController::
-	ServerConfirmCommunicationDoor_Implementation(int32 CandidateIndex)
-{
-	UWorld* World = GetWorld();
-	if (!World ||
-		!ServerDoorCandidateLocations.IsValidIndex(CandidateIndex) ||
-		!ServerDoorCandidateYaws.IsValidIndex(CandidateIndex))
-	{
-		return;
-	}
-
-	if (bServerManualDoorPlacement)
-	{
-		ABotanicusCommunicationDoorActor* Door =
-			ServerManualDoorToMove.Get();
-		if (!IsValid(Door))
-		{
-			FActorSpawnParameters SpawnParameters;
-			SpawnParameters.SpawnCollisionHandlingOverride =
-				ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-			Door = World->SpawnActor<ABotanicusCommunicationDoorActor>(
-				FVector(ServerDoorCandidateLocations[CandidateIndex]),
-				FRotator(
-					0.0f,
-					ServerDoorCandidateYaws[CandidateIndex],
-					0.0f),
-				SpawnParameters);
-			if (Door)
-			{
-				ConfigurePurchasedActorForNetworking(Door);
-			}
-		}
-		else
-		{
-			Door->SetActorLocationAndRotation(
-				FVector(ServerDoorCandidateLocations[CandidateIndex]),
-				FRotator(
-					0.0f,
-					ServerDoorCandidateYaws[CandidateIndex],
-					0.0f),
-				false,
-				nullptr,
-				ETeleportType::TeleportPhysics);
-			Door->ForceNetUpdate();
-		}
-		if (!Door)
-		{
-			return;
-		}
-
-		ServerDoorCandidatePurchasedWalls.Reset();
-		ServerDoorCandidateExistingWalls.Reset();
-		ServerDoorCandidateLocations.Reset();
-		ServerDoorCandidateYaws.Reset();
-		ServerManualDoorToMove = nullptr;
-		bServerManualDoorPlacement = false;
-		ScheduleSharedStateAutosave(this);
-		ClientEndCommunicationDoorPlacement(true);
-		return;
-	}
-
-	if (!ServerDoorCandidatePurchasedWalls.IsValidIndex(CandidateIndex) ||
-		!ServerDoorCandidateExistingWalls.IsValidIndex(CandidateIndex))
-	{
-		return;
-	}
-
-	AActor* PurchasedWall =
-		ServerDoorCandidatePurchasedWalls[CandidateIndex];
-	AActor* ExistingWall =
-		ServerDoorCandidateExistingWalls[CandidateIndex];
-	if (!IsValid(PurchasedWall) || !IsValid(ExistingWall))
-	{
-		ServerCancelCommunicationDoor();
-		return;
-	}
-
-	FActorSpawnParameters SpawnParameters;
-	SpawnParameters.SpawnCollisionHandlingOverride =
-		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	ABotanicusCommunicationDoorActor* Door =
-		World->SpawnActor<ABotanicusCommunicationDoorActor>(
-			FVector(ServerDoorCandidateLocations[CandidateIndex]),
-			FRotator(
-				0.0f,
-				ServerDoorCandidateYaws[CandidateIndex],
-				0.0f),
-			SpawnParameters);
-	if (!Door)
-	{
-		return;
-	}
-	ConfigurePurchasedActorForNetworking(Door);
-
-	const TArray<FName> RemovedWallNames = {
-		PurchasedWall->GetFName(),
-		ExistingWall->GetFName()};
-	if (ABotanicusGameMode* BotanicusGameMode =
-			Cast<ABotanicusGameMode>(World->GetAuthGameMode()))
-	{
-		for (const FName WallName : RemovedWallNames)
-		{
-			BotanicusGameMode->RegisterRemovedBuildingActor(WallName);
-		}
-	}
-
-	for (TActorIterator<ABotanicusPlayerController> ControllerIt(World);
-		 ControllerIt;
-		 ++ControllerIt)
-	{
-		ControllerIt->ClientHideRemovedBuildingActors(RemovedWallNames);
-	}
-	PurchasedWall->Destroy();
-	ExistingWall->Destroy();
-
-	ServerDoorCandidatePurchasedWalls.Reset();
-	ServerDoorCandidateExistingWalls.Reset();
-	ServerDoorCandidateLocations.Reset();
-	ServerDoorCandidateYaws.Reset();
-	ServerManualDoorToMove = nullptr;
-	bServerManualDoorPlacement = false;
-	ClientEndCommunicationDoorPlacement(true);
-
-	UE_LOG(
-		LogBotanicus,
-		Display,
-		TEXT("Created a replicated communication door at %s."),
-		*Door->GetActorLocation().ToString());
-}
-
-void ABotanicusPlayerController::
-	ServerCancelCommunicationDoor_Implementation()
-{
-	ServerDoorCandidatePurchasedWalls.Reset();
-	ServerDoorCandidateExistingWalls.Reset();
-	ServerDoorCandidateLocations.Reset();
-	ServerDoorCandidateYaws.Reset();
-	ServerManualDoorToMove = nullptr;
-	bServerManualDoorPlacement = false;
-	ClientEndCommunicationDoorPlacement(false);
-}
-
-void ABotanicusPlayerController::ServerUpdateBuildingGroupMove_Implementation(
-	FVector_NetQuantize10 NewPivotLocation,
-	float NewYaw)
-{
-	if (ServerBuildingGroup.Num() == 0 ||
-		NewPivotLocation.ContainsNaN() ||
-		!FMath::IsFinite(NewYaw))
-	{
-		return;
-	}
-
-	if (const APawn* ControlledPawn = GetPawn())
-	{
-		const FVector PawnLocation = ControlledPawn->GetActorLocation();
-		if (FVector::DistSquared2D(PawnLocation, NewPivotLocation) >
-			FMath::Square(MaximumBuildingEditDistance))
-		{
-			return;
-		}
-	}
-
-	FVector GroundedPivot = NewPivotLocation;
-	float LandscapeHeight = 0.0f;
-	const bool bLandscapeFound = FindLandscapeHeight(
-		FVector2D(GroundedPivot.X, GroundedPivot.Y),
-		LandscapeHeight);
-	if (bLandscapeFound)
-	{
-		GroundedPivot.Z = LandscapeHeight + ServerBuildingGroundOffset;
-	}
-
-	ApplyServerBuildingGroupTransform(GroundedPivot, NewYaw);
-
-	FVector SnapCorrection = FVector::ZeroVector;
-	AActor* SnappedMovingWall = nullptr;
-	AActor* SnappedExistingWall = nullptr;
-	if (FindBuildingConnectionSnap(
-			ServerBuildingGroup,
-			SnapCorrection,
-			SnappedMovingWall,
-			SnappedExistingWall))
-	{
-		GroundedPivot += SnapCorrection;
-		ApplyServerBuildingGroupTransform(GroundedPivot, NewYaw);
-		ServerSnappedMovingWall = SnappedMovingWall;
-		ServerSnappedExistingWall = SnappedExistingWall;
-	}
-	else
-	{
-		ServerSnappedMovingWall = nullptr;
-		ServerSnappedExistingWall = nullptr;
-	}
-
-	bServerBuildingPlacementValid =
-		bLandscapeFound && IsServerBuildingGroupPlacementValid();
-	ClientUpdateBuildingPlacementValidity(
-		bServerBuildingPlacementValid);
-	if (bServerBuildingPurchasePlacement)
-	{
-		BroadcastPurchasedBuildingSnapshot(false);
-	}
-}
-
-void ABotanicusPlayerController::ServerConfirmBuildingGroupMove_Implementation()
-{
-	if (!bServerBuildingPlacementValid ||
-		!IsServerBuildingGroupPlacementValid())
-	{
-		bServerBuildingPlacementValid = false;
-		ClientUpdateBuildingPlacementValidity(false);
-		ClientMessage(
-			TEXT("Le serveur refuse ce placement : collision ou terrain invalide."));
-		return;
-	}
-
-	for (AActor* Actor : ServerBuildingGroup)
-	{
-		if (IsValid(Actor))
-		{
-			if (bServerBuildingPurchasePlacement)
-			{
-				Actor->Tags.Remove(TEXT("BotanicusPlacementPreview"));
-			}
-			Actor->ForceNetUpdate();
-		}
-	}
-
-	const bool bConfirmingBuildingPurchase =
-		bServerBuildingPurchasePlacement;
-	const bool bBeginDoorPlacement =
-		bConfirmingBuildingPurchase &&
-		BuildCommunicationDoorCandidates(ServerBuildingGroup);
-	const int32 PreviousProgressionLevel =
-		BuildingProgressionLevel;
-	int32 NewProgressionLevel = BuildingProgressionLevel;
-	if (bConfirmingBuildingPurchase)
-	{
-		BroadcastPurchasedBuildingSnapshot(true);
-		SetPurchasedBuildingPawnCollisionForAllPlayers(
-			ServerBuildingGroup,
-			true);
-		if (const FBotanicusBuildingDefinition* PurchasedDefinition =
-			FindBuildingDefinition(
-				this,
-				ServerPendingBuildingPurchaseKey))
-		{
-			NewProgressionLevel = FMath::Max(
-				BuildingProgressionLevel,
-				FMath::Max(
-					1,
-					PurchasedDefinition->
-						RequiredDevelopmentLevel) +
-					1);
-		}
-		BuildingProgressionLevel = NewProgressionLevel;
-		if (NewProgressionLevel > PreviousProgressionLevel)
-		{
-			AddSharedFunds(
-				this,
-				FMath::Max(0, DevelopmentLevelRewardCredits));
-		}
-		ServerPendingBuildingPurchasePrice = 0;
-		ServerPendingBuildingPurchaseKey = NAME_None;
-		ForceNetUpdate();
-		OnRep_OrderState();
-	}
-	ClearServerBuildingGroupMove();
-	if (bConfirmingBuildingPurchase)
-	{
-		ScheduleSharedStateAutosave(this);
-	}
-	ClientEndBuildingGroupMove(true);
-	if (NewProgressionLevel > PreviousProgressionLevel)
-	{
-		ClientMessage(
-			*FString::Printf(
-				TEXT(
-					"Niveau de développement %d atteint : prime de %d crédits."),
-				NewProgressionLevel,
-				FMath::Max(0, DevelopmentLevelRewardCredits)));
-	}
-	if (bBeginDoorPlacement)
-	{
-		ClientBeginCommunicationDoorPlacement(
-			ServerDoorCandidateLocations,
-			ServerDoorCandidateYaws);
-	}
-}
-
-void ABotanicusPlayerController::ServerCancelBuildingGroupMove_Implementation()
-{
-	if (bServerBuildingPurchasePlacement)
-	{
-		const TArray<AActor*> PurchasedActors = ServerBuildingGroup;
-		for (TActorIterator<ABotanicusPlayerController> ControllerIt(
-				 GetWorld());
-			 ControllerIt;
-			 ++ControllerIt)
-		{
-			ControllerIt->ClientCancelPurchasedBuildingSnapshot();
-		}
-		// Forget cached responses without re-enabling collision on actors that
-		// are about to be destroyed. Send this while their replicated references
-		// are still valid so every client can identify the cached components.
-		SetPurchasedBuildingPawnCollisionForAllPlayers(
-			PurchasedActors,
-			true,
-			false);
-		for (AActor* Actor : PurchasedActors)
-		{
-			if (IsValid(Actor))
-			{
-				Actor->Destroy();
-			}
-		}
-		RefundPendingBuildingPurchase();
-	}
-	else
-	{
-		for (int32 Index = 0;
-			 Index < ServerBuildingGroup.Num() &&
-			 Index < ServerBuildingOriginalTransforms.Num();
-			 ++Index)
-		{
-			AActor* Actor = ServerBuildingGroup[Index];
-			if (IsValid(Actor))
-			{
-				Actor->SetActorTransform(
-					ServerBuildingOriginalTransforms[Index],
-					false,
-					nullptr,
-					ETeleportType::TeleportPhysics);
-				Actor->ForceNetUpdate();
-			}
-		}
-	}
-
-	ClearServerBuildingGroupMove();
-	ClientEndBuildingGroupMove(false);
-}
-
-void ABotanicusPlayerController::ClientBeginBuildingGroupMove_Implementation(
-	const TArray<AActor*>& GroupActors,
-	FVector_NetQuantize10 GroupPivot,
-	float InitialYaw)
-{
-	SetBuildingGroupHighlighted(false);
-	LocalBuildingGroup.Reset(GroupActors.Num());
-	LocalBuildingOriginalTransforms.Reset(GroupActors.Num());
-	for (AActor* Actor : GroupActors)
-	{
-		if (IsValid(Actor))
-		{
-			LocalBuildingGroup.Add(Actor);
-			LocalBuildingOriginalTransforms.Add(Actor->GetActorTransform());
-		}
-	}
-
-	LocalBuildingOriginalPivot = GroupPivot;
-	LocalBuildingPivot = GroupPivot;
-	LocalBuildingYaw = InitialYaw;
-	float InitialLandscapeHeight = GroupPivot.Z;
-	LocalBuildingGroundOffset =
-		FindLandscapeHeight(
-			FVector2D(GroupPivot.X, GroupPivot.Y),
-			InitialLandscapeHeight)
-			? GroupPivot.Z - InitialLandscapeHeight
-			: 0.0f;
-	BuildingPreviewUpdateAccumulator = 0.0f;
-	bBuildingCameraOrbitInitialized = false;
-	bLocalBuildingPlacementValid = true;
-	SetBuildingGroupHighlighted(true);
-	UpdateBuildingGroupPlacementVisual(true);
-
-	ClientMessage(
-		TEXT("Bâtiment sélectionné : souris pour déplacer, molette pour tourner, Ctrl + molette pour zoomer, Maj gauche + souris pour orienter la caméra, clic/E pour confirmer."));
-}
-
-void ABotanicusPlayerController::ClientEndBuildingGroupMove_Implementation(
-	bool bConfirmed)
-{
-	if (bBuildingCameraOrbitActive)
-	{
-		EndBuildingCameraOrbit();
-	}
-	SetBuildingGroupHighlighted(false);
-	LocalBuildingGroup.Reset();
-	LocalBuildingOriginalTransforms.Reset();
-	LocalBuildingPivot = FVector::ZeroVector;
-	LocalBuildingOriginalPivot = FVector::ZeroVector;
-	LocalBuildingYaw = 0.0f;
-	LocalBuildingGroundOffset = 0.0f;
-	BuildingPreviewUpdateAccumulator = 0.0f;
-	bBuildingCameraOrbitInitialized = false;
-	bLocalBuildingPlacementValid = true;
-
-	ClientMessage(
-		bConfirmed
-			? TEXT("Déplacement du bâtiment confirmé.")
-			: TEXT("Déplacement du bâtiment annulé."));
-}
-
-void ABotanicusPlayerController::
-	ClientUpdateBuildingPlacementValidity_Implementation(
-		bool bPlacementValid)
-{
-	bLocalBuildingPlacementValid = bPlacementValid;
-	UpdateBuildingGroupPlacementVisual(bPlacementValid);
-}
-
-void ABotanicusPlayerController::
-	ClientSetPurchasedBuildingPawnCollision_Implementation(
-		const TArray<AActor*>& GroupActors,
-		bool bEnabled,
-		bool bRestoreOriginalResponses)
-{
-	SetBuildingGroupPawnCollision(
-		GroupActors,
-		bEnabled,
-		bRestoreOriginalResponses);
-}
-
-void ABotanicusPlayerController::
-	ClientApplyPurchasedBuildingSnapshot_Implementation(
-		const TArray<FName>& ActorNames,
-		const TArray<FTransform>& ActorTransforms)
-{
-	QueuePurchasedBuildingSnapshot(ActorNames, ActorTransforms);
-}
-
-void ABotanicusPlayerController::
-	ClientApplyPurchasedBuildingPreviewSnapshot_Implementation(
-		const TArray<FName>& ActorNames,
-		const TArray<FTransform>& ActorTransforms)
-{
-	QueuePurchasedBuildingSnapshot(ActorNames, ActorTransforms);
-}
-
-void ABotanicusPlayerController::
-	ClientCancelPurchasedBuildingSnapshot_Implementation()
-{
-	GetWorldTimerManager().ClearTimer(
-		PurchasedBuildingSnapshotRetryTimer);
-	PendingPurchasedBuildingActorNames.Reset();
-	PendingPurchasedBuildingTransforms.Reset();
-	PurchasedBuildingSnapshotRetryCount = 0;
-}
-
-void ABotanicusPlayerController::
-	ClientBeginCommunicationDoorPlacement_Implementation(
-		const TArray<FVector_NetQuantize10>& CandidateLocations,
-		const TArray<float>& CandidateYaws)
-{
-	if (!bBuildingTopDownViewActive ||
-		CandidateLocations.Num() == 0 ||
-		CandidateLocations.Num() != CandidateYaws.Num())
-	{
-		return;
-	}
-
-	LocalDoorCandidateLocations = CandidateLocations;
-	LocalDoorCandidateYaws = CandidateYaws;
-	LocalCommunicationDoorCandidateIndex = 0;
-	bCommunicationDoorPlacementActive = true;
-	bDoorEditSelectionActive = false;
-	RefreshTopDownToolbar();
-
-	if (!IsValid(CommunicationDoorPreviewActor))
-	{
-		FActorSpawnParameters SpawnParameters;
-		SpawnParameters.Owner = this;
-		SpawnParameters.ObjectFlags |= RF_Transient;
-		SpawnParameters.SpawnCollisionHandlingOverride =
-			ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		CommunicationDoorPreviewActor =
-			GetWorld()->SpawnActor<ABotanicusCommunicationDoorActor>(
-				FVector(LocalDoorCandidateLocations[0]),
-				FRotator(0.0f, LocalDoorCandidateYaws[0], 0.0f),
-				SpawnParameters);
-		if (CommunicationDoorPreviewActor)
-		{
-			CommunicationDoorPreviewActor->SetPreviewMode(true);
-		}
-	}
-
-	ClientMessage(
-		TEXT(
-			"Choisissez un emplacement avec la souris, puis clic gauche pour confirmer. Clic droit/Echap pour annuler."));
-}
-
-void ABotanicusPlayerController::
-	ClientEndCommunicationDoorPlacement_Implementation(bool bCreated)
-{
-	bCommunicationDoorPlacementActive = false;
-	bDoorEditSelectionActive = false;
-	LocalDoorCandidateLocations.Reset();
-	LocalDoorCandidateYaws.Reset();
-	LocalCommunicationDoorCandidateIndex = INDEX_NONE;
-	if (IsValid(CommunicationDoorPreviewActor))
-	{
-		CommunicationDoorPreviewActor->Destroy();
-		CommunicationDoorPreviewActor = nullptr;
-	}
-	RefreshTopDownToolbar();
-
-	ClientMessage(
-		bCreated
-			? TEXT("Porte enregistrée.")
-			: TEXT("Modification de la porte annulée."));
-}
-
-void ABotanicusPlayerController::
-	ClientHideRemovedBuildingActors_Implementation(
-		const TArray<FName>& ActorNames)
-{
-	TSet<FName> NamesToHide;
-	for (const FName ActorName : ActorNames)
-	{
-		NamesToHide.Add(ActorName);
-	}
-	for (TActorIterator<AActor> ActorIt(GetWorld()); ActorIt; ++ActorIt)
-	{
-		AActor* Actor = *ActorIt;
-		if (IsValid(Actor) && NamesToHide.Contains(Actor->GetFName()))
-		{
-			Actor->SetActorHiddenInGame(true);
-			Actor->SetActorEnableCollision(false);
-		}
-	}
-}
-
 void ABotanicusPlayerController::ServerPlacePing_Implementation(
 	FVector_NetQuantize10 RequestedLocation)
 {
@@ -15243,1811 +11556,6 @@ void ABotanicusPlayerController::ServerPlacePing_Implementation(
 		*PlayerName,
 		*RequestedLocation.ToString(),
 		PingLifeTime);
-}
-
-void ABotanicusPlayerController::ServerCreatePath_Implementation(
-	const TArray<FVector_NetQuantize10>& RequestedPoints,
-	uint8 RequestedPathType)
-{
-	UWorld* World = GetWorld();
-	APawn* ControlledPawn = GetPawn();
-	const EBotanicusPathType PathType =
-		RequestedPathType ==
-			static_cast<uint8>(
-				EBotanicusPathType::VisitorRoute)
-			? EBotanicusPathType::VisitorRoute
-			: EBotanicusPathType::Standard;
-	if (!World ||
-		!ControlledPawn ||
-		RequestedPoints.Num() < 2 ||
-		RequestedPoints.Num() > 64)
-	{
-		return;
-	}
-
-	TArray<FVector> ValidatedPoints;
-	ValidatedPoints.Reserve(RequestedPoints.Num());
-	TArray<TObjectPtr<ABotanicusPathActor>> ConnectedPaths;
-	ConnectedPaths.SetNumZeroed(2);
-	float TotalLength = 0.0f;
-
-	for (int32 PointIndex = 0;
-		 PointIndex < RequestedPoints.Num();
-		 ++PointIndex)
-	{
-		const FVector_NetQuantize10& RequestedPoint =
-			RequestedPoints[PointIndex];
-		if (RequestedPoint.ContainsNaN())
-		{
-			return;
-		}
-
-		FVector GroundedPoint;
-		if (PathType == EBotanicusPathType::VisitorRoute)
-		{
-			GroundedPoint = FVector(RequestedPoint);
-		}
-		else
-		{
-			float LandscapeHeight = 0.0f;
-			if (!FindLandscapeHeight(
-				FVector2D(RequestedPoint.X, RequestedPoint.Y),
-				LandscapeHeight))
-			{
-				return;
-			}
-			GroundedPoint = FVector(
-				RequestedPoint.X,
-				RequestedPoint.Y,
-				LandscapeHeight + 0.25f);
-		}
-
-		if ((PointIndex == 0 ||
-			PointIndex == RequestedPoints.Num() - 1)
-			)
-		{
-			FVector SnappedPoint;
-			ABotanicusPathActor* ConnectedPath = nullptr;
-			if (SnapPathPoint(
-				GroundedPoint,
-				SnappedPoint,
-				ConnectedPath,
-				PathType))
-			{
-				GroundedPoint = SnappedPoint;
-				ConnectedPaths[
-					PointIndex == 0 ? 0 : 1] = ConnectedPath;
-			}
-		}
-
-		if (ValidatedPoints.Num() > 0)
-		{
-			const float SegmentLength =
-				FVector::Dist2D(ValidatedPoints.Last(), GroundedPoint);
-			if (SegmentLength < 25.0f || SegmentLength > 5000.0f)
-			{
-				return;
-			}
-			TotalLength += SegmentLength;
-			if (TotalLength > 50000.0f)
-			{
-				return;
-			}
-
-			if (PathType ==
-				EBotanicusPathType::VisitorRoute)
-			{
-				FCollisionQueryParams QueryParams(
-					SCENE_QUERY_STAT(
-						BotanicusVisitorRouteWallValidation),
-					false);
-				QueryParams.AddIgnoredActor(ControlledPawn);
-				FHitResult WallHit;
-				if (World->LineTraceSingleByChannel(
-						WallHit,
-						ValidatedPoints.Last() +
-							FVector(0.0f, 0.0f, 80.0f),
-						GroundedPoint +
-							FVector(0.0f, 0.0f, 80.0f),
-						ECC_Visibility,
-						QueryParams))
-				{
-					ClientMessage(
-						TEXT(
-							"Route PNJ refusée : un segment traverse un mur ou un obstacle."));
-					return;
-				}
-			}
-		}
-		ValidatedPoints.Add(GroundedPoint);
-	}
-
-	if (FVector::DistSquared2D(
-		ControlledPawn->GetActorLocation(),
-		ValidatedPoints[0]) >
-		FMath::Square(MaximumBuildingEditDistance))
-	{
-		return;
-	}
-
-	FActorSpawnParameters SpawnParameters;
-	SpawnParameters.Owner = this;
-	SpawnParameters.SpawnCollisionHandlingOverride =
-		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	ABotanicusPathActor* Path =
-		World->SpawnActor<ABotanicusPathActor>(
-			FVector::ZeroVector,
-			FRotator::ZeroRotator,
-			SpawnParameters);
-	if (!Path)
-	{
-		return;
-	}
-
-	Path->InitializeConfirmedPath(
-		ValidatedPoints,
-		PathType);
-	if (ConnectedPaths[0])
-	{
-		ConnectedPaths[0]->AddJunctionPoint(ValidatedPoints[0]);
-	}
-	if (ConnectedPaths[1])
-	{
-		ConnectedPaths[1]->AddJunctionPoint(ValidatedPoints.Last());
-	}
-	UE_LOG(
-		LogBotanicus,
-		Display,
-		TEXT("Created replicated %s with %d points and length %.0f cm."),
-		PathType == EBotanicusPathType::VisitorRoute
-			? TEXT("visitor route")
-			: TEXT("path"),
-		ValidatedPoints.Num(),
-		TotalLength);
-	ScheduleSharedStateAutosave(this);
-}
-
-void ABotanicusPlayerController::
-	ServerCreateVisitorZone_Implementation(
-	FVector_NetQuantize10 RequestedLocation,
-	uint8 RequestedZoneType)
-{
-	UWorld* World = GetWorld();
-	APawn* ControlledPawn = GetPawn();
-	if (!World ||
-		!ControlledPawn ||
-		RequestedLocation.ContainsNaN() ||
-		RequestedZoneType > 2 ||
-		FVector::DistSquared2D(
-			ControlledPawn->GetActorLocation(),
-			FVector(RequestedLocation)) >
-			FMath::Square(MaximumBuildingEditDistance))
-	{
-		return;
-	}
-
-	const EBotanicusVisitorZoneType ZoneType =
-		static_cast<EBotanicusVisitorZoneType>(
-			RequestedZoneType);
-	for (TActorIterator<ABotanicusVisitorZoneActor> ZoneIt(World);
-		 ZoneIt;
-		 ++ZoneIt)
-	{
-		if (ZoneIt->GetZoneType() == ZoneType)
-		{
-			ZoneIt->Destroy();
-		}
-	}
-
-	FVector ZoneExtent;
-	switch (ZoneType)
-	{
-	case EBotanicusVisitorZoneType::Parking:
-		ZoneExtent = FVector(500.0f, 300.0f, 6.0f);
-		break;
-	case EBotanicusVisitorZoneType::SalesArea:
-		ZoneExtent = FVector(700.0f, 500.0f, 6.0f);
-		break;
-	case EBotanicusVisitorZoneType::Checkout:
-	default:
-		// 10 m x 6 m: enough room for the starter register, several
-		// self-checkouts and a visible customer queue.
-		ZoneExtent = FVector(500.0f, 300.0f, 6.0f);
-		break;
-	}
-
-	FActorSpawnParameters SpawnParameters;
-	SpawnParameters.SpawnCollisionHandlingOverride =
-		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	ABotanicusVisitorZoneActor* Zone =
-		World->SpawnActor<ABotanicusVisitorZoneActor>(
-			ABotanicusVisitorZoneActor::StaticClass(),
-			FVector(RequestedLocation),
-			FRotator::ZeroRotator,
-			SpawnParameters);
-	if (Zone)
-	{
-		Zone->InitializeZone(ZoneType, ZoneExtent);
-		ScheduleSharedStateAutosave(this);
-	}
-}
-
-void ABotanicusPlayerController::
-	ServerCreateRefundZone_Implementation(
-	FVector_NetQuantize10 RequestedLocation)
-{
-	UWorld* World = GetWorld();
-	APawn* ControlledPawn = GetPawn();
-	if (!World ||
-		!ControlledPawn ||
-		RequestedLocation.ContainsNaN() ||
-		FVector::DistSquared2D(
-			ControlledPawn->GetActorLocation(),
-			FVector(RequestedLocation)) >
-			FMath::Square(MaximumBuildingEditDistance))
-	{
-		return;
-	}
-
-	for (TActorIterator<ABotanicusRefundZoneActor> ZoneIt(World);
-		 ZoneIt;
-		 ++ZoneIt)
-	{
-		ZoneIt->Destroy();
-	}
-
-	FActorSpawnParameters SpawnParameters;
-	SpawnParameters.SpawnCollisionHandlingOverride =
-		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	ABotanicusRefundZoneActor* Zone =
-		World->SpawnActor<ABotanicusRefundZoneActor>(
-			ABotanicusRefundZoneActor::StaticClass(),
-			FVector(RequestedLocation),
-			FRotator::ZeroRotator,
-			SpawnParameters);
-	if (Zone)
-	{
-		Zone->InitializeZone(FVector(220.0f, 150.0f, 6.0f));
-		ScheduleSharedStateAutosave(this);
-	}
-}
-
-void ABotanicusPlayerController::
-	ServerCreateDeliveryZone_Implementation(
-	FVector_NetQuantize10 RequestedLocation)
-{
-	UWorld* World = GetWorld();
-	APawn* ControlledPawn = GetPawn();
-	if (!World ||
-		!ControlledPawn ||
-		RequestedLocation.ContainsNaN() ||
-		FVector::DistSquared2D(
-			ControlledPawn->GetActorLocation(),
-			FVector(RequestedLocation)) >
-			FMath::Square(MaximumBuildingEditDistance))
-	{
-		return;
-	}
-
-	for (TActorIterator<ABotanicusDeliveryZoneActor> ZoneIt(World);
-		 ZoneIt;
-		 ++ZoneIt)
-	{
-		ZoneIt->Destroy();
-	}
-
-	FActorSpawnParameters SpawnParameters;
-	SpawnParameters.SpawnCollisionHandlingOverride =
-		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	if (World->SpawnActor<ABotanicusDeliveryZoneActor>(
-			ABotanicusDeliveryZoneActor::StaticClass(),
-			FVector(RequestedLocation),
-			FRotator::ZeroRotator,
-			SpawnParameters))
-	{
-		ScheduleSharedStateAutosave(this);
-	}
-}
-
-void ABotanicusPlayerController::ServerDeletePathSegment_Implementation(
-	ABotanicusPathActor* Path,
-	int32 SegmentIndex,
-	FVector_NetQuantize10 RequestedHitLocation)
-{
-	UWorld* World = GetWorld();
-	APawn* ControlledPawn = GetPawn();
-	if (!World ||
-		!ControlledPawn ||
-		!IsValid(Path) ||
-		Path->IsPreviewPath() ||
-		RequestedHitLocation.ContainsNaN())
-	{
-		return;
-	}
-
-	const TArray<FVector> OriginalPoints = Path->GetPathWorldPoints();
-	if (!OriginalPoints.IsValidIndex(SegmentIndex) ||
-		!OriginalPoints.IsValidIndex(SegmentIndex + 1))
-	{
-		return;
-	}
-
-	int32 VerifiedSegmentIndex = INDEX_NONE;
-	FVector VerifiedClosestPoint = FVector::ZeroVector;
-	float VerifiedDistance = 0.0f;
-	if (!Path->FindClosestSegment(
-			FVector(RequestedHitLocation),
-			VerifiedSegmentIndex,
-			VerifiedClosestPoint,
-			VerifiedDistance) ||
-		VerifiedSegmentIndex != SegmentIndex ||
-		VerifiedDistance > ExistingPathSnapDistance ||
-		FVector::DistSquared2D(
-			ControlledPawn->GetActorLocation(),
-			VerifiedClosestPoint) >
-			FMath::Square(MaximumBuildingEditDistance))
-	{
-		return;
-	}
-
-	TArray<FVector> LeftPoints;
-	for (int32 PointIndex = 0;
-		 PointIndex <= SegmentIndex;
-		 ++PointIndex)
-	{
-		LeftPoints.Add(OriginalPoints[PointIndex]);
-	}
-
-	TArray<FVector> RightPoints;
-	for (int32 PointIndex = SegmentIndex + 1;
-		 PointIndex < OriginalPoints.Num();
-		 ++PointIndex)
-	{
-		RightPoints.Add(OriginalPoints[PointIndex]);
-	}
-
-	const TArray<FVector> OriginalJunctions =
-		Path->GetJunctionWorldPoints();
-	const EBotanicusPathType OriginalPathType =
-		Path->GetPathType();
-	int32 RemainingPieceCount = 0;
-	auto SpawnRemainingPiece =
-		[this,
-		 World,
-		 &OriginalJunctions,
-		 OriginalPathType,
-		 &RemainingPieceCount](
-			const TArray<FVector>& PiecePoints)
-		{
-			if (PiecePoints.Num() < 2)
-			{
-				return;
-			}
-
-			FActorSpawnParameters SpawnParameters;
-			SpawnParameters.Owner = this;
-			SpawnParameters.SpawnCollisionHandlingOverride =
-				ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-			ABotanicusPathActor* Piece =
-				World->SpawnActor<ABotanicusPathActor>(
-					FVector::ZeroVector,
-					FRotator::ZeroRotator,
-					SpawnParameters);
-			if (!Piece)
-			{
-				return;
-			}
-
-			Piece->InitializeConfirmedPath(
-				PiecePoints,
-				OriginalPathType);
-			TArray<FVector> RetainedJunctions;
-			for (const FVector& JunctionPoint : OriginalJunctions)
-			{
-				FVector ClosestPoint;
-				float Distance = 0.0f;
-				if (Piece->FindClosestPoint(
-						JunctionPoint,
-						ClosestPoint,
-						Distance) &&
-					Distance <= ExistingPathSnapDistance)
-				{
-					RetainedJunctions.Add(JunctionPoint);
-				}
-			}
-			Piece->RestoreJunctionPoints(RetainedJunctions);
-			++RemainingPieceCount;
-		};
-
-	SpawnRemainingPiece(LeftPoints);
-	SpawnRemainingPiece(RightPoints);
-	Path->Destroy();
-
-	// Junction markers live on the path that existed first. Removing a
-	// connected segment can therefore orphan a marker on another actor.
-	// Retain only markers that still touch at least one different path.
-	TArray<ABotanicusPathActor*> RemainingPaths;
-	for (TActorIterator<ABotanicusPathActor> PathIt(World);
-		 PathIt;
-		 ++PathIt)
-	{
-		ABotanicusPathActor* RemainingPath = *PathIt;
-		if (IsValid(RemainingPath) &&
-			RemainingPath != Path &&
-			!RemainingPath->IsPreviewPath())
-		{
-			RemainingPaths.Add(RemainingPath);
-		}
-	}
-	for (ABotanicusPathActor* RemainingPath : RemainingPaths)
-	{
-		TArray<FVector> RetainedJunctions;
-		for (const FVector& JunctionPoint :
-			 RemainingPath->GetJunctionWorldPoints())
-		{
-			bool bStillConnected = false;
-			for (ABotanicusPathActor* OtherPath : RemainingPaths)
-			{
-				if (OtherPath == RemainingPath)
-				{
-					continue;
-				}
-
-				FVector ClosestPoint;
-				float Distance = 0.0f;
-				if (OtherPath->FindClosestPoint(
-						JunctionPoint,
-						ClosestPoint,
-						Distance) &&
-					Distance <= 50.0f)
-				{
-					bStillConnected = true;
-					break;
-				}
-			}
-			if (bStillConnected)
-			{
-				RetainedJunctions.Add(JunctionPoint);
-			}
-		}
-		RemainingPath->RestoreJunctionPoints(RetainedJunctions);
-	}
-
-	UE_LOG(
-		LogBotanicus,
-		Display,
-		TEXT(
-			"Deleted path segment %d; generated %d remaining path piece(s)."),
-		SegmentIndex,
-		RemainingPieceCount);
-}
-
-TArray<AActor*> ABotanicusPlayerController::BuildCompleteBuildingGroup(
-	AActor* HitActor) const
-{
-	TArray<AActor*> AllBuildingActors;
-	TArray<AActor*> StructuralActors;
-	for (TActorIterator<AActor> ActorIt(GetWorld()); ActorIt; ++ActorIt)
-	{
-		AActor* Actor = *ActorIt;
-		if (!IsValid(Actor) || !IsEbsBuildingActor(Actor))
-		{
-			continue;
-		}
-
-		AllBuildingActors.Add(Actor);
-		if (IsStructuralBuildingActor(Actor))
-		{
-			StructuralActors.Add(Actor);
-		}
-	}
-
-	AActor* StructuralSeed =
-		IsStructuralBuildingActor(HitActor) ? HitActor : nullptr;
-	if (!StructuralSeed && IsEbsBuildingActor(HitActor))
-	{
-		float BestDistanceSquared = FMath::Square(1200.0f);
-		for (AActor* Candidate : StructuralActors)
-		{
-			const float DistanceSquared = FVector::DistSquared(
-				HitActor->GetActorLocation(),
-				Candidate->GetActorLocation());
-			if (DistanceSquared < BestDistanceSquared)
-			{
-				BestDistanceSquared = DistanceSquared;
-				StructuralSeed = Candidate;
-			}
-		}
-	}
-
-	if (!StructuralSeed)
-	{
-		return {};
-	}
-
-	TArray<AActor*> Result;
-	TSet<AActor*> AddedStructures;
-	TArray<AActor*> PendingStructures;
-	AddedStructures.Add(StructuralSeed);
-	PendingStructures.Add(StructuralSeed);
-
-	while (PendingStructures.Num() > 0)
-	{
-		AActor* Current = PendingStructures.Pop(EAllowShrinking::No);
-		Result.Add(Current);
-
-		FVector CurrentOrigin;
-		FVector CurrentExtent;
-		Current->GetActorBounds(true, CurrentOrigin, CurrentExtent);
-		const FBox CurrentBounds(
-			CurrentOrigin - CurrentExtent - FVector(100.0f),
-			CurrentOrigin + CurrentExtent + FVector(100.0f));
-
-		for (AActor* Candidate : StructuralActors)
-		{
-			if (AddedStructures.Contains(Candidate))
-			{
-				continue;
-			}
-
-			FVector CandidateOrigin;
-			FVector CandidateExtent;
-			Candidate->GetActorBounds(
-				true,
-				CandidateOrigin,
-				CandidateExtent);
-			const FBox CandidateBounds(
-				CandidateOrigin - CandidateExtent,
-				CandidateOrigin + CandidateExtent);
-			if (CurrentBounds.Intersect(CandidateBounds))
-			{
-				AddedStructures.Add(Candidate);
-				PendingStructures.Add(Candidate);
-			}
-		}
-	}
-
-	FBox BuildingBounds(EForceInit::ForceInit);
-	for (AActor* Actor : Result)
-	{
-		FVector Origin;
-		FVector Extent;
-		Actor->GetActorBounds(true, Origin, Extent);
-		BuildingBounds += FBox(Origin - Extent, Origin + Extent);
-	}
-
-	const FBox ContentBounds(
-		BuildingBounds.Min - FVector(150.0f, 150.0f, 100.0f),
-		BuildingBounds.Max + FVector(150.0f, 150.0f, 500.0f));
-	for (AActor* Actor : AllBuildingActors)
-	{
-		if (!AddedStructures.Contains(Actor) &&
-			ContentBounds.IsInsideOrOn(Actor->GetActorLocation()))
-		{
-			Result.AddUnique(Actor);
-		}
-	}
-
-	for (int32 Index = 0; Index < Result.Num(); ++Index)
-	{
-		TArray<AActor*> AttachedActors;
-		Result[Index]->GetAttachedActors(
-			AttachedActors,
-			true,
-			true);
-		for (AActor* Attached : AttachedActors)
-		{
-			if (IsValid(Attached) && IsEbsBuildingActor(Attached))
-			{
-				Result.AddUnique(Attached);
-			}
-		}
-	}
-
-	return Result;
-}
-
-bool ABotanicusPlayerController::IsEbsBuildingActor(
-	const AActor* Actor) const
-{
-	if (!IsValid(Actor))
-	{
-		return false;
-	}
-
-	return Actor->IsA<ABotanicusCatalogBuildingActor>() ||
-		Actor->GetClass()->GetPathName().Contains(
-			TEXT("/Game/EasyBuildingSystem/Blueprints/BuildingObjects/"));
-}
-
-bool ABotanicusPlayerController::IsStructuralBuildingActor(
-	const AActor* Actor) const
-{
-	if (!IsEbsBuildingActor(Actor))
-	{
-		return false;
-	}
-	if (Actor->IsA<ABotanicusCatalogBuildingActor>())
-	{
-		return true;
-	}
-
-	const FString ClassName = Actor->GetClass()->GetName();
-	static const TCHAR* StructuralTokens[] = {
-		TEXT("Foundation"),
-		TEXT("Wall"),
-		TEXT("Ceiling"),
-		TEXT("Roof"),
-		TEXT("Ramp"),
-		TEXT("Stairs"),
-		TEXT("Fence"),
-		TEXT("DoorFrame"),
-		TEXT("WindowFrame"),
-	};
-
-	for (const TCHAR* Token : StructuralTokens)
-	{
-		if (ClassName.Contains(Token, ESearchCase::IgnoreCase))
-		{
-			return true;
-		}
-	}
-
-	return false;
-}
-
-bool ABotanicusPlayerController::IsPlainBuildingWall(
-	const AActor* Actor) const
-{
-	if (!IsEbsBuildingActor(Actor))
-	{
-		return false;
-	}
-
-	const FString ClassName = Actor->GetClass()->GetName();
-	return ClassName.Contains(TEXT("Wall"), ESearchCase::IgnoreCase) &&
-		!ClassName.Contains(TEXT("Roof"), ESearchCase::IgnoreCase) &&
-		!ClassName.Contains(TEXT("Tri"), ESearchCase::IgnoreCase) &&
-		!ClassName.Contains(TEXT("Slope"), ESearchCase::IgnoreCase) &&
-		!ClassName.Contains(TEXT("Door"), ESearchCase::IgnoreCase) &&
-		!ClassName.Contains(TEXT("Window"), ESearchCase::IgnoreCase);
-}
-
-bool ABotanicusPlayerController::FindBuildingConnectionSnap(
-	const TArray<TObjectPtr<AActor>>& MovingGroup,
-	FVector& OutCorrection,
-	AActor*& OutMovingWall,
-	AActor*& OutExistingWall) const
-{
-	OutCorrection = FVector::ZeroVector;
-	OutMovingWall = nullptr;
-	OutExistingWall = nullptr;
-
-	UWorld* World = GetWorld();
-	if (!World || MovingGroup.Num() == 0)
-	{
-		return false;
-	}
-
-	TSet<const AActor*> MovingActors;
-	for (AActor* Actor : MovingGroup)
-	{
-		if (IsValid(Actor))
-		{
-			MovingActors.Add(Actor);
-		}
-	}
-
-	float BestCorrectionSize = TNumericLimits<float>::Max();
-	for (AActor* MovingWall : MovingGroup)
-	{
-		if (!IsPlainBuildingWall(MovingWall))
-		{
-			continue;
-		}
-
-		FVector MovingOrigin;
-		FVector MovingExtent;
-		MovingWall->GetActorBounds(
-			true,
-			MovingOrigin,
-			MovingExtent);
-		const bool bMovingNormalIsX =
-			MovingExtent.X <= MovingExtent.Y;
-
-		for (TActorIterator<AActor> ExistingIt(World);
-			 ExistingIt;
-			 ++ExistingIt)
-		{
-			AActor* ExistingWall = *ExistingIt;
-			if (!IsValid(ExistingWall) ||
-				MovingActors.Contains(ExistingWall) ||
-				!IsPlainBuildingWall(ExistingWall))
-			{
-				continue;
-			}
-
-			FVector ExistingOrigin;
-			FVector ExistingExtent;
-			ExistingWall->GetActorBounds(
-				true,
-				ExistingOrigin,
-				ExistingExtent);
-			const bool bExistingNormalIsX =
-				ExistingExtent.X <= ExistingExtent.Y;
-			if (bMovingNormalIsX != bExistingNormalIsX)
-			{
-				continue;
-			}
-
-			const float NormalCorrection =
-				bMovingNormalIsX
-					? ExistingOrigin.X - MovingOrigin.X
-					: ExistingOrigin.Y - MovingOrigin.Y;
-			const float CorrectionSize =
-				FMath::Abs(NormalCorrection);
-			if (CorrectionSize > BuildingConnectionSnapDistance ||
-				CorrectionSize >= BestCorrectionSize)
-			{
-				continue;
-			}
-
-			const float MovingTangentMin =
-				bMovingNormalIsX
-					? MovingOrigin.Y - MovingExtent.Y
-					: MovingOrigin.X - MovingExtent.X;
-			const float MovingTangentMax =
-				bMovingNormalIsX
-					? MovingOrigin.Y + MovingExtent.Y
-					: MovingOrigin.X + MovingExtent.X;
-			const float ExistingTangentMin =
-				bMovingNormalIsX
-					? ExistingOrigin.Y - ExistingExtent.Y
-					: ExistingOrigin.X - ExistingExtent.X;
-			const float ExistingTangentMax =
-				bMovingNormalIsX
-					? ExistingOrigin.Y + ExistingExtent.Y
-					: ExistingOrigin.X + ExistingExtent.X;
-			const float TangentOverlap =
-				FMath::Min(MovingTangentMax, ExistingTangentMax) -
-				FMath::Max(MovingTangentMin, ExistingTangentMin);
-			if (TangentOverlap < 180.0f)
-			{
-				continue;
-			}
-
-			const float VerticalOverlap =
-				FMath::Min(
-					MovingOrigin.Z + MovingExtent.Z,
-					ExistingOrigin.Z + ExistingExtent.Z) -
-				FMath::Max(
-					MovingOrigin.Z - MovingExtent.Z,
-					ExistingOrigin.Z - ExistingExtent.Z);
-			if (VerticalOverlap < 200.0f)
-			{
-				continue;
-			}
-
-			BestCorrectionSize = CorrectionSize;
-			OutCorrection = bMovingNormalIsX
-				? FVector(NormalCorrection, 0.0f, 0.0f)
-				: FVector(0.0f, NormalCorrection, 0.0f);
-			OutMovingWall = MovingWall;
-			OutExistingWall = ExistingWall;
-		}
-	}
-
-	return IsValid(OutMovingWall) && IsValid(OutExistingWall);
-}
-
-bool ABotanicusPlayerController::BuildCommunicationDoorCandidates(
-	const TArray<AActor*>& PurchasedGroup)
-{
-	check(HasAuthority());
-
-	ServerDoorCandidatePurchasedWalls.Reset();
-	ServerDoorCandidateExistingWalls.Reset();
-	ServerDoorCandidateLocations.Reset();
-	ServerDoorCandidateYaws.Reset();
-
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		return false;
-	}
-
-	TSet<const AActor*> PurchasedActors;
-	for (AActor* Actor : PurchasedGroup)
-	{
-		if (IsValid(Actor))
-		{
-			PurchasedActors.Add(Actor);
-		}
-	}
-
-	TArray<AActor*> ExistingWalls;
-	for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
-	{
-		AActor* Actor = *ActorIt;
-		if (IsValid(Actor) &&
-			!PurchasedActors.Contains(Actor) &&
-			IsPlainBuildingWall(Actor))
-		{
-			ExistingWalls.Add(Actor);
-		}
-	}
-
-	for (AActor* PurchasedWall : PurchasedGroup)
-	{
-		if (!IsPlainBuildingWall(PurchasedWall))
-		{
-			continue;
-		}
-
-		FVector PurchasedOrigin;
-		FVector PurchasedExtent;
-		PurchasedWall->GetActorBounds(
-			true,
-			PurchasedOrigin,
-			PurchasedExtent);
-		const bool bPurchasedNormalIsX =
-			PurchasedExtent.X <= PurchasedExtent.Y;
-
-		for (AActor* ExistingWall : ExistingWalls)
-		{
-			FVector ExistingOrigin;
-			FVector ExistingExtent;
-			ExistingWall->GetActorBounds(
-				true,
-				ExistingOrigin,
-				ExistingExtent);
-			const bool bExistingNormalIsX =
-				ExistingExtent.X <= ExistingExtent.Y;
-			if (bPurchasedNormalIsX != bExistingNormalIsX)
-			{
-				continue;
-			}
-
-			const float NormalDistance =
-				bPurchasedNormalIsX
-					? FMath::Abs(
-						PurchasedOrigin.X - ExistingOrigin.X)
-					: FMath::Abs(
-						PurchasedOrigin.Y - ExistingOrigin.Y);
-			const float MaximumNormalDistance =
-				(bPurchasedNormalIsX
-					 ? PurchasedExtent.X + ExistingExtent.X
-					 : PurchasedExtent.Y + ExistingExtent.Y) +
-				80.0f;
-			if (NormalDistance > MaximumNormalDistance)
-			{
-				continue;
-			}
-
-			const float PurchasedTangentMin =
-				bPurchasedNormalIsX
-					? PurchasedOrigin.Y - PurchasedExtent.Y
-					: PurchasedOrigin.X - PurchasedExtent.X;
-			const float PurchasedTangentMax =
-				bPurchasedNormalIsX
-					? PurchasedOrigin.Y + PurchasedExtent.Y
-					: PurchasedOrigin.X + PurchasedExtent.X;
-			const float ExistingTangentMin =
-				bPurchasedNormalIsX
-					? ExistingOrigin.Y - ExistingExtent.Y
-					: ExistingOrigin.X - ExistingExtent.X;
-			const float ExistingTangentMax =
-				bPurchasedNormalIsX
-					? ExistingOrigin.Y + ExistingExtent.Y
-					: ExistingOrigin.X + ExistingExtent.X;
-			const float OverlapMin =
-				FMath::Max(PurchasedTangentMin, ExistingTangentMin);
-			const float OverlapMax =
-				FMath::Min(PurchasedTangentMax, ExistingTangentMax);
-			if (OverlapMax - OverlapMin < 180.0f)
-			{
-				continue;
-			}
-
-			const float BottomZ = FMath::Max(
-				PurchasedOrigin.Z - PurchasedExtent.Z,
-				ExistingOrigin.Z - ExistingExtent.Z);
-			const float TopZ = FMath::Min(
-				PurchasedOrigin.Z + PurchasedExtent.Z,
-				ExistingOrigin.Z + ExistingExtent.Z);
-			if (TopZ - BottomZ < 200.0f)
-			{
-				continue;
-			}
-
-			FVector CandidateLocation =
-				(PurchasedOrigin + ExistingOrigin) * 0.5f;
-			if (bPurchasedNormalIsX)
-			{
-				CandidateLocation.Y = (OverlapMin + OverlapMax) * 0.5f;
-			}
-			else
-			{
-				CandidateLocation.X = (OverlapMin + OverlapMax) * 0.5f;
-			}
-			CandidateLocation.Z = BottomZ;
-
-			bool bDuplicate = false;
-			for (const FVector_NetQuantize10& ExistingCandidate :
-				 ServerDoorCandidateLocations)
-			{
-				if (FVector::DistSquared(
-						FVector(ExistingCandidate),
-						CandidateLocation) <
-					FMath::Square(100.0f))
-				{
-					bDuplicate = true;
-					break;
-				}
-			}
-			if (bDuplicate)
-			{
-				continue;
-			}
-
-			ServerDoorCandidatePurchasedWalls.Add(PurchasedWall);
-			ServerDoorCandidateExistingWalls.Add(ExistingWall);
-			ServerDoorCandidateLocations.Add(
-				FVector_NetQuantize10(CandidateLocation));
-			ServerDoorCandidateYaws.Add(
-				bPurchasedNormalIsX ? 0.0f : 90.0f);
-		}
-	}
-
-	UE_LOG(
-		LogBotanicus,
-		Display,
-		TEXT(
-			"Detected %d communication-door candidate wall pair(s)."),
-		ServerDoorCandidateLocations.Num());
-	return ServerDoorCandidateLocations.Num() > 0;
-}
-
-bool ABotanicusPlayerController::BuildManualDoorCandidates(
-	AActor* SelectedActor)
-{
-	check(HasAuthority());
-
-	ServerDoorCandidatePurchasedWalls.Reset();
-	ServerDoorCandidateExistingWalls.Reset();
-	ServerDoorCandidateLocations.Reset();
-	ServerDoorCandidateYaws.Reset();
-
-	UWorld* World = GetWorld();
-	if (!World || !IsValid(SelectedActor))
-	{
-		return false;
-	}
-
-	const bool bMovingExistingDoor =
-		SelectedActor->IsA<ABotanicusCommunicationDoorActor>();
-	TSet<AActor*> CandidateBuildings;
-	if (bMovingExistingDoor)
-	{
-		for (TActorIterator<AActor> It(World); It; ++It)
-		{
-			if (IsEbsBuildingActor(*It))
-			{
-				CandidateBuildings.Add(*It);
-			}
-		}
-	}
-	else if (SelectedActor->IsA<ABotanicusCatalogBuildingActor>())
-	{
-		CandidateBuildings.Add(SelectedActor);
-	}
-	else
-	{
-		for (AActor* Actor :
-			 BuildCompleteBuildingGroup(SelectedActor))
-		{
-			if (IsValid(Actor))
-			{
-				CandidateBuildings.Add(Actor);
-			}
-		}
-	}
-
-	const auto IsOccupied =
-		[this, World](const FVector& Location)
-		{
-			for (TActorIterator<ABotanicusCommunicationDoorActor> It(
-					 World);
-				 It;
-				 ++It)
-			{
-				if (*It != ServerManualDoorToMove.Get() &&
-					FVector::DistSquared2D(
-						It->GetActorLocation(),
-						Location) < FMath::Square(140.0f))
-				{
-					return true;
-				}
-			}
-			return false;
-		};
-	const auto AddCandidate =
-		[this, &IsOccupied](
-			const FVector& Origin,
-			const FVector& Extent)
-		{
-			FVector Location = Origin;
-			Location.Z = Origin.Z - Extent.Z;
-			const bool bNormalIsX = Extent.X <= Extent.Y;
-			if (IsOccupied(Location))
-			{
-				return;
-			}
-			for (const FVector_NetQuantize10& Existing :
-				 ServerDoorCandidateLocations)
-			{
-				if (FVector::DistSquared2D(
-						FVector(Existing),
-						Location) < FMath::Square(100.0f))
-				{
-					return;
-				}
-			}
-			ServerDoorCandidateLocations.Add(
-				FVector_NetQuantize10(Location));
-			ServerDoorCandidateYaws.Add(
-				bNormalIsX ? 0.0f : 90.0f);
-		};
-
-	for (AActor* Building : CandidateBuildings)
-	{
-		if (!IsValid(Building))
-		{
-			continue;
-		}
-		if (Building->IsA<ABotanicusCatalogBuildingActor>())
-		{
-			FBox FrontOpeningBounds(EForceInit::ForceInit);
-			TInlineComponentArray<UPrimitiveComponent*> Components(
-				Building);
-			for (UPrimitiveComponent* Component : Components)
-			{
-				if (!IsValid(Component) ||
-					!Component->GetName().Contains(
-						TEXT("Wall"),
-						ESearchCase::IgnoreCase))
-				{
-					continue;
-				}
-				if (Component->GetName().Contains(
-						TEXT("FrontWall"),
-						ESearchCase::IgnoreCase))
-				{
-					FrontOpeningBounds += Component->Bounds.GetBox();
-					continue;
-				}
-				AddCandidate(
-					Component->Bounds.Origin,
-					Component->Bounds.BoxExtent);
-			}
-			if (FrontOpeningBounds.IsValid)
-			{
-				AddCandidate(
-					FrontOpeningBounds.GetCenter(),
-					FrontOpeningBounds.GetExtent());
-			}
-		}
-		else if (IsPlainBuildingWall(Building))
-		{
-			FVector Origin;
-			FVector Extent;
-			Building->GetActorBounds(true, Origin, Extent);
-			AddCandidate(Origin, Extent);
-		}
-	}
-
-	UE_LOG(
-		LogBotanicus,
-		Display,
-		TEXT("Manual door editing found %d candidate(s)."),
-		ServerDoorCandidateLocations.Num());
-	return ServerDoorCandidateLocations.Num() > 0;
-}
-
-bool ABotanicusPlayerController::IsBuildingOwnedByThisPlayer(
-	AActor* Actor) const
-{
-	if (!IsValid(Actor))
-	{
-		return false;
-	}
-
-	UFunction* OwnershipFunction =
-		Actor->FindFunction(TEXT("CheckPlayerIsOwner_BPI"));
-	if (!OwnershipFunction)
-	{
-		// Some demonstration assets do not enable EBS ownership. They remain
-		// editable so the feature can be tested on the reference map.
-		return true;
-	}
-
-	FStructOnScope Parameters(OwnershipFunction);
-	void* ParameterMemory = Parameters.GetStructMemory();
-	bool* OwnershipResult = nullptr;
-
-	for (TFieldIterator<FProperty> PropertyIt(OwnershipFunction);
-		 PropertyIt;
-		 ++PropertyIt)
-	{
-		FProperty* Property = *PropertyIt;
-		if (!Property->HasAnyPropertyFlags(CPF_Parm))
-		{
-			continue;
-		}
-
-		if (FBoolProperty* BoolProperty = CastField<FBoolProperty>(Property))
-		{
-			if (Property->HasAnyPropertyFlags(CPF_OutParm | CPF_ReturnParm))
-			{
-				OwnershipResult =
-					BoolProperty->ContainerPtrToValuePtr<bool>(
-						ParameterMemory);
-			}
-			continue;
-		}
-
-		if (Property->HasAnyPropertyFlags(CPF_OutParm))
-		{
-			continue;
-		}
-
-		if (FObjectPropertyBase* ObjectProperty =
-			CastField<FObjectPropertyBase>(Property))
-		{
-			UObject* Value = nullptr;
-			if (ObjectProperty->PropertyClass->IsChildOf(
-				APlayerController::StaticClass()))
-			{
-				Value = const_cast<ABotanicusPlayerController*>(this);
-			}
-			else if (ObjectProperty->PropertyClass->IsChildOf(
-				APawn::StaticClass()))
-			{
-				Value = GetPawn();
-			}
-			else if (ObjectProperty->PropertyClass->IsChildOf(
-				APlayerState::StaticClass()))
-			{
-				Value = PlayerState;
-			}
-
-			ObjectProperty->SetObjectPropertyValue_InContainer(
-				ParameterMemory,
-				Value);
-		}
-		else if (FStrProperty* StringProperty =
-			CastField<FStrProperty>(Property))
-		{
-			const FString PlayerName =
-				PlayerState ? PlayerState->GetPlayerName() : FString();
-			StringProperty->SetPropertyValue_InContainer(
-				ParameterMemory,
-				PlayerName);
-		}
-		else if (FNameProperty* NameProperty =
-			CastField<FNameProperty>(Property))
-		{
-			const FName PlayerName =
-				PlayerState
-					? FName(*PlayerState->GetPlayerName())
-					: NAME_None;
-			NameProperty->SetPropertyValue_InContainer(
-				ParameterMemory,
-				PlayerName);
-		}
-	}
-
-	Actor->ProcessEvent(OwnershipFunction, ParameterMemory);
-	return !OwnershipResult || *OwnershipResult;
-}
-
-bool ABotanicusPlayerController::TryAcquireBuildingGroupLock(
-	const TArray<AActor*>& GroupActors)
-{
-	check(HasAuthority());
-
-	for (auto LockIt = ActiveBuildingEditLocks.CreateIterator();
-		 LockIt;
-		 ++LockIt)
-	{
-		if (!LockIt.Key().IsValid() || !LockIt.Value().IsValid())
-		{
-			LockIt.RemoveCurrent();
-		}
-	}
-
-	for (AActor* BuildingActor : GroupActors)
-	{
-		if (!IsValid(BuildingActor))
-		{
-			continue;
-		}
-
-		if (const TWeakObjectPtr<ABotanicusPlayerController>* LockOwner =
-			ActiveBuildingEditLocks.Find(BuildingActor))
-		{
-			if (LockOwner->IsValid() && LockOwner->Get() != this)
-			{
-				return false;
-			}
-		}
-	}
-
-	for (AActor* BuildingActor : GroupActors)
-	{
-		if (IsValid(BuildingActor))
-		{
-			ActiveBuildingEditLocks.Add(BuildingActor, this);
-		}
-	}
-
-	return true;
-}
-
-void ABotanicusPlayerController::ReleaseBuildingGroupLock()
-{
-	if (!HasAuthority())
-	{
-		return;
-	}
-
-	for (auto LockIt = ActiveBuildingEditLocks.CreateIterator();
-		 LockIt;
-		 ++LockIt)
-	{
-		if (!LockIt.Key().IsValid() ||
-			!LockIt.Value().IsValid() ||
-			LockIt.Value().Get() == this)
-		{
-			LockIt.RemoveCurrent();
-		}
-	}
-}
-
-FVector ABotanicusPlayerController::CalculateBuildingGroupPivot(
-	const TArray<AActor*>& GroupActors) const
-{
-	FBox Bounds(EForceInit::ForceInit);
-	for (AActor* Actor : GroupActors)
-	{
-		if (!IsValid(Actor))
-		{
-			continue;
-		}
-
-		FVector Origin;
-		FVector Extent;
-		Actor->GetActorBounds(true, Origin, Extent);
-		Bounds += FBox(Origin - Extent, Origin + Extent);
-	}
-
-	if (!Bounds.IsValid)
-	{
-		return FVector::ZeroVector;
-	}
-
-	const FVector Center = Bounds.GetCenter();
-	return FVector(Center.X, Center.Y, Bounds.Min.Z);
-}
-
-void ABotanicusPlayerController::ApplyServerBuildingGroupTransform(
-	const FVector& NewPivot,
-	float NewYaw)
-{
-	const FQuat DeltaRotation =
-		FRotator(0.0f, NewYaw - ServerBuildingInitialYaw, 0.0f)
-			.Quaternion();
-	for (int32 Index = 0;
-		 Index < ServerBuildingGroup.Num() &&
-		 Index < ServerBuildingOriginalTransforms.Num();
-		 ++Index)
-	{
-		AActor* Actor = ServerBuildingGroup[Index];
-		if (!IsValid(Actor))
-		{
-			continue;
-		}
-
-		const FTransform& Original = ServerBuildingOriginalTransforms[Index];
-		const FVector RelativeLocation =
-			Original.GetLocation() - ServerBuildingOriginalPivot;
-		FTransform NewTransform = Original;
-		NewTransform.SetLocation(
-			NewPivot + DeltaRotation.RotateVector(RelativeLocation));
-		NewTransform.SetRotation(
-			DeltaRotation * Original.GetRotation());
-		Actor->SetActorTransform(
-			NewTransform,
-			false,
-			nullptr,
-			ETeleportType::TeleportPhysics);
-		Actor->ForceNetUpdate();
-	}
-}
-
-void ABotanicusPlayerController::SetBuildingGroupPawnCollision(
-	const TArray<AActor*>& GroupActors,
-	bool bEnabled,
-	bool bRestoreOriginalResponses)
-{
-	if (!bEnabled)
-	{
-		for (AActor* Actor : GroupActors)
-		{
-			if (!IsValid(Actor))
-			{
-				continue;
-			}
-			TInlineComponentArray<UPrimitiveComponent*> Components(Actor);
-			for (UPrimitiveComponent* Component : Components)
-			{
-				if (!IsValid(Component) ||
-					Component->GetCollisionEnabled() ==
-						ECollisionEnabled::NoCollision ||
-					BuildingPawnCollisionComponents.Contains(Component))
-				{
-					continue;
-				}
-				BuildingPawnCollisionComponents.Add(Component);
-				BuildingPawnCollisionOriginalResponses.Add(
-					Component->GetCollisionResponseToChannel(ECC_Pawn));
-				Component->SetCollisionResponseToChannel(
-					ECC_Pawn,
-					ECR_Ignore);
-			}
-		}
-		return;
-	}
-
-	TSet<UPrimitiveComponent*> GroupComponents;
-	for (AActor* Actor : GroupActors)
-	{
-		if (!IsValid(Actor))
-		{
-			continue;
-		}
-		TInlineComponentArray<UPrimitiveComponent*> Components(Actor);
-		for (UPrimitiveComponent* Component : Components)
-		{
-			GroupComponents.Add(Component);
-		}
-	}
-
-	for (int32 Index = BuildingPawnCollisionComponents.Num() - 1;
-		 Index >= 0;
-		 --Index)
-	{
-		UPrimitiveComponent* Component =
-			BuildingPawnCollisionComponents[Index].Get();
-		if (IsValid(Component) && !GroupComponents.Contains(Component))
-		{
-			continue;
-		}
-		if (bRestoreOriginalResponses &&
-			IsValid(Component) &&
-			BuildingPawnCollisionOriginalResponses.IsValidIndex(Index))
-		{
-			Component->SetCollisionResponseToChannel(
-				ECC_Pawn,
-				BuildingPawnCollisionOriginalResponses[Index]);
-		}
-		BuildingPawnCollisionComponents.RemoveAtSwap(Index);
-		BuildingPawnCollisionOriginalResponses.RemoveAtSwap(Index);
-	}
-}
-
-void ABotanicusPlayerController::
-	SetPurchasedBuildingPawnCollisionForAllPlayers(
-		const TArray<AActor*>& GroupActors,
-		bool bEnabled,
-		bool bRestoreOriginalResponses)
-{
-	check(HasAuthority());
-	SetBuildingGroupPawnCollision(
-		GroupActors,
-		bEnabled,
-		bRestoreOriginalResponses);
-
-	for (TActorIterator<ABotanicusPlayerController> ControllerIt(
-			 GetWorld());
-		 ControllerIt;
-		 ++ControllerIt)
-	{
-		ControllerIt->ClientSetPurchasedBuildingPawnCollision(
-			GroupActors,
-			bEnabled,
-			bRestoreOriginalResponses);
-	}
-}
-
-void ABotanicusPlayerController::BroadcastPurchasedBuildingSnapshot(
-	bool bReliable)
-{
-	check(HasAuthority());
-
-	UWorld* World = GetWorld();
-	if (!World || ServerBuildingGroup.Num() == 0)
-	{
-		return;
-	}
-
-	TArray<FName> ActorNames;
-	TArray<FTransform> ActorTransforms;
-	ActorNames.Reserve(ServerBuildingGroup.Num());
-	ActorTransforms.Reserve(ServerBuildingGroup.Num());
-	for (AActor* Actor : ServerBuildingGroup)
-	{
-		if (IsValid(Actor))
-		{
-			ActorNames.Add(Actor->GetFName());
-			ActorTransforms.Add(Actor->GetActorTransform());
-		}
-	}
-
-	for (TActorIterator<ABotanicusPlayerController> ControllerIt(World);
-		 ControllerIt;
-		 ++ControllerIt)
-	{
-		if (bReliable)
-		{
-			ControllerIt->ClientApplyPurchasedBuildingSnapshot(
-				ActorNames,
-				ActorTransforms);
-		}
-		else
-		{
-			ControllerIt->ClientApplyPurchasedBuildingPreviewSnapshot(
-				ActorNames,
-				ActorTransforms);
-		}
-	}
-}
-
-void ABotanicusPlayerController::QueuePurchasedBuildingSnapshot(
-	const TArray<FName>& ActorNames,
-	const TArray<FTransform>& ActorTransforms)
-{
-	if (ActorNames.Num() == 0 ||
-		ActorNames.Num() != ActorTransforms.Num())
-	{
-		return;
-	}
-
-	if (PendingPurchasedBuildingActorNames != ActorNames)
-	{
-		PurchasedBuildingSnapshotRetryCount = 0;
-	}
-	PendingPurchasedBuildingActorNames = ActorNames;
-	PendingPurchasedBuildingTransforms = ActorTransforms;
-	TryApplyPurchasedBuildingSnapshot();
-}
-
-void ABotanicusPlayerController::TryApplyPurchasedBuildingSnapshot()
-{
-	UWorld* World = GetWorld();
-	if (!World ||
-		PendingPurchasedBuildingActorNames.Num() == 0 ||
-		PendingPurchasedBuildingActorNames.Num() !=
-			PendingPurchasedBuildingTransforms.Num())
-	{
-		return;
-	}
-
-	TMap<FName, AActor*> ActorsByName;
-	for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
-	{
-		AActor* Actor = *ActorIt;
-		if (IsValid(Actor))
-		{
-			ActorsByName.Add(Actor->GetFName(), Actor);
-		}
-	}
-
-	int32 AppliedActorCount = 0;
-	for (int32 Index = 0;
-		 Index < PendingPurchasedBuildingActorNames.Num();
-		 ++Index)
-	{
-		AActor* const* FoundActor =
-			ActorsByName.Find(PendingPurchasedBuildingActorNames[Index]);
-		if (!FoundActor || !IsValid(*FoundActor))
-		{
-			continue;
-		}
-
-		(*FoundActor)->SetActorTransform(
-			PendingPurchasedBuildingTransforms[Index],
-			false,
-			nullptr,
-			ETeleportType::TeleportPhysics);
-		(*FoundActor)->UpdateComponentTransforms();
-		(*FoundActor)->MarkComponentsRenderStateDirty();
-		++AppliedActorCount;
-	}
-
-	if (AppliedActorCount <
-			PendingPurchasedBuildingActorNames.Num() &&
-		PurchasedBuildingSnapshotRetryCount < 100)
-	{
-		++PurchasedBuildingSnapshotRetryCount;
-		if (!GetWorldTimerManager().IsTimerActive(
-				PurchasedBuildingSnapshotRetryTimer))
-		{
-			GetWorldTimerManager().SetTimer(
-				PurchasedBuildingSnapshotRetryTimer,
-				this,
-				&ABotanicusPlayerController::
-					TryApplyPurchasedBuildingSnapshot,
-				0.1f,
-				false);
-		}
-		return;
-	}
-
-	GetWorldTimerManager().ClearTimer(
-		PurchasedBuildingSnapshotRetryTimer);
-	const int32 ExpectedActorCount =
-		PendingPurchasedBuildingActorNames.Num();
-	PendingPurchasedBuildingActorNames.Reset();
-	PendingPurchasedBuildingTransforms.Reset();
-	PurchasedBuildingSnapshotRetryCount = 0;
-
-	// Applying another player's building snapshot must never cycle EBS view
-	// modes: those calls can move the local camera or Pawn. Component transforms
-	// are already refreshed above; only reapply the local roof presentation.
-	if (bBuildingTopDownViewActive)
-	{
-		RefreshTopDownRoofVisibility();
-	}
-
-	UE_LOG(
-		LogBotanicus,
-		Display,
-		TEXT(
-			"Client applied purchased building snapshot to %d/%d actors and refreshed EBS."),
-		AppliedActorCount,
-		ExpectedActorCount);
-}
-
-bool ABotanicusPlayerController::
-	IsServerBuildingGroupPlacementValid() const
-{
-	UWorld* World = GetWorld();
-	if (!World || ServerBuildingGroup.Num() == 0)
-	{
-		return false;
-	}
-
-	FCollisionObjectQueryParams ObjectQuery;
-	ObjectQuery.AddObjectTypesToQuery(ECC_WorldStatic);
-	ObjectQuery.AddObjectTypesToQuery(ECC_WorldDynamic);
-	ObjectQuery.AddObjectTypesToQuery(ECC_PhysicsBody);
-	ObjectQuery.AddObjectTypesToQuery(ECC_Pawn);
-
-	FCollisionQueryParams QueryParams(
-		SCENE_QUERY_STAT(BotanicusWholeBuildingPlacement),
-		false);
-	for (AActor* GroupMember : ServerBuildingGroup)
-	{
-		QueryParams.AddIgnoredActor(GroupMember);
-	}
-
-	for (AActor* GroupMember : ServerBuildingGroup)
-	{
-		if (!IsValid(GroupMember))
-		{
-			continue;
-		}
-
-		struct FPlacementTestBox
-		{
-			FVector Center = FVector::ZeroVector;
-			FVector Extent = FVector::ZeroVector;
-			FQuat Rotation = FQuat::Identity;
-		};
-		TArray<FPlacementTestBox> TestBoxes;
-		if (GroupMember->IsA<ABotanicusCatalogBuildingActor>())
-		{
-			TInlineComponentArray<UPrimitiveComponent*> Components(
-				GroupMember);
-			for (UPrimitiveComponent* Component : Components)
-			{
-				if (!IsValid(Component) ||
-					Component->GetCollisionEnabled() ==
-						ECollisionEnabled::NoCollision)
-				{
-					continue;
-				}
-				FPlacementTestBox& Box =
-					TestBoxes.AddDefaulted_GetRef();
-				Box.Center = Component->Bounds.Origin;
-				Box.Extent = Component->Bounds.BoxExtent;
-				Box.Rotation = Component->GetComponentQuat();
-			}
-		}
-		else
-		{
-			const FBox LocalBounds =
-				GroupMember->CalculateComponentsBoundingBoxInLocalSpace(
-					false,
-					true);
-			if (LocalBounds.IsValid)
-			{
-				const FTransform ActorTransform =
-					GroupMember->GetActorTransform();
-				FPlacementTestBox& Box =
-					TestBoxes.AddDefaulted_GetRef();
-				Box.Center = ActorTransform.TransformPosition(
-					LocalBounds.GetCenter());
-				Box.Extent =
-					LocalBounds.GetExtent() *
-					ActorTransform.GetScale3D().GetAbs();
-				Box.Rotation = ActorTransform.GetRotation();
-			}
-		}
-
-		for (FPlacementTestBox& TestBox : TestBoxes)
-		{
-			// A tiny inset allows snapped pieces and neighbouring buildings to
-			// touch exactly at their faces without being penetrations.
-			TestBox.Extent.X =
-				FMath::Max(1.0f, TestBox.Extent.X - 5.0f);
-			TestBox.Extent.Y =
-				FMath::Max(1.0f, TestBox.Extent.Y - 5.0f);
-			TestBox.Extent.Z =
-				FMath::Max(1.0f, TestBox.Extent.Z - 5.0f);
-
-			TArray<FOverlapResult> Overlaps;
-			World->OverlapMultiByObjectType(
-				Overlaps,
-				TestBox.Center,
-				TestBox.Rotation,
-				ObjectQuery,
-				FCollisionShape::MakeBox(TestBox.Extent),
-				QueryParams);
-
-			for (const FOverlapResult& Overlap : Overlaps)
-			{
-				AActor* OverlappedActor = Overlap.GetActor();
-				if (!IsValid(OverlappedActor) ||
-					OverlappedActor->IsA<ALandscapeProxy>() ||
-					ServerBuildingGroup.Contains(OverlappedActor))
-				{
-					continue;
-				}
-
-				// The two wall modules deliberately share the same plane when a
-				// purchased building is magnetised to an existing one.
-				if (GroupMember == ServerSnappedMovingWall &&
-					OverlappedActor == ServerSnappedExistingWall)
-				{
-					continue;
-				}
-
-				if (IsValid(ServerSnappedMovingWall) &&
-					IsValid(ServerSnappedExistingWall) &&
-					IsEbsBuildingActor(GroupMember) &&
-					IsEbsBuildingActor(OverlappedActor))
-				{
-					FVector SnapMovingOrigin;
-					FVector SnapMovingExtent;
-					ServerSnappedMovingWall->GetActorBounds(
-						true,
-						SnapMovingOrigin,
-						SnapMovingExtent);
-					const bool bConnectionNormalIsX =
-						SnapMovingExtent.X <= SnapMovingExtent.Y;
-					const float ConnectionPlane =
-						bConnectionNormalIsX
-							? SnapMovingOrigin.X
-							: SnapMovingOrigin.Y;
-
-					FVector MovingOrigin;
-					FVector MovingExtent;
-					GroupMember->GetActorBounds(
-						true,
-						MovingOrigin,
-						MovingExtent);
-					FVector ExistingOrigin;
-					FVector ExistingExtent;
-					OverlappedActor->GetActorBounds(
-						true,
-						ExistingOrigin,
-						ExistingExtent);
-
-					const float MovingMin =
-						bConnectionNormalIsX
-							? MovingOrigin.X - MovingExtent.X
-							: MovingOrigin.Y - MovingExtent.Y;
-					const float MovingMax =
-						bConnectionNormalIsX
-							? MovingOrigin.X + MovingExtent.X
-							: MovingOrigin.Y + MovingExtent.Y;
-					const float ExistingMin =
-						bConnectionNormalIsX
-							? ExistingOrigin.X - ExistingExtent.X
-							: ExistingOrigin.Y - ExistingExtent.Y;
-					const float ExistingMax =
-						bConnectionNormalIsX
-							? ExistingOrigin.X + ExistingExtent.X
-							: ExistingOrigin.Y + ExistingExtent.Y;
-					const float IntersectionMin =
-						FMath::Max(MovingMin, ExistingMin);
-					const float IntersectionMax =
-						FMath::Min(MovingMax, ExistingMax);
-
-					if (IntersectionMax >= IntersectionMin &&
-						IntersectionMin >=
-							ConnectionPlane -
-								BuildingConnectionOverlapDepth &&
-						IntersectionMax <=
-							ConnectionPlane +
-								BuildingConnectionOverlapDepth)
-					{
-						continue;
-					}
-				}
-
-				return false;
-			}
-		}
-	}
-
-	return true;
-}
-
-void ABotanicusPlayerController::ClearServerBuildingGroupMove()
-{
-	ReleaseBuildingGroupLock();
-	ServerBuildingGroup.Reset();
-	ServerBuildingOriginalTransforms.Reset();
-	ServerBuildingOriginalPivot = FVector::ZeroVector;
-	ServerBuildingInitialYaw = 0.0f;
-	ServerBuildingGroundOffset = 0.0f;
-	ServerSnappedMovingWall = nullptr;
-	ServerSnappedExistingWall = nullptr;
-	bServerBuildingPlacementValid = true;
-	bServerBuildingPurchasePlacement = false;
-	ServerPendingBuildingPurchasePrice = 0;
-	ServerPendingBuildingPurchaseKey = NAME_None;
-}
-
-void ABotanicusPlayerController::RefundPendingBuildingPurchase()
-{
-	if (ServerPendingBuildingPurchasePrice <= 0)
-	{
-		ServerPendingBuildingPurchaseKey = NAME_None;
-		return;
-	}
-
-	const int32 RefundedPrice = ServerPendingBuildingPurchasePrice;
-	const FName RefundedKey = ServerPendingBuildingPurchaseKey;
-	AddSharedFunds(this, RefundedPrice);
-	ServerPendingBuildingPurchasePrice = 0;
-	ServerPendingBuildingPurchaseKey = NAME_None;
-	ForceNetUpdate();
-	OnRep_OrderState();
-	ClientMessage(
-		*FString::Printf(
-			TEXT("Placement annulé : %d crédits remboursés."),
-			RefundedPrice));
-	UE_LOG(
-		LogBotanicus,
-		Display,
-		TEXT("Refunded %d credits for cancelled building purchase %s."),
-		RefundedPrice,
-		*RefundedKey.ToString());
-	ScheduleSharedStateAutosave(this);
 }
 
 bool ABotanicusPlayerController::ShouldUseTouchControls() const

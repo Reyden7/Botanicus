@@ -371,6 +371,8 @@ public:
 	UPROPERTY()
 	TArray<FBotanicusSavedBuildingActor> BuildingActors;
 
+	// Legacy construction records remain serialized for old save slots.
+	// Runtime loading ignores their transforms and uses the level's actors.
 	UPROPERTY()
 	TArray<FName> RemovedBuildingActorNames;
 

@@ -35,7 +35,6 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Exec, Category="Botanicus|Save")
 	bool BotanicusSaveNow();
 
-	void RegisterRemovedBuildingActor(FName ActorName);
 	/** Coalesces inventory mutations into one save on the next server tick. */
 	void ScheduleInventoryAutosave();
 
@@ -73,7 +72,6 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusWorldSaveGame> CurrentSaveGame;
 
-	TSet<FName> RemovedBuildingActorNames;
 	TMap<TWeakObjectPtr<AController>, int32> PIERemotePlayerSlots;
 	int32 NextPIERemotePlayerSlot = 0;
 	bool bAutosaveReady = false;

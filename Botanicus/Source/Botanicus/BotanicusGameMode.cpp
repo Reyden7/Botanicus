@@ -8,14 +8,12 @@
 #include "BotanicusPlayerController.h"
 #include "Catalog/BotanicusItemCatalogSubsystem.h"
 #include "Building/BotanicusCatalogBuildingActor.h"
-#include "Building/BotanicusCommunicationDoorActor.h"
 #include "Building/BotanicusElementalGreenhouseActor.h"
 #include "Delivery/BotanicusDeliveryParcelActor.h"
 #include "Delivery/BotanicusDeliveryZoneActor.h"
 #include "Delivery/BotanicusLargeEquipmentActor.h"
 #include "Delivery/BotanicusPlaceableItemActor.h"
 #include "Decoration/BotanicusBrokenFlowerPotActor.h"
-#include "Economy/BotanicusRefundZoneActor.h"
 #include "Environment/BotanicusClimateDeviceActor.h"
 #include "Growing/BotanicusPlantPotActor.h"
 #include "Growing/BotanicusMultiPlantPotActor.h"
@@ -33,12 +31,10 @@
 #include "GameFramework/PlayerState.h"
 #include "Kismet/GameplayStatics.h"
 #include "NavigationSystem.h"
-#include "Path/BotanicusPathActor.h"
 #include "QuickBar/BotanicusQuickBarComponent.h"
 #include "Save/BotanicusWorldSaveGame.h"
 #include "TimerManager.h"
 #include "Visitors/BotanicusVisitorManager.h"
-#include "Visitors/BotanicusVisitorZoneActor.h"
 #include "Preparation/BotanicusComputerActor.h"
 #include "Preparation/BotanicusPreparationWorkbenchActor.h"
 
@@ -46,24 +42,6 @@ namespace
 {
 	const FName PurchasedBuildingTag(TEXT("BotanicusPurchasedBuilding"));
 
-	void ConfigureRestoredPurchasedActorForNetworking(AActor* Actor)
-	{
-		if (!IsValid(Actor))
-		{
-			return;
-		}
-
-		Actor->SetOwner(nullptr);
-		Actor->bOnlyRelevantToOwner = false;
-		Actor->bAlwaysRelevant = true;
-		Actor->SetNetUpdateFrequency(30.0f);
-		Actor->SetMinNetUpdateFrequency(10.0f);
-		Actor->SetReplicates(true);
-		Actor->SetReplicateMovement(true);
-		Actor->SetNetDormancy(DORM_Awake);
-		Actor->FlushNetDormancy();
-		Actor->ForceNetUpdate();
-	}
 }
 
 ABotanicusGameMode::ABotanicusGameMode()
@@ -475,12 +453,6 @@ void ABotanicusGameMode::RestartPlayer(AController* NewPlayer)
 	{
 		RestorePlayerInventory(NewPlayer);
 		RestorePlayerEconomy(NewPlayer);
-		if (ABotanicusPlayerController* BotanicusController =
-			Cast<ABotanicusPlayerController>(NewPlayer))
-		{
-			BotanicusController->ClientHideRemovedBuildingActors(
-				RemovedBuildingActorNames.Array());
-		}
 		if (bAutosaveReady)
 		{
 			EnsureStarterFixtures(NewPlayer);
@@ -492,12 +464,6 @@ void ABotanicusGameMode::Logout(AController* Exiting)
 {
 	if (HasAuthority())
 	{
-		if (ABotanicusPlayerController* BotanicusController =
-			Cast<ABotanicusPlayerController>(Exiting))
-		{
-			BotanicusController->
-				CancelPendingBuildingPurchaseForLogout();
-		}
 		if (ABotanicusCharacter* Character =
 			Cast<ABotanicusCharacter>(Exiting->GetPawn()))
 		{
@@ -515,14 +481,6 @@ void ABotanicusGameMode::Logout(AController* Exiting)
 	}
 
 	Super::Logout(Exiting);
-}
-
-void ABotanicusGameMode::RegisterRemovedBuildingActor(FName ActorName)
-{
-	if (HasAuthority() && !ActorName.IsNone())
-	{
-		RemovedBuildingActorNames.Add(ActorName);
-	}
 }
 
 void ABotanicusGameMode::ScheduleInventoryAutosave()
@@ -622,18 +580,15 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 	CurrentSaveGame->bHasDeliveryZone = false;
 	CurrentSaveGame->DeliveryZoneTransform = FTransform::Identity;
 	CurrentSaveGame->WorldItems.Reset();
-	CurrentSaveGame->RemovedBuildingActorNames =
-		RemovedBuildingActorNames.Array();
+	// Legacy construction fields stay in the save schema so old slots load,
+	// but the authored level owns all structural actor locations.
+	CurrentSaveGame->RemovedBuildingActorNames.Reset();
 	CurrentSaveGame->CommunicationDoors.Reset();
 
-	for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
+	for (TActorIterator<ABotanicusGreenhouseActor> ActorIt(World); ActorIt; ++ActorIt)
 	{
-		AActor* Actor = *ActorIt;
-		if (!IsValid(Actor) ||
-			(!Actor->ActorHasTag(PurchasedBuildingTag) &&
-			 !Actor->IsA<ABotanicusGreenhouseActor>() &&
-			 !Actor->GetClass()->GetPathName().Contains(
-				 TEXT("/EasyBuildingSystem/Blueprints/BuildingObjects/"))))
+		ABotanicusGreenhouseActor* Actor = *ActorIt;
+		if (!IsValid(Actor) || Actor->ActorHasTag(PurchasedBuildingTag))
 		{
 			continue;
 		}
@@ -642,9 +597,8 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 			CurrentSaveGame->BuildingActors.AddDefaulted_GetRef();
 		SavedActor.ActorName = Actor->GetFName();
 		SavedActor.ActorClass = FSoftClassPath(Actor->GetClass());
-		SavedActor.Transform = Actor->GetActorTransform();
-		SavedActor.bRuntimeSpawned =
-			Actor->ActorHasTag(PurchasedBuildingTag);
+		SavedActor.Transform = FTransform::Identity;
+		SavedActor.bRuntimeSpawned = false;
 		if (const ABotanicusGreenhouseActor* Greenhouse =
 			Cast<ABotanicusGreenhouseActor>(Actor))
 		{
@@ -659,78 +613,6 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 			SavedActor.GreenhouseLuminosityPercent =
 				Greenhouse->GetLuminosityPercent();
 		}
-	}
-
-	for (TActorIterator<ABotanicusPathActor> PathIt(World);
-		 PathIt;
-		 ++PathIt)
-	{
-		if (PathIt->IsPreviewPath())
-		{
-			continue;
-		}
-
-		const TArray<FVector> WorldPoints = PathIt->GetPathWorldPoints();
-		if (WorldPoints.Num() < 2)
-		{
-			continue;
-		}
-
-		FBotanicusSavedPath& SavedPath =
-			CurrentSaveGame->Paths.AddDefaulted_GetRef();
-		SavedPath.PathType =
-			static_cast<uint8>(PathIt->GetPathType());
-		SavedPath.Points.Reserve(WorldPoints.Num());
-		for (const FVector& Point : WorldPoints)
-		{
-			SavedPath.Points.Add(FVector_NetQuantize10(Point));
-		}
-		for (const FVector& JunctionPoint :
-			 PathIt->GetJunctionWorldPoints())
-		{
-			SavedPath.JunctionPoints.Add(
-				FVector_NetQuantize10(JunctionPoint));
-		}
-	}
-
-	for (TActorIterator<ABotanicusVisitorZoneActor> ZoneIt(World);
-		 ZoneIt;
-		 ++ZoneIt)
-	{
-		FBotanicusSavedVisitorZone& SavedZone =
-			CurrentSaveGame->VisitorZones.AddDefaulted_GetRef();
-		SavedZone.Transform = ZoneIt->GetActorTransform();
-		SavedZone.ZoneType =
-			static_cast<uint8>(ZoneIt->GetZoneType());
-		SavedZone.BoxExtent = ZoneIt->GetZoneExtent();
-	}
-
-	for (TActorIterator<ABotanicusRefundZoneActor> ZoneIt(World);
-		 ZoneIt;
-		 ++ZoneIt)
-	{
-		FBotanicusSavedRefundZone& SavedZone =
-			CurrentSaveGame->RefundZones.AddDefaulted_GetRef();
-		SavedZone.Transform = ZoneIt->GetActorTransform();
-		SavedZone.BoxExtent = ZoneIt->GetZoneExtent();
-	}
-
-	for (TActorIterator<ABotanicusDeliveryZoneActor> ZoneIt(World);
-		 ZoneIt;
-		 ++ZoneIt)
-	{
-		CurrentSaveGame->bHasDeliveryZone = true;
-		CurrentSaveGame->DeliveryZoneTransform =
-			ZoneIt->GetActorTransform();
-		break;
-	}
-
-	for (TActorIterator<ABotanicusCommunicationDoorActor> DoorIt(World);
-		 DoorIt;
-		 ++DoorIt)
-	{
-		CurrentSaveGame->CommunicationDoors.Add(
-			DoorIt->GetActorTransform());
 	}
 
 	for (TActorIterator<ABotanicusDeliveryParcelActor> ParcelIt(World);
@@ -796,6 +678,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 	{
 		if (!IsValid(*ItemIt) ||
 			ItemIt->IsActorBeingDestroyed() ||
+			ItemIt->IsA<ABotanicusCashRegisterActor>() ||
 			ItemIt->ActorHasTag(TEXT("BotanicusPlacementPreview")))
 		{
 			continue;
@@ -1160,322 +1043,29 @@ void ABotanicusGameMode::RestoreWorldState()
 		return;
 	}
 
-	TMap<FName, AActor*> BuildingActorsByName;
-	for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
-	{
-		AActor* Actor = *ActorIt;
-		if (IsValid(Actor) &&
-			(Actor->IsA<ABotanicusGreenhouseActor>() ||
-			 Actor->GetClass()->GetPathName().Contains(
-				 TEXT("/EasyBuildingSystem/Blueprints/BuildingObjects/"))))
-		{
-			BuildingActorsByName.Add(Actor->GetFName(), Actor);
-		}
-	}
-
-	RemovedBuildingActorNames.Reset();
-	for (const FName RemovedActorName :
-		 CurrentSaveGame->RemovedBuildingActorNames)
-	{
-		RemovedBuildingActorNames.Add(RemovedActorName);
-		if (AActor* const* FoundActor =
-			BuildingActorsByName.Find(RemovedActorName))
-		{
-			if (IsValid(*FoundActor))
-			{
-				(*FoundActor)->Destroy();
-			}
-			BuildingActorsByName.Remove(RemovedActorName);
-		}
-	}
-
-	int32 RestoredCount = 0;
+	// Structural actors come from the level. Old construction records are
+	// intentionally ignored; only a named greenhouse's gameplay state survives.
 	for (const FBotanicusSavedBuildingActor& SavedActor :
 		 CurrentSaveGame->BuildingActors)
 	{
-		AActor* const* FoundActor =
-			BuildingActorsByName.Find(SavedActor.ActorName);
-		AActor* RestoredActor =
-			FoundActor && IsValid(*FoundActor) ? *FoundActor : nullptr;
-		if (!RestoredActor &&
-			SavedActor.bRuntimeSpawned &&
-			!SavedActor.ActorClass.IsNull())
+		for (TActorIterator<ABotanicusGreenhouseActor> It(World); It; ++It)
 		{
-			if (UClass* ActorClass =
-				SavedActor.ActorClass.TryLoadClass<AActor>())
+			if (It->GetFName() != SavedActor.ActorName ||
+				It->ActorHasTag(PurchasedBuildingTag))
 			{
-				FActorSpawnParameters SpawnParameters;
-				SpawnParameters.Name = SavedActor.ActorName;
-				SpawnParameters.SpawnCollisionHandlingOverride =
-					ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-				RestoredActor = World->SpawnActor<AActor>(
-					ActorClass,
-					SavedActor.Transform,
-					SpawnParameters);
-				if (RestoredActor)
-				{
-					RestoredActor->Tags.AddUnique(PurchasedBuildingTag);
-					ConfigureRestoredPurchasedActorForNetworking(
-						RestoredActor);
-					BuildingActorsByName.Add(
-						RestoredActor->GetFName(),
-						RestoredActor);
-				}
+				continue;
 			}
-		}
-		if (!RestoredActor)
-		{
-			continue;
-		}
-
-		RestoredActor->SetActorTransform(
-			SavedActor.Transform,
-			false,
-			nullptr,
-			ETeleportType::TeleportPhysics);
-		if (ABotanicusGreenhouseActor* Greenhouse =
-			Cast<ABotanicusGreenhouseActor>(RestoredActor))
-		{
-			Greenhouse->RestoreGreenhouseState(
+			It->RestoreGreenhouseState(
 				CurrentSaveGame->SaveVersion >= 27
 					? SavedActor.GreenhouseLevel
 					: SavedActor.ElementalGreenhouseLevel,
 				CurrentSaveGame->SaveVersion >= 27
-					? SavedActor.GreenhouseTemperatureCelsius
-					: 20.0f,
+					? SavedActor.GreenhouseTemperatureCelsius : 20.0f,
 				CurrentSaveGame->SaveVersion >= 27
-					? SavedActor.GreenhouseAirHumidityPercent
-					: 50.0f,
+					? SavedActor.GreenhouseAirHumidityPercent : 50.0f,
 				CurrentSaveGame->SaveVersion >= 27
-					? SavedActor.GreenhouseLuminosityPercent
-					: 50.0f);
-		}
-		++RestoredCount;
-	}
-
-	UE_LOG(
-		LogBotanicus,
-		Display,
-		TEXT("Restored %d/%d saved building actors."),
-		RestoredCount,
-		CurrentSaveGame->BuildingActors.Num());
-
-	for (TActorIterator<ABotanicusCommunicationDoorActor> DoorIt(World);
-		 DoorIt;
-		 ++DoorIt)
-	{
-		DoorIt->Destroy();
-	}
-	for (const FTransform& DoorTransform :
-		 CurrentSaveGame->CommunicationDoors)
-	{
-		FActorSpawnParameters SpawnParameters;
-		SpawnParameters.SpawnCollisionHandlingOverride =
-			ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		World->SpawnActor<ABotanicusCommunicationDoorActor>(
-			ABotanicusCommunicationDoorActor::StaticClass(),
-			DoorTransform,
-			SpawnParameters);
-	}
-
-	TArray<ABotanicusPathActor*> ExistingPaths;
-	for (TActorIterator<ABotanicusPathActor> PathIt(World);
-		 PathIt;
-		 ++PathIt)
-	{
-		ExistingPaths.Add(*PathIt);
-	}
-	const bool bHasSavedPaths = !CurrentSaveGame->Paths.IsEmpty();
-	for (ABotanicusPathActor* ExistingPath : ExistingPaths)
-	{
-		if (bHasSavedPaths && IsValid(ExistingPath))
-		{
-			ExistingPath->Destroy();
-		}
-	}
-
-	int32 RestoredPathCount = 0;
-	if (bHasSavedPaths)
-	for (const FBotanicusSavedPath& SavedPath : CurrentSaveGame->Paths)
-	{
-		if (SavedPath.Points.Num() < 2)
-		{
-			continue;
-		}
-
-		TArray<FVector> WorldPoints;
-		WorldPoints.Reserve(SavedPath.Points.Num());
-		for (const FVector_NetQuantize10& Point : SavedPath.Points)
-		{
-			WorldPoints.Add(FVector(Point));
-		}
-
-		ABotanicusPathActor* RestoredPath =
-			World->SpawnActor<ABotanicusPathActor>();
-		if (RestoredPath)
-		{
-		const EBotanicusPathType RestoredPathType =
-			CurrentSaveGame->SaveVersion >= 11 &&
-				SavedPath.PathType ==
-					static_cast<uint8>(
-						EBotanicusPathType::VisitorRoute)
-				? EBotanicusPathType::VisitorRoute
-				: EBotanicusPathType::Standard;
-		RestoredPath->InitializeConfirmedPath(
-			WorldPoints,
-			RestoredPathType);
-			TArray<FVector> JunctionPoints;
-			JunctionPoints.Reserve(SavedPath.JunctionPoints.Num());
-			for (const FVector_NetQuantize10& JunctionPoint :
-				 SavedPath.JunctionPoints)
-			{
-				JunctionPoints.Add(FVector(JunctionPoint));
-			}
-			RestoredPath->RestoreJunctionPoints(JunctionPoints);
-			++RestoredPathCount;
-		}
-	}
-
-	UE_LOG(
-		LogBotanicus,
-		Display,
-		TEXT("Restored %d/%d saved paths."),
-		RestoredPathCount,
-		CurrentSaveGame->Paths.Num());
-
-	const bool bHasSavedVisitorZones =
-		CurrentSaveGame->SaveVersion >= 11 &&
-		!CurrentSaveGame->VisitorZones.IsEmpty();
-	if (bHasSavedVisitorZones)
-	{
-		for (TActorIterator<ABotanicusVisitorZoneActor> ZoneIt(World);
-			 ZoneIt;
-			 ++ZoneIt)
-		{
-			ZoneIt->Destroy();
-		}
-		for (const FBotanicusSavedVisitorZone& SavedZone :
-			 CurrentSaveGame->VisitorZones)
-		{
-			FActorSpawnParameters SpawnParameters;
-			SpawnParameters.SpawnCollisionHandlingOverride =
-				ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-			ABotanicusVisitorZoneActor* Zone =
-				World->SpawnActor<ABotanicusVisitorZoneActor>(
-					ABotanicusVisitorZoneActor::StaticClass(),
-					SavedZone.Transform,
-					SpawnParameters);
-			if (Zone)
-			{
-				const EBotanicusVisitorZoneType ZoneType =
-					static_cast<EBotanicusVisitorZoneType>(
-						FMath::Clamp<int32>(
-							SavedZone.ZoneType,
-							0,
-							2));
-				FVector RestoredExtent = SavedZone.BoxExtent;
-				if (ZoneType ==
-					EBotanicusVisitorZoneType::Checkout)
-				{
-					// Migrate old saves whose checkout planning surface
-					// only had room for the starter manual register.
-					RestoredExtent.X =
-						FMath::Max(RestoredExtent.X, 500.0f);
-					RestoredExtent.Y =
-						FMath::Max(RestoredExtent.Y, 300.0f);
-				}
-				Zone->InitializeZone(
-					ZoneType,
-					RestoredExtent);
-			}
-		}
-	}
-
-	const bool bHasSavedRefundZones =
-		CurrentSaveGame->SaveVersion >= 21 &&
-		!CurrentSaveGame->RefundZones.IsEmpty();
-	if (bHasSavedRefundZones)
-	{
-		for (TActorIterator<ABotanicusRefundZoneActor> ZoneIt(World);
-			 ZoneIt;
-			 ++ZoneIt)
-		{
-			ZoneIt->Destroy();
-		}
-		for (const FBotanicusSavedRefundZone& SavedZone :
-			 CurrentSaveGame->RefundZones)
-		{
-			FActorSpawnParameters SpawnParameters;
-			SpawnParameters.SpawnCollisionHandlingOverride =
-				ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-			ABotanicusRefundZoneActor* Zone =
-				World->SpawnActor<ABotanicusRefundZoneActor>(
-					ABotanicusRefundZoneActor::StaticClass(),
-					SavedZone.Transform,
-					SpawnParameters);
-			if (Zone)
-			{
-				Zone->InitializeZone(SavedZone.BoxExtent);
-			}
-		}
-	}
-
-	TArray<ABotanicusDeliveryZoneActor*> ExistingDeliveryZones;
-	for (TActorIterator<ABotanicusDeliveryZoneActor> ZoneIt(World);
-		 ZoneIt;
-		 ++ZoneIt)
-	{
-		ExistingDeliveryZones.Add(*ZoneIt);
-	}
-	if (CurrentSaveGame->SaveVersion >= 22 &&
-		CurrentSaveGame->bHasDeliveryZone)
-	{
-		ABotanicusDeliveryZoneActor* DeliveryZone =
-			ExistingDeliveryZones.IsEmpty()
-				? nullptr
-				: ExistingDeliveryZones[0];
-		if (!DeliveryZone)
-		{
-			FActorSpawnParameters SpawnParameters;
-			SpawnParameters.SpawnCollisionHandlingOverride =
-				ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-			DeliveryZone =
-				World->SpawnActor<ABotanicusDeliveryZoneActor>(
-					ABotanicusDeliveryZoneActor::StaticClass(),
-					CurrentSaveGame->DeliveryZoneTransform,
-					SpawnParameters);
-		}
-		else
-		{
-			DeliveryZone->SetActorTransform(
-				CurrentSaveGame->DeliveryZoneTransform,
-				false,
-				nullptr,
-				ETeleportType::TeleportPhysics);
-		}
-
-		for (int32 Index = 1;
-			 Index < ExistingDeliveryZones.Num();
-			 ++Index)
-		{
-			if (IsValid(ExistingDeliveryZones[Index]))
-			{
-				ExistingDeliveryZones[Index]->Destroy();
-			}
-		}
-	}
-	else
-	{
-		// A delivery zone placed directly in the level is already a valid
-		// starter zone. Only remove accidental duplicates.
-		for (int32 Index = 1;
-			 Index < ExistingDeliveryZones.Num();
-			 ++Index)
-		{
-			if (IsValid(ExistingDeliveryZones[Index]))
-			{
-				ExistingDeliveryZones[Index]->Destroy();
-			}
+					? SavedActor.GreenhouseLuminosityPercent : 50.0f);
+			break;
 		}
 	}
 
@@ -1500,7 +1090,8 @@ void ABotanicusGameMode::RestoreWorldState()
 	}
 	for (AActor* ExistingWorldItem : ExistingWorldItems)
 	{
-		if (IsValid(ExistingWorldItem))
+		if (IsValid(ExistingWorldItem) &&
+			!ExistingWorldItem->IsA<ABotanicusCashRegisterActor>())
 		{
 			ExistingWorldItem->Destroy();
 		}
@@ -1510,7 +1101,8 @@ void ABotanicusGameMode::RestoreWorldState()
 	for (const FBotanicusSavedWorldItem& SavedItem :
 		 CurrentSaveGame->WorldItems)
 	{
-		if (SavedItem.ActorClass.IsNull())
+		if (SavedItem.ActorClass.IsNull() ||
+			SavedItem.ItemKey == TEXT("CashRegister"))
 		{
 			continue;
 		}
@@ -1525,6 +1117,11 @@ void ABotanicusGameMode::RestoreWorldState()
 					: SavedItem.ItemKey;
 
 		UClass* ItemClass = SavedItem.ActorClass.TryLoadClass<AActor>();
+		if (ItemClass && ItemClass->IsChildOf(
+			ABotanicusCashRegisterActor::StaticClass()))
+		{
+			continue;
+		}
 		// The item catalogue is authoritative for every culture-pot variant.
 		// This also migrates elemental pots saved before their individual
 		// Blueprints existed, so their editable soil settings are applied.
@@ -1848,25 +1445,6 @@ void ABotanicusGameMode::EnsureStarterFixtures(
 			AdjustIfPossibleButAlwaysSpawn;
 	bool bCreatedFixture = false;
 
-	TActorIterator<ABotanicusDeliveryZoneActor> DeliveryZoneIt(World);
-	const bool bHasDeliveryZone = !!DeliveryZoneIt;
-	if (!bHasDeliveryZone)
-	{
-		const FVector Location = ResolveFloorLocation(
-			Pawn->GetActorLocation() -
-				Forward * 650.0f +
-				Right * 500.0f,
-			0.0f);
-		if (World->SpawnActor<ABotanicusDeliveryZoneActor>(
-				ABotanicusDeliveryZoneActor::StaticClass(),
-				Location,
-				Pawn->GetActorRotation(),
-				SpawnParameters))
-		{
-			bCreatedFixture = true;
-		}
-	}
-
 	bool bHasWorkbench = false;
 	for (TActorIterator<ABotanicusPreparationWorkbenchActor> It(World);
 		 It;
@@ -1903,52 +1481,6 @@ void ABotanicusGameMode::EnsureStarterFixtures(
 			Workbench->InitializeEquipment(
 				TEXT("PreparationWorkbench"));
 			Workbench->ForceNetUpdate();
-			bCreatedFixture = true;
-		}
-	}
-
-	bool bHasCashRegister = false;
-	for (TActorIterator<ABotanicusCashRegisterActor> It(World);
-		 It;
-		 ++It)
-	{
-		bHasCashRegister |= !It->ActorHasTag(
-			TEXT("BotanicusPlacementPreview"));
-	}
-	if (!bHasCashRegister)
-	{
-		FVector RegisterLocation =
-			Pawn->GetActorLocation() +
-			Forward * 320.0f +
-			Right * 210.0f;
-		FRotator RegisterRotation = Pawn->GetActorRotation();
-		for (TActorIterator<ABotanicusVisitorZoneActor> ZoneIt(World);
-			 ZoneIt;
-			 ++ZoneIt)
-		{
-			if (ZoneIt->GetZoneType() ==
-				EBotanicusVisitorZoneType::Checkout)
-			{
-				RegisterRotation = ZoneIt->GetActorRotation();
-				RegisterLocation =
-					ZoneIt->GetActorLocation() -
-					ZoneIt->GetActorForwardVector() * 155.0f;
-				break;
-			}
-		}
-		RegisterLocation =
-			ResolveFloorLocation(RegisterLocation, 0.0f);
-		if (ABotanicusCashRegisterActor* CashRegister =
-				World->SpawnActor<ABotanicusCashRegisterActor>(
-					ABotanicusCashRegisterActor::StaticClass(),
-					RegisterLocation,
-					RegisterRotation,
-					SpawnParameters))
-		{
-			CashRegister->InitializePlacedItem(
-				TEXT("CashRegister"),
-				1);
-			CashRegister->ForceNetUpdate();
 			bCreatedFixture = true;
 		}
 	}
@@ -2375,12 +1907,14 @@ void ABotanicusGameMode::RestorePlayerEconomy(
 	if (CurrentSaveGame->SaveVersion == 4)
 	{
 		bool bHasLegacyCompactGreenhouse = false;
-		for (TActorIterator<ABotanicusCompactGreenhouseActor> BuildingIt(
-				 GetWorld());
-			 BuildingIt;
-			 ++BuildingIt)
+		for (const FBotanicusSavedBuildingActor& SavedActor :
+			 CurrentSaveGame->BuildingActors)
 		{
-			if (BuildingIt->ActorHasTag(PurchasedBuildingTag))
+			UClass* SavedClass =
+				SavedActor.ActorClass.TryLoadClass<AActor>();
+			if (SavedActor.bRuntimeSpawned && SavedClass &&
+				SavedClass->IsChildOf(
+					ABotanicusCompactGreenhouseActor::StaticClass()))
 			{
 				bHasLegacyCompactGreenhouse = true;
 				break;

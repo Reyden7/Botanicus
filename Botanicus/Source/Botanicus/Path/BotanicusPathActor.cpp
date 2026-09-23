@@ -47,24 +47,9 @@ void ABotanicusPathActor::GetLifetimeReplicatedProps(
 	DOREPLIFETIME(ABotanicusPathActor, PathType);
 }
 
-void ABotanicusPathActor::InitializeConfirmedPath(
-	const TArray<FVector>& WorldPoints,
-	EBotanicusPathType InPathType)
-{
-	SetPathPointsInternal(WorldPoints, false, InPathType);
-	ForceNetUpdate();
-}
-
-void ABotanicusPathActor::SetPreviewPath(
-	const TArray<FVector>& WorldPoints,
-	EBotanicusPathType InPathType)
-{
-	SetPathPointsInternal(WorldPoints, true, InPathType);
-}
-
 void ABotanicusPathActor::AddJunctionPoint(const FVector& WorldPoint)
 {
-	if (!HasAuthority() || bPreviewPath)
+	if (!HasAuthority())
 	{
 		return;
 	}
@@ -80,24 +65,6 @@ void ABotanicusPathActor::AddJunctionPoint(const FVector& WorldPoint)
 
 	JunctionPoints.Add(FVector_NetQuantize10(
 		SnapVisualPointToGround(WorldPoint)));
-	RebuildPathMeshes();
-	ForceNetUpdate();
-}
-
-void ABotanicusPathActor::RestoreJunctionPoints(
-	const TArray<FVector>& WorldPoints)
-{
-	if (!HasAuthority())
-	{
-		return;
-	}
-
-	JunctionPoints.Reset(WorldPoints.Num());
-	for (const FVector& Point : WorldPoints)
-	{
-		JunctionPoints.Add(FVector_NetQuantize10(
-			SnapVisualPointToGround(Point)));
-	}
 	RebuildPathMeshes();
 	ForceNetUpdate();
 }
@@ -156,7 +123,7 @@ bool ABotanicusPathActor::FindClosestPoint(
 	FVector& OutClosestPoint,
 	float& OutDistance) const
 {
-	if (!SplineComponent || PathPoints.Num() < 2 || bPreviewPath)
+	if (!SplineComponent || PathPoints.Num() < 2)
 	{
 		return false;
 	}
@@ -175,7 +142,7 @@ bool ABotanicusPathActor::FindClosestSegment(
 	FVector& OutClosestPoint,
 	float& OutDistance) const
 {
-	if (!SplineComponent || PathPoints.Num() < 2 || bPreviewPath)
+	if (!SplineComponent || PathPoints.Num() < 2)
 	{
 		return false;
 	}
@@ -212,7 +179,6 @@ void ABotanicusPathActor::OnConstruction(const FTransform& Transform)
 
 void ABotanicusPathActor::OnRep_PathPoints()
 {
-	bPreviewPath = false;
 	RebuildPathMeshes();
 }
 
@@ -224,22 +190,6 @@ void ABotanicusPathActor::OnRep_JunctionPoints()
 void ABotanicusPathActor::OnRep_PathType()
 {
 	DynamicPathMaterial = nullptr;
-	RebuildPathMeshes();
-}
-
-void ABotanicusPathActor::SetPathPointsInternal(
-	const TArray<FVector>& WorldPoints,
-	bool bIsPreview,
-	EBotanicusPathType InPathType)
-{
-	PathType = InPathType;
-	PathPoints.Reset(WorldPoints.Num());
-	for (const FVector& Point : WorldPoints)
-	{
-		PathPoints.Add(FVector_NetQuantize10(
-			SnapVisualPointToGround(Point)));
-	}
-	bPreviewPath = bIsPreview;
 	RebuildPathMeshes();
 }
 
@@ -377,8 +327,7 @@ void ABotanicusPathActor::RebuildPathMeshes()
 		Segment->SetEndScale(SegmentScale, true);
 		Segment->SetCollisionProfileName(
 			UCollisionProfile::NoCollision_ProfileName);
-		Segment->SetRenderCustomDepth(bPreviewPath);
-		Segment->SetCustomDepthStencilValue(1);
+		Segment->SetRenderCustomDepth(false);
 		SegmentComponents.Add(Segment);
 	}
 

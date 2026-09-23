@@ -12,13 +12,11 @@ class UUserWidget;
 class UBotanicusMultiplayerSubsystem;
 class UBotanicusQuickBarComponent;
 class UBotanicusQuickBarWidget;
-class UBotanicusTopDownToolbarWidget;
 class UBotanicusCarryProgressWidget;
 class UBotanicusOrderCatalogWidget;
 class UBotanicusWorkbenchUpgradeWidget;
 class UBotanicusDevelopmentPanelWidget;
 class UBotanicusBotanistNotebookWidget;
-class UBotanicusBuildingCatalogWidget;
 class UBotanicusSharedFundsWidget;
 class UBotanicusShopObjectivesWidget;
 class UBotanicusDaySummaryWidget;
@@ -28,13 +26,10 @@ class UBotanicusInteractionTargetWidget;
 class UBotanicusClimateDeviceControlWidget;
 class UBotanicusHudMessageWidget;
 class UBotanicusHudLayoutWidget;
-class UTextRenderComponent;
 class UBotanicusThrowPowerWidget;
 class ABotanicusGameState;
 class ACameraActor;
 class AActor;
-class ABotanicusPathActor;
-class ABotanicusCommunicationDoorActor;
 class ABotanicusDeliveryParcelActor;
 class ABotanicusDeliveryZoneActor;
 class ABotanicusBrokenFlowerPotActor;
@@ -53,7 +48,6 @@ class ABotanicusWaterReserveActor;
 class ABotanicusComputerActor;
 class ABotanicusStorageShelfActor;
 class ABotanicusPreparationWorkbenchActor;
-class UActorComponent;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
 class UPrimitiveComponent;
@@ -126,21 +120,10 @@ public:
 	UFUNCTION(Exec)
 	void BotanicusOrder(FName ItemKey);
 
-	/** Development command: validates whole-building grouping on the current map. */
-	UFUNCTION(Exec)
-	void BotanicusTestBuildingGrouping();
-
 	/** Development command: places a ping in front of the controlled pawn. */
 	UFUNCTION(Exec)
 	void BotanicusTestPing();
 
-	/** Toggles the two-state Botanicus building camera. Bound to the T key. */
-	UFUNCTION(BlueprintCallable, Exec, Category="Botanicus|Building")
-	void ToggleBuildingTopDownView();
-
-	/** True while the local player is using the free top-down building camera. */
-	UFUNCTION(BlueprintPure, Category="Botanicus|Building")
-	bool IsBuildingTopDownViewActive() const { return bBuildingTopDownViewActive; }
 
 	UFUNCTION(BlueprintPure, Category="Botanicus|Furniture")
 	bool IsFurnitureMoveModeActive() const
@@ -180,51 +163,6 @@ public:
 		ABotanicusClimateDeviceActor* ClimateDevice,
 		float PowerLevel);
 
-	UFUNCTION(BlueprintCallable, Category="Botanicus|Path")
-	void BeginPathPlacement();
-
-	UFUNCTION(BlueprintCallable, Category="Botanicus|Visitors")
-	void BeginVisitorRoutePlacement();
-
-	UFUNCTION(BlueprintCallable, Category="Botanicus|Visitors")
-	void BeginVisitorParkingPlacement();
-
-	UFUNCTION(BlueprintCallable, Category="Botanicus|Visitors")
-	void BeginVisitorSalesAreaPlacement();
-
-	UFUNCTION(BlueprintCallable, Category="Botanicus|Visitors")
-	void BeginVisitorCheckoutPlacement();
-
-	UFUNCTION(BlueprintCallable, Category="Botanicus|Economy")
-	void BeginRefundZonePlacement();
-
-	UFUNCTION(BlueprintCallable, Category="Botanicus|Delivery")
-	void BeginDeliveryZonePlacement();
-
-	UFUNCTION(BlueprintCallable, Category="Botanicus|Path")
-	void ConfirmPathPlacement();
-
-	UFUNCTION(BlueprintCallable, Category="Botanicus|Path")
-	void CancelPathPlacement();
-
-	UFUNCTION(BlueprintCallable, Category="Botanicus|Path")
-	void BeginPathDeletion();
-
-	UFUNCTION(BlueprintCallable, Category="Botanicus|Path")
-	void CancelPathDeletion();
-	void CancelVisitorZonePlacement();
-
-	UFUNCTION(BlueprintCallable, Category="Botanicus|Building")
-	void BeginDoorEditing();
-
-	UFUNCTION(BlueprintCallable, Category="Botanicus|Building")
-	void CancelDoorEditing();
-
-	UFUNCTION(BlueprintCallable, Category="Botanicus|Building")
-	void ToggleBuildingCatalog();
-
-	UFUNCTION(BlueprintCallable, Category="Botanicus|Building")
-	void PurchaseCatalogBuilding(FName BuildingKey);
 
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Delivery")
 	void ToggleOrderCatalog();
@@ -386,17 +324,8 @@ public:
 		int32 WateringCount,
 		bool bElementalDead);
 
-	/** Cancels and refunds an unconfirmed building before logout is saved. */
-	void CancelPendingBuildingPurchaseForLogout();
 
-	UFUNCTION(Client, Reliable)
-	void ClientHideRemovedBuildingActors(
-		const TArray<FName>& ActorNames);
-
-	UFUNCTION(BlueprintPure, Category="Botanicus|Path")
-	bool IsPathPlacementActive() const { return bPathPlacementActive; }
-
-	/** Prevents hotbar shortcuts from colliding with construction controls. */
+	/** Prevents hotbar shortcuts from colliding with active item UI. */
 	UFUNCTION(BlueprintPure, Category="Botanicus|Inventory")
 	bool IsQuickBarInputBlocked() const;
 
@@ -458,8 +387,6 @@ protected:
 
 	UBotanicusMultiplayerSubsystem* GetBotanicusMultiplayerSubsystem() const;
 
-	void EnterBuildingTopDownView();
-	void ExitBuildingTopDownView();
 	void ForceFirstPersonView();
 	void InitializeHudLayoutWidget();
 	void InitializeQuickBarWidget();
@@ -472,7 +399,6 @@ protected:
 	void InitializeInteractionTargetWidget();
 	void InitializeHudMessageWidget();
 	void SetHudCursorMode(bool bEnabled);
-	void InitializeTopDownToolbarWidget();
 	void InitializeOrderCatalogWidget();
 	void FinishOpenOrderCatalogFromComputer();
 	void CloseOrderCatalogFromComputer();
@@ -480,55 +406,8 @@ protected:
 	void InitializeWorkbenchUpgradeWidget();
 	void InitializeDevelopmentPanelWidget();
 	void InitializeBotanistNotebookWidget();
-	void InitializeBuildingCatalogWidget();
-	void BeginPathPlacementInternal(EBotanicusPathType PathType);
-	void BeginVisitorZonePlacement(int32 ZoneType);
-	void PlaceVisitorZoneAtCursor();
 	void HideEbsDemoHud();
 	void HideLegacyWorldGuidance();
-	void RefreshTopDownRoofVisibility();
-	void RestoreTopDownRoofVisibility();
-	void RefreshTopDownBuildingLabels(bool bShowLabels);
-	void HideTopDownBuildingLabels();
-	float GetTopDownBuildingViewDistance() const;
-	FText ResolveTopDownBuildingName(AActor* BuildingActor) const;
-	void AdvanceEbsViewMode();
-	void MoveBuildingCameraForward(float AxisValue);
-	void MoveBuildingCameraRight(float AxisValue);
-	void ZoomBuildingCamera(float Direction);
-	void BeginBuildingCameraOrbit();
-	void EndBuildingCameraOrbit();
-	void UpdateBuildingCameraOrbit();
-	void InitializeBuildingCameraOrbitFromCurrentView();
-	void ApplyBuildingCameraOrbit();
-	void BeginBuildingCameraFreeLook();
-	void EndBuildingCameraFreeLook();
-	void UpdateBuildingCameraFreeLook();
-	void AddPathPointAtCursor();
-	void RemoveLastPathPoint();
-	void UpdatePathPreview();
-	void RefreshTopDownToolbar();
-	void TryDeletePathSegmentAtCursor();
-	bool GetPathCursorPoint(FVector& OutPoint) const;
-	bool SnapPathPoint(
-		const FVector& RawPoint,
-		FVector& OutSnappedPoint,
-		ABotanicusPathActor*& OutConnectedPath,
-		EBotanicusPathType DesiredPathType) const;
-	bool FindNearestBuildingEntrance(
-		const FVector& RawPoint,
-		FVector& OutEntrancePoint) const;
-	ABotanicusPathActor* FindNearestExistingPath(
-		const FVector& RawPoint,
-		FVector& OutPathPoint,
-		EBotanicusPathType DesiredPathType) const;
-	bool IsCursorOverTopDownToolbar() const;
-	void TrySelectBuildingGroup();
-	void ConfirmBuildingGroupMove();
-	void CancelBuildingGroupMove();
-	void RotateBuildingGroup(float Direction);
-	void UpdateBuildingGroupPreview(float DeltaTime);
-	void UpdateCommunicationDoorPreview();
 	bool TryCollectNearbyDeliveryParcel();
 	void BeginParcelMoveCharge(
 		ABotanicusDeliveryParcelActor* Parcel);
@@ -685,45 +564,14 @@ protected:
 	float GetMoveHoldDurationForActor(
 		const AActor* Actor,
 		float DefaultDuration) const;
-	ABotanicusDeliveryZoneActor* FindOrCreateDeliveryZone();
+	ABotanicusDeliveryZoneActor* FindDeliveryZone();
 	bool DeliverCatalogItem(
 		FName ItemKey,
 		int32 Quantity);
 	void CompleteCatalogOrder(FGuid OrderId);
 	void RefreshOrderCatalog();
 	void SpawnTestLargeEquipment(FName ItemKey);
-	bool FindBuildingConnectionSnap(
-		const TArray<TObjectPtr<AActor>>& MovingGroup,
-		FVector& OutCorrection,
-		AActor*& OutMovingWall,
-		AActor*& OutExistingWall) const;
-	bool BuildCommunicationDoorCandidates(
-		const TArray<AActor*>& PurchasedGroup);
-	bool BuildManualDoorCandidates(AActor* SelectedActor);
-	bool IsPlainBuildingWall(const AActor* Actor) const;
 	bool TryPlacePing();
-	bool IsEbsConstructionModeActive(UActorComponent*& OutBuildingComponent) const;
-	void SetBuildingGroupHighlighted(bool bHighlighted);
-	void UpdateBuildingGroupPlacementVisual(bool bPlacementValid);
-	bool TraceTopDownCursor(
-		FHitResult& OutHit,
-		bool* bOutOnLandscape = nullptr) const;
-	bool FindLandscapeHeight(const FVector2D& WorldXY, float& OutHeight) const;
-
-	UFUNCTION(Server, Reliable)
-	void ServerBeginBuildingGroupMove(AActor* HitActor);
-
-	UFUNCTION(Server, Unreliable)
-	void ServerUpdateBuildingGroupMove(FVector_NetQuantize10 NewPivotLocation, float NewYaw);
-
-	UFUNCTION(Server, Reliable)
-	void ServerConfirmBuildingGroupMove();
-
-	UFUNCTION(Server, Reliable)
-	void ServerCancelBuildingGroupMove();
-
-	UFUNCTION(Server, Reliable)
-	void ServerPurchaseCatalogBuilding(FName BuildingKey);
 
 	UFUNCTION(Server, Reliable)
 	void ServerCollectDeliveryParcel(
@@ -964,110 +812,9 @@ protected:
 		ABotanicusPlaceableItemActor* WorldItem);
 
 	UFUNCTION(Server, Reliable)
-	void ServerConfirmCommunicationDoor(int32 CandidateIndex);
-
-	UFUNCTION(Server, Reliable)
-	void ServerBeginManualDoorPlacement(AActor* SelectedActor);
-
-	UFUNCTION(Server, Reliable)
-	void ServerCancelCommunicationDoor();
-
-	UFUNCTION(Client, Reliable)
-	void ClientBeginCommunicationDoorPlacement(
-		const TArray<FVector_NetQuantize10>& CandidateLocations,
-		const TArray<float>& CandidateYaws);
-
-	UFUNCTION(Client, Reliable)
-	void ClientEndCommunicationDoorPlacement(bool bCreated);
-
-	UFUNCTION(Client, Reliable)
-	void ClientBeginBuildingGroupMove(
-		const TArray<AActor*>& GroupActors,
-		FVector_NetQuantize10 GroupPivot,
-		float InitialYaw);
-
-	UFUNCTION(Client, Reliable)
-	void ClientEndBuildingGroupMove(bool bConfirmed);
-
-	UFUNCTION(Client, Unreliable)
-	void ClientUpdateBuildingPlacementValidity(bool bPlacementValid);
-
-	UFUNCTION(Client, Reliable)
-	void ClientSetPurchasedBuildingPawnCollision(
-		const TArray<AActor*>& GroupActors,
-		bool bEnabled,
-		bool bRestoreOriginalResponses);
-
-	UFUNCTION(Client, Reliable)
-	void ClientApplyPurchasedBuildingSnapshot(
-		const TArray<FName>& ActorNames,
-		const TArray<FTransform>& ActorTransforms);
-
-	UFUNCTION(Client, Unreliable)
-	void ClientApplyPurchasedBuildingPreviewSnapshot(
-		const TArray<FName>& ActorNames,
-		const TArray<FTransform>& ActorTransforms);
-
-	UFUNCTION(Client, Reliable)
-	void ClientCancelPurchasedBuildingSnapshot();
-
-	UFUNCTION(Server, Reliable)
 	void ServerPlacePing(FVector_NetQuantize10 RequestedLocation);
 
-	UFUNCTION(Server, Reliable)
-	void ServerCreatePath(
-		const TArray<FVector_NetQuantize10>& RequestedPoints,
-		uint8 RequestedPathType);
 
-	UFUNCTION(Server, Reliable)
-	void ServerCreateVisitorZone(
-		FVector_NetQuantize10 RequestedLocation,
-		uint8 RequestedZoneType);
-
-	UFUNCTION(Server, Reliable)
-	void ServerCreateRefundZone(
-		FVector_NetQuantize10 RequestedLocation);
-
-	UFUNCTION(Server, Reliable)
-	void ServerCreateDeliveryZone(
-		FVector_NetQuantize10 RequestedLocation);
-
-	UFUNCTION(Server, Reliable)
-	void ServerDeletePathSegment(
-		ABotanicusPathActor* Path,
-		int32 SegmentIndex,
-		FVector_NetQuantize10 RequestedHitLocation);
-
-	TArray<AActor*> BuildCompleteBuildingGroup(AActor* HitActor) const;
-	bool IsEbsBuildingActor(const AActor* Actor) const;
-	bool IsStructuralBuildingActor(const AActor* Actor) const;
-	bool IsBuildingOwnedByThisPlayer(AActor* Actor) const;
-	bool TryAcquireBuildingGroupLock(const TArray<AActor*>& GroupActors);
-	void ReleaseBuildingGroupLock();
-	FVector CalculateBuildingGroupPivot(const TArray<AActor*>& GroupActors) const;
-	void ApplyServerBuildingGroupTransform(const FVector& NewPivot, float NewYaw);
-	void SetBuildingGroupPawnCollision(
-		const TArray<AActor*>& GroupActors,
-		bool bEnabled,
-		bool bRestoreOriginalResponses = true);
-	void SetPurchasedBuildingPawnCollisionForAllPlayers(
-		const TArray<AActor*>& GroupActors,
-		bool bEnabled,
-		bool bRestoreOriginalResponses = true);
-	void BroadcastPurchasedBuildingSnapshot(bool bReliable);
-	void QueuePurchasedBuildingSnapshot(
-		const TArray<FName>& ActorNames,
-		const TArray<FTransform>& ActorTransforms);
-	void TryApplyPurchasedBuildingSnapshot();
-	bool IsServerBuildingGroupPlacementValid() const;
-	void ClearServerBuildingGroupMove();
-	void RefundPendingBuildingPurchase();
-
-	UPROPERTY(Transient)
-	TObjectPtr<ACameraActor> BuildingCameraActor;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UBotanicusTopDownToolbarWidget> TopDownToolbarWidget;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBotanicusOrderCatalogWidget> OrderCatalogWidget;
@@ -1099,74 +846,6 @@ protected:
 	TObjectPtr<UBotanicusBotanistNotebookWidget>
 		BotanistNotebookWidget;
 
-	UPROPERTY(Transient)
-	TObjectPtr<UBotanicusBuildingCatalogWidget> BuildingCatalogWidget;
-
-	UPROPERTY(Transient)
-	TObjectPtr<ABotanicusPathActor> PathPreviewActor;
-
-	UPROPERTY(Transient)
-	TObjectPtr<ABotanicusCommunicationDoorActor>
-		CommunicationDoorPreviewActor;
-
-	TSet<TWeakObjectPtr<UPrimitiveComponent>>
-		TopDownHiddenRoofComponents;
-
-	TMap<
-		TWeakObjectPtr<AActor>,
-		TWeakObjectPtr<UTextRenderComponent>>
-		TopDownBuildingLabels;
-
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="500.0"))
-	float BuildingCameraHeight = 1800.0f;
-
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="100.0"))
-	float MinimumBuildingCameraHeight = 600.0f;
-
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="100.0"))
-	float MaximumBuildingCameraHeight = 25000.0f;
-
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="10.0"))
-	float BuildingCameraZoomStep = 250.0f;
-
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="0.01"))
-	float BuildingCameraOrbitSensitivity = 0.22f;
-
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="100.0"))
-	float BuildingDetailViewDistance = 10000.0f;
-
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="1.0", ClampMax="89.0"))
-	float MinimumBuildingCameraOrbitPitch = 15.0f;
-
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="1.0", ClampMax="89.0"))
-	float MaximumBuildingCameraOrbitPitch = 85.0f;
-
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="-89.0", ClampMax="-1.0"))
-	float MinimumBuildingCameraFreeLookPitch = -89.0f;
-
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="-89.0", ClampMax="-1.0"))
-	float MaximumBuildingCameraFreeLookPitch = -10.0f;
-
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="100.0"))
-	float BuildingCameraPanSpeed = 1400.0f;
-
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Camera", meta=(ClampMin="0.0"))
-	float BuildingCameraBlendTime = 0.25f;
-
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Editing", meta=(ClampMin="1.0"))
-	float BuildingRotationStep = 15.0f;
-
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Editing", meta=(ClampMin="1.0"))
-	float BuildingPreviewUpdatesPerSecond = 20.0f;
-
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Editing", meta=(ClampMin="25.0"))
-	float BuildingConnectionSnapDistance = 350.0f;
-
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Editing", meta=(ClampMin="10.0"))
-	float BuildingConnectionOverlapDepth = 150.0f;
-
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Building Editing", meta=(ClampMin="1000.0"))
-	float MaximumBuildingEditDistance = 30000.0f;
 
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Ping", meta=(ClampMin="100.0"))
 	float MaximumPingDistance = 30000.0f;
@@ -1248,25 +927,6 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Item Throw", meta=(ClampMin="100.0"))
 	float MaximumQuickBarThrowSpeed = 2200.0f;
 
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Path", meta=(ClampMin="25.0"))
-	float BuildingEntranceSnapDistance = 350.0f;
-
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Path", meta=(ClampMin="25.0"))
-	float ExistingPathSnapDistance = 260.0f;
-
-	UPROPERTY()
-	TObjectPtr<UMaterialInterface> ValidBuildingPlacementMaterial;
-
-	UPROPERTY()
-	TObjectPtr<UMaterialInterface> InvalidBuildingPlacementMaterial;
-
-	UPROPERTY(Transient)
-	TArray<TObjectPtr<UMeshComponent>> BuildingPreviewMaterialMeshes;
-
-	UPROPERTY(Transient)
-	TArray<TObjectPtr<UMaterialInterface>> BuildingPreviewOriginalMaterials;
-
-	TArray<int32> BuildingPreviewMaterialCounts;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> FurnitureHighlightMaterial;
@@ -1274,11 +934,6 @@ protected:
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> InteractionHighlightMaterial;
 
-	UPROPERTY(Transient)
-	TArray<TObjectPtr<AActor>> LocalBuildingGroup;
-
-	UPROPERTY(Transient)
-	TArray<TObjectPtr<AActor>> ServerBuildingGroup;
 
 	UPROPERTY(Transient)
 	TObjectPtr<ABotanicusLargeEquipmentActor>
@@ -1439,38 +1094,6 @@ protected:
 	TObjectPtr<ABotanicusDeliveryParcelActor>
 		ServerMovedDeliveryParcel;
 
-	TArray<FTransform> LocalBuildingOriginalTransforms;
-	TArray<FTransform> ServerBuildingOriginalTransforms;
-	TArray<TWeakObjectPtr<UPrimitiveComponent>>
-		BuildingPawnCollisionComponents;
-	TArray<TEnumAsByte<ECollisionResponse>>
-		BuildingPawnCollisionOriginalResponses;
-	TObjectPtr<AActor> ServerSnappedMovingWall;
-	TObjectPtr<AActor> ServerSnappedExistingWall;
-	TObjectPtr<ABotanicusCommunicationDoorActor>
-		ServerManualDoorToMove;
-	TArray<TObjectPtr<AActor>> ServerDoorCandidatePurchasedWalls;
-	TArray<TObjectPtr<AActor>> ServerDoorCandidateExistingWalls;
-	TArray<FVector_NetQuantize10> ServerDoorCandidateLocations;
-	TArray<float> ServerDoorCandidateYaws;
-	TArray<FVector_NetQuantize10> LocalDoorCandidateLocations;
-	TArray<float> LocalDoorCandidateYaws;
-	FVector LocalBuildingPivot = FVector::ZeroVector;
-	FVector LocalBuildingOriginalPivot = FVector::ZeroVector;
-	FVector ServerBuildingOriginalPivot = FVector::ZeroVector;
-	float LocalBuildingYaw = 0.0f;
-	float ServerBuildingInitialYaw = 0.0f;
-	float LocalBuildingGroundOffset = 0.0f;
-	float ServerBuildingGroundOffset = 0.0f;
-	float BuildingPreviewUpdateAccumulator = 0.0f;
-	float BuildingCameraOrbitYaw = 0.0f;
-	float BuildingCameraOrbitPitch = 85.0f;
-	float BuildingCameraOrbitDistance = 1800.0f;
-	float BuildingOrbitSavedMouseX = 0.0f;
-	float BuildingOrbitSavedMouseY = 0.0f;
-	bool bBuildingCameraOrbitActive = false;
-	bool bBuildingCameraOrbitInitialized = false;
-	bool bBuildingCameraFreeLookActive = false;
 	float LargeEquipmentPlacementYaw = 0.0f;
 	float LargeEquipmentPreviewUpdateAccumulator = 0.0f;
 	float QuickBarItemPlacementYaw = 0.0f;
@@ -1491,7 +1114,6 @@ protected:
 	double LastServerWateringCanSprayPulseTime = -1000.0;
 	float ParcelPlacementYaw = 0.0f;
 	float ParcelPreviewUpdateAccumulator = 0.0f;
-	float TopDownRoofRefreshAccumulator = 0.0f;
 	bool bLocalLargeEquipmentPlacementValid = false;
 	bool bLocalQuickBarItemPlacementValid = false;
 	bool bQuickBarThrowChargeActive = false;
@@ -1521,33 +1143,12 @@ protected:
 	FGuid LocalQuickBarItemInstanceId;
 	FName LocalQuickBarItemKey = NAME_None;
 	double LastServerPingTime = -1000.0;
-	bool bLocalBuildingPlacementValid = true;
-	bool bServerBuildingPlacementValid = true;
-	bool bServerBuildingPurchasePlacement = false;
-	int32 ServerPendingBuildingPurchasePrice = 0;
-	FName ServerPendingBuildingPurchaseKey = NAME_None;
-	bool bBuildingTopDownViewActive = false;
-	bool bPathPlacementActive = false;
-	bool bPathStrokeActive = false;
-	bool bPathDeletionActive = false;
-	EBotanicusPathType PendingPathType =
-		EBotanicusPathType::Standard;
-	int32 PendingVisitorZoneType = INDEX_NONE;
-	bool bCommunicationDoorPlacementActive = false;
-	bool bDoorEditSelectionActive = false;
-	bool bServerManualDoorPlacement = false;
 	bool bAzertyForwardPressed = false;
 	bool bAzertyBackwardPressed = false;
 	bool bAzertyLeftPressed = false;
 	bool bAzertyRightPressed = false;
-	int32 LocalCommunicationDoorCandidateIndex = INDEX_NONE;
-	TArray<FVector> PendingPathPoints;
-	TArray<FName> PendingPurchasedBuildingActorNames;
-	TArray<FTransform> PendingPurchasedBuildingTransforms;
-	FTimerHandle PurchasedBuildingSnapshotRetryTimer;
 	FTimerHandle CollectedItemInspectionRetryTimer;
 	TMap<FGuid, FTimerHandle> PendingOrderTimers;
-	int32 PurchasedBuildingSnapshotRetryCount = 0;
 	int32 PendingCollectedItemSlotIndex = INDEX_NONE;
 	int32 CollectedItemInspectionRetryCount = 0;
 	FName PendingCollectedItemKey = NAME_None;

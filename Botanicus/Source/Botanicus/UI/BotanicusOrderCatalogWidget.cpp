@@ -4,7 +4,6 @@
 
 #include "BotanicusPlayerController.h"
 #include "Blueprint/WidgetTree.h"
-#include "Catalog/BotanicusBuildingCatalogSubsystem.h"
 #include "Catalog/BotanicusItemCatalogSubsystem.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
@@ -29,7 +28,6 @@
 #include "Engine/Texture2D.h"
 #include "GameFramework/GameStateBase.h"
 #include "Styling/CoreStyle.h"
-#include "UI/BotanicusBuildingCatalogWidget.h"
 #include "UI/BotanicusCommandPanelSettings.h"
 
 namespace
@@ -1263,7 +1261,7 @@ void UBotanicusOrderCatalogWidget::BuildLayout()
 		this, &UBotanicusOrderCatalogWidget::HandleSalesTabClicked);
 	UButton* StyledBuildingsButton = AddStyledTab(
 		TEXT("T_Command_TabBuildings"),
-		NSLOCTEXT("BotanicusOrders", "BuildingsTab", "BATIMENTS"));
+		NSLOCTEXT("BotanicusOrders", "BuildingsTab", "AMELIORATIONS"));
 	StyledBuildingsButton->OnClicked.AddDynamic(
 		this, &UBotanicusOrderCatalogWidget::HandleBuildingsTabClicked);
 
@@ -1581,7 +1579,7 @@ void UBotanicusOrderCatalogWidget::BuildLayout()
 		NSLOCTEXT(
 			"BotanicusOrders",
 			"BuildingsTab",
-			"BATIMENTS"));
+			"AMELIORATIONS"));
 	BuildingsButton->OnClicked.AddDynamic(
 		this,
 		&UBotanicusOrderCatalogWidget::HandleBuildingsTabClicked);
@@ -1619,7 +1617,6 @@ void UBotanicusOrderCatalogWidget::RebuildItemRows()
 
 	ItemsBox->ClearChildren();
 	ItemRows.Reset();
-	BuildingRows.Reset();
 	MainShopUpgradeRow = nullptr;
 	WorkbenchUpgradeRow = nullptr;
 	const UGameInstance* GameInstance =
@@ -1637,49 +1634,6 @@ void UBotanicusOrderCatalogWidget::RebuildItemRows()
 				ItemsBox->AddChildToVerticalBox(MainShopUpgradeRow);
 			ShopRowSlot->SetPadding(
 				FMargin(0.0f, 0.0f, 0.0f, 12.0f));
-		}
-		const UBotanicusBuildingCatalogSubsystem* BuildingCatalog =
-			GameInstance
-				? GameInstance->GetSubsystem<
-					UBotanicusBuildingCatalogSubsystem>()
-				: nullptr;
-		if (!BuildingCatalog)
-		{
-			return;
-		}
-		TArray<FBotanicusBuildingDefinition> Buildings =
-			BuildingCatalog->GetAllBuildings();
-		Buildings.Sort(
-			[](const FBotanicusBuildingDefinition& A,
-			   const FBotanicusBuildingDefinition& B)
-			{
-				return A.Price < B.Price;
-			});
-		for (const FBotanicusBuildingDefinition& Definition :
-			 Buildings)
-		{
-			if (Definition.BuildingKey.IsNone())
-			{
-				continue;
-			}
-			UBotanicusBuildingCatalogRowWidget* Row =
-				CreateWidget<
-					UBotanicusBuildingCatalogRowWidget>(
-					GetOwningPlayer(),
-					UBotanicusBuildingCatalogRowWidget::
-						StaticClass());
-			if (!Row)
-			{
-				continue;
-			}
-			Row->InitializeRow(
-				BotanicusController,
-				Definition);
-			UVerticalBoxSlot* RowSlot =
-				ItemsBox->AddChildToVerticalBox(Row);
-			RowSlot->SetPadding(
-				FMargin(0.0f, 0.0f, 0.0f, 7.0f));
-			BuildingRows.Add(Row);
 		}
 		return;
 	}
@@ -1829,15 +1783,6 @@ void UBotanicusOrderCatalogWidget::Refresh()
 		if (Row)
 		{
 			Row->RefreshAvailability(Funds);
-		}
-	}
-	for (UBotanicusBuildingCatalogRowWidget* Row : BuildingRows)
-	{
-		if (Row)
-		{
-			Row->RefreshAvailability(
-				Funds,
-				DevelopmentLevel);
 		}
 	}
 	if (MainShopUpgradeRow)

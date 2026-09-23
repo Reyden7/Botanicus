@@ -19,7 +19,7 @@ enum class EBotanicusPathType : uint8
 	VisitorRoute
 };
 
-/** Replicated spline path created from the top-down planning view. */
+/** Level-authored, replicated spline path used by visitor navigation. */
 UCLASS()
 class BOTANICUS_API ABotanicusPathActor : public AActor
 {
@@ -31,16 +31,7 @@ public:
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
-	void InitializeConfirmedPath(
-		const TArray<FVector>& WorldPoints,
-		EBotanicusPathType InPathType =
-			EBotanicusPathType::Standard);
-	void SetPreviewPath(
-		const TArray<FVector>& WorldPoints,
-		EBotanicusPathType InPathType =
-			EBotanicusPathType::Standard);
 	void AddJunctionPoint(const FVector& WorldPoint);
-	void RestoreJunctionPoints(const TArray<FVector>& WorldPoints);
 
 	TArray<FVector> GetPathWorldPoints() const;
 	/** Densified spline used by navigation and automatic junction detection. */
@@ -56,7 +47,6 @@ public:
 		int32& OutSegmentIndex,
 		FVector& OutClosestPoint,
 		float& OutDistance) const;
-	bool IsPreviewPath() const { return bPreviewPath; }
 	EBotanicusPathType GetPathType() const { return PathType; }
 	bool IsVisitorRoute() const
 	{
@@ -76,10 +66,6 @@ private:
 	UFUNCTION()
 	void OnRep_PathType();
 
-	void SetPathPointsInternal(
-		const TArray<FVector>& WorldPoints,
-		bool bIsPreview,
-		EBotanicusPathType InPathType);
 	FVector SnapVisualPointToGround(const FVector& WorldPoint) const;
 	void RebuildPathMeshes();
 
@@ -127,5 +113,4 @@ private:
 		FVector(500.0f, 0.0f, 0.0f)
 	};
 
-	bool bPreviewPath = false;
 };

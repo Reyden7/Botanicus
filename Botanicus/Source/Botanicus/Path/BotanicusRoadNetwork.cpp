@@ -278,7 +278,7 @@ bool FBotanicusRoadNetwork::BuildVisitorCircuit(
 	TArray<TArray<int32>> PathNodeIndices;
 	for (TActorIterator<ABotanicusPathActor> It(World); It; ++It)
 	{
-		if (!It->IsVisitorRoute() || It->IsPreviewPath())
+		if (!It->IsVisitorRoute())
 		{
 			continue;
 		}
