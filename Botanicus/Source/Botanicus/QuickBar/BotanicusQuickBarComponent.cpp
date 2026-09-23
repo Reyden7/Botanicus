@@ -337,6 +337,48 @@ bool UBotanicusQuickBarComponent::RemoveQuantity(int32 SlotIndex, int32 Quantity
 	return true;
 }
 
+bool UBotanicusQuickBarComponent::RemoveItem(FName ItemKey, int32 Quantity)
+{
+	AActor* OwnerActor = GetOwner();
+	if (!OwnerActor || !OwnerActor->HasAuthority() || ItemKey.IsNone() ||
+		Quantity <= 0 || GetTotalQuantity(ItemKey) < Quantity)
+	{
+		return false;
+	}
+
+	int32 Remaining = Quantity;
+	bool bSelectionChanged = false;
+	for (int32 SlotIndex = 0; SlotIndex < Slots.Num() && Remaining > 0; ++SlotIndex)
+	{
+		FBotanicusQuickBarSlot& Slot = Slots[SlotIndex];
+		if (Slot.IsEmpty() || Slot.ItemKey != ItemKey)
+		{
+			continue;
+		}
+		const int32 Removed = FMath::Min(Remaining, Slot.Quantity);
+		Slot.Quantity -= Removed;
+		Remaining -= Removed;
+		bSelectionChanged |= SlotIndex == SelectedSlotIndex;
+		if (Slot.Quantity == 0)
+		{
+			Slot = FBotanicusQuickBarSlot();
+		}
+	}
+
+	OnQuickBarChanged.Broadcast();
+	if (bSelectionChanged)
+	{
+		BroadcastSelection();
+	}
+	OwnerActor->ForceNetUpdate();
+	if (ABotanicusGameMode* GameMode =
+			GetWorld()->GetAuthGameMode<ABotanicusGameMode>())
+	{
+		GameMode->ScheduleInventoryAutosave();
+	}
+	return Remaining == 0;
+}
+
 bool UBotanicusQuickBarComponent::SetCarriedItemState(
 	int32 SlotIndex,
 	const FBotanicusCarriedItemState& State)

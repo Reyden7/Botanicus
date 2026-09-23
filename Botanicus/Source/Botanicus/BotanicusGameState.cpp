@@ -9,6 +9,7 @@
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
+#include "IllegalTrade/BotanicusIllegalTradeSettings.h"
 #include "TimerManager.h"
 #include "Net/UnrealNetwork.h"
 
@@ -30,6 +31,10 @@ void ABotanicusGameState::Tick(float DeltaSeconds)
 	}
 
 	const float PreviousMinute = DayTimeMinutes;
+	const UBotanicusIllegalTradeSettings* IllegalSettings =
+		GetDefault<UBotanicusIllegalTradeSettings>();
+	const float ShopOpenMinute = IllegalSettings ? IllegalSettings->ShopOpenMinute : 480.0f;
+	const float ShopCloseMinute = IllegalSettings ? IllegalSettings->ShopCloseMinute : 1140.0f;
 	DayTimeMinutes =
 		FMath::Fmod(
 			DayTimeMinutes + FMath::Max(0.0f, DeltaSeconds),
@@ -38,17 +43,18 @@ void ABotanicusGameState::Tick(float DeltaSeconds)
 	if (DidClockCrossMinute(
 			PreviousMinute,
 			DayTimeMinutes,
-			480.0f))
+			ShopOpenMinute))
 	{
 		SetMainShopOpen(true);
 	}
 	if (DidClockCrossMinute(
 			PreviousMinute,
 			DayTimeMinutes,
-			1140.0f))
+			ShopCloseMinute))
 	{
 		SetMainShopOpen(false);
 	}
+	RefreshIllegalTradeState();
 }
 
 void ABotanicusGameState::GetLifetimeReplicatedProps(
@@ -78,6 +84,8 @@ void ABotanicusGameState::GetLifetimeReplicatedProps(
 	DOREPLIFETIME(ABotanicusGameState, LastDayRevenueTarget);
 	DOREPLIFETIME(ABotanicusGameState, DevelopmentTimeScale);
 	DOREPLIFETIME(ABotanicusGameState, DayTimeMinutes);
+	DOREPLIFETIME(ABotanicusGameState, bIllegalTradeActive);
+	DOREPLIFETIME(ABotanicusGameState, Suspicion);
 	DOREPLIFETIME(ABotanicusGameState, OutdoorEnvironment);
 	DOREPLIFETIME(ABotanicusGameState, DiscoveredDiseaseKeys);
 	DOREPLIFETIME(ABotanicusGameState, TotalPlantsSold);
@@ -291,6 +299,7 @@ void ABotanicusGameState::InitializeDayCycle(
 			FMath::Max(0.0f, InDayTimeMinutes),
 			1440.0f);
 	RefreshOutdoorEnvironment();
+	RefreshIllegalTradeState();
 	if (!bShopDayActive)
 	{
 		DailyPlantsSold = 0;
@@ -321,6 +330,11 @@ void ABotanicusGameState::SetMainShopOpen(bool bInOpen)
 	{
 		FinishShopDay();
 	}
+	if (!bMainShopOpen)
+	{
+		OnShopClosed.Broadcast();
+	}
+	RefreshIllegalTradeState();
 	NotifyFundsChanged();
 	if (UWorld* World = GetWorld())
 	{
@@ -356,6 +370,102 @@ void ABotanicusGameState::SetMainShopOpen(bool bInOpen)
 				World->GetAuthGameMode<ABotanicusGameMode>())
 		{
 			GameMode->ScheduleInventoryAutosave();
+		}
+	}
+}
+
+void ABotanicusGameState::InitializeIllegalTrade(int32 InSuspicion)
+{
+	if (!HasAuthority() || bIllegalTradeInitialized)
+	{
+		return;
+	}
+	bIllegalTradeInitialized = true;
+	Suspicion = FMath::Clamp(InSuspicion, 0, 100);
+	RefreshIllegalTradeState();
+	NotifyFundsChanged();
+}
+
+void ABotanicusGameState::AddSuspicion(int32 Amount)
+{
+	if (!HasAuthority() || Amount == 0)
+	{
+		return;
+	}
+	Suspicion = FMath::Clamp(Suspicion + Amount, 0, 100);
+	NotifyFundsChanged();
+	if (ABotanicusGameMode* GameMode = GetWorld() ? GetWorld()->GetAuthGameMode<ABotanicusGameMode>() : nullptr)
+	{
+		GameMode->ScheduleInventoryAutosave();
+	}
+}
+
+void ABotanicusGameState::SetDayTimeMinutesForDevelopment(float InDayTimeMinutes)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	DayTimeMinutes = FMath::Fmod(FMath::Max(0.0f, InDayTimeMinutes), 1440.0f);
+	const UBotanicusIllegalTradeSettings* Settings = GetDefault<UBotanicusIllegalTradeSettings>();
+	const float ShopOpenMinute = Settings ? Settings->ShopOpenMinute : 480.0f;
+	const float ShopCloseMinute = Settings ? Settings->ShopCloseMinute : 1140.0f;
+	const bool bShouldShopBeOpen = ShopOpenMinute <= ShopCloseMinute
+		? DayTimeMinutes >= ShopOpenMinute && DayTimeMinutes < ShopCloseMinute
+		: DayTimeMinutes >= ShopOpenMinute || DayTimeMinutes < ShopCloseMinute;
+	SetMainShopOpen(bShouldShopBeOpen);
+	RefreshOutdoorEnvironment();
+	RefreshIllegalTradeState();
+	NotifyFundsChanged();
+}
+
+void ABotanicusGameState::SetSuspicionForDevelopment(int32 InSuspicion)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	Suspicion = FMath::Clamp(InSuspicion, 0, 100);
+	NotifyFundsChanged();
+}
+
+void ABotanicusGameState::RefreshIllegalTradeState()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	const UBotanicusIllegalTradeSettings* Settings =
+		GetDefault<UBotanicusIllegalTradeSettings>();
+	SetIllegalTradeActive(
+		Settings && !bMainShopOpen && Settings->IsIllegalTradeMinute(DayTimeMinutes));
+}
+
+void ABotanicusGameState::SetIllegalTradeActive(bool bActive)
+{
+	if (bIllegalTradeActive == bActive)
+	{
+		return;
+	}
+	bIllegalTradeActive = bActive;
+	UE_LOG(
+		LogBotanicusIllegalTrade,
+		Display,
+		TEXT("Illegal trade %s at %.0f game minutes."),
+		bIllegalTradeActive ? TEXT("opened") : TEXT("closed"),
+		DayTimeMinutes);
+	OnIllegalTradeStateChanged.Broadcast(bIllegalTradeActive);
+	ForceNetUpdate();
+	if (UWorld* World = GetWorld())
+	{
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			if (APlayerController* Controller = It->Get())
+			{
+				Controller->ClientMessage(bIllegalTradeActive
+					? TEXT("Le commerce clandestin est actif. Des clients peuvent arriver derrière la boutique.")
+					: TEXT("Le commerce clandestin est terminé pour cette nuit."));
+			}
 		}
 	}
 }
@@ -698,6 +808,11 @@ void ABotanicusGameState::OnRep_SharedFunds()
 void ABotanicusGameState::OnRep_DevelopmentTimeScale()
 {
 	ApplyDevelopmentTimeScale();
+}
+
+void ABotanicusGameState::OnRep_IllegalTradeState()
+{
+	OnIllegalTradeStateChanged.Broadcast(bIllegalTradeActive);
 }
 
 void ABotanicusGameState::NotifyFundsChanged()

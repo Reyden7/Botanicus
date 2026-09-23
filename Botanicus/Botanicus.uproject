@@ -65,6 +65,10 @@
 				"Win64",
 				"Mac"
 			]
+		},
+		{
+			"Name": "AIAssistant",
+			"Enabled": true
 		}
 	],
 	"AdditionalPluginDirectories": [

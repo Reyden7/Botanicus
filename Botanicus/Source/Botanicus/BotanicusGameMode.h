@@ -39,6 +39,21 @@ public:
 	/** Coalesces inventory mutations into one save on the next server tick. */
 	void ScheduleInventoryAutosave();
 
+	UFUNCTION(Exec)
+	void SetTime(float Hour);
+
+	UFUNCTION(Exec)
+	void SetSuspicion(int32 Value);
+
+	UFUNCTION(Exec)
+	void SpawnIllegalCustomer();
+
+	UFUNCTION(Exec)
+	void SetIllegalPlantGrowth(float Percent);
+
+	UFUNCTION(Exec)
+	void FillIllegalPlanterWater();
+
 private:
 	FString GetAutosaveSlotName() const;
 	FString GetPlayerSaveKey(const AController* Controller);

@@ -24,7 +24,6 @@ public class Botanicus : ModuleRules
 			"StateTreeModule",
 			"GameplayStateTreeModule",
 			"Landscape",
-			"Niagara",
 			"ProceduralMeshComponent",
 			"UMG",
 			"Slate",

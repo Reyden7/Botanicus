@@ -268,6 +268,24 @@ struct BOTANICUS_API FBotanicusSavedWorldItem
 
 	UPROPERTY()
 	float ClimateDevicePowerLevel = 1.0f;
+
+	UPROPERTY()
+	int32 IllegalPlanterLevel = 1;
+
+	UPROPERTY()
+	int32 IllegalPlanterSoilUnits = 0;
+
+	UPROPERTY()
+	float IllegalPlanterWaterAmount = 0.0f;
+
+	UPROPERTY()
+	TArray<float> IllegalPlanterSlotWaterAmounts;
+
+	UPROPERTY()
+	TArray<FName> IllegalPlanterPlantIds;
+
+	UPROPERTY()
+	TArray<float> IllegalPlanterGrowthProgress;
 };
 
 /** Server-owned persistent state for one Botanicus map. */
@@ -278,7 +296,7 @@ class BOTANICUS_API UBotanicusWorldSaveGame : public USaveGame
 
 public:
 	UPROPERTY()
-	int32 SaveVersion = 31;
+	int32 SaveVersion = 32;
 
 	UPROPERTY()
 	FString MapName;
@@ -316,6 +334,9 @@ public:
 
 	UPROPERTY()
 	float DayTimeMinutes = 420.0f;
+
+	UPROPERTY()
+	int32 Suspicion = 0;
 
 	UPROPERTY()
 	int32 TotalPlantsSold = 0;

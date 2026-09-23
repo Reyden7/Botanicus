@@ -60,6 +60,8 @@
 #include "Growing/BotanicusMultiPlantPotActor.h"
 #include "Growing/BotanicusWateringCanActor.h"
 #include "Growing/BotanicusWaterReserveActor.h"
+#include "IllegalTrade/BotanicusIllegalPlanterActor.h"
+#include "IllegalTrade/BotanicusIllegalCustomerCharacter.h"
 #include "Interaction/BotanicusInteractable.h"
 #include "Online/BotanicusMultiplayerSubsystem.h"
 #include "Path/BotanicusPathActor.h"
@@ -1131,7 +1133,9 @@ void ABotanicusPlayerController::PlayerTick(float DeltaTime)
 	{
 		AActor* ActivePot = IsValid(LocalActivePlantPot)
 			? static_cast<AActor*>(LocalActivePlantPot.Get())
-			: static_cast<AActor*>(LocalActiveSalePot.Get());
+			: IsValid(LocalActiveIllegalPlanter)
+				? static_cast<AActor*>(LocalActiveIllegalPlanter.Get())
+				: static_cast<AActor*>(LocalActiveSalePot.Get());
 		if (!IsValid(ActivePot) ||
 			!IsLookingAtWorldItem(
 				ActivePot,
@@ -1153,7 +1157,7 @@ void ABotanicusPlayerController::PlayerTick(float DeltaTime)
 	UpdateHeldWorldItemPreview();
 	UpdateQuickBarItemPlacement(DeltaTime);
 	UpdateEquippedQuickBarItem();
-	UpdateLocalWateringEffect(DeltaTime);
+	UpdateWateringCanSpray(DeltaTime);
 	UpdateThrowPowerWidget();
 	UpdateDeliveryParcelPlacement(DeltaTime);
 	if (InteractionTargetWidget && CarryProgressWidget &&
@@ -1514,6 +1518,15 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		!bBuildingTopDownViewActive &&
 		!bFurnitureMoveModeActive)
 	{
+		if (ABotanicusIllegalCustomerCharacter* Customer =
+				Cast<ABotanicusIllegalCustomerCharacter>(
+					LocalInteractionHighlightActor.Get());
+			IsValid(Customer) &&
+			Customer->CanInteract_Implementation(GetPawn()))
+		{
+			ServerSellIllegalOrder(Customer);
+			return true;
+		}
 		if (ABotanicusClimateDeviceActor* ClimateDevice =
 				Cast<ABotanicusClimateDeviceActor>(
 					LocalInteractionHighlightActor.Get());
@@ -2607,6 +2620,40 @@ void ABotanicusPlayerController::RefreshInteractionTargetName(
 				"ConfigureClimateDeviceAction",
 				"POUR CONFIGURER"),
 			ClimateDevice->GetInteractionPrompt_Implementation(GetPawn()).TargetName);
+		return;
+	}
+	if (const ABotanicusIllegalCustomerCharacter* Customer =
+			Cast<ABotanicusIllegalCustomerCharacter>(TargetActor))
+	{
+		if (Customer->GetCustomerState() !=
+			EBotanicusIllegalCustomerState::Waiting)
+		{
+			InteractionTargetWidget->ClearTarget();
+			return;
+		}
+		InteractionTargetWidget->SetKeyboardPrompt(
+			NSLOCTEXT("BotanicusIllegalTrade", "SellNightOrder", "VENDRE"),
+			FText::Format(
+				NSLOCTEXT("BotanicusIllegalTrade", "NightOrderHud", "{0} x{1}"),
+				Customer->GetProductName(),
+				FText::AsNumber(Customer->GetRequestedQuantity())));
+		return;
+	}
+	if (const ABotanicusIllegalPlanterActor* IllegalPlanter =
+			Cast<ABotanicusIllegalPlanterActor>(TargetActor))
+	{
+		const FBotanicusInteractionPrompt Prompt =
+			IllegalPlanter->GetInteractionPrompt_Implementation(GetPawn());
+		const ABotanicusCharacter* ControlledCharacter =
+			Cast<ABotanicusCharacter>(GetPawn());
+		const UBotanicusQuickBarComponent* QuickBar = ControlledCharacter
+			? ControlledCharacter->GetQuickBarComponent()
+			: nullptr;
+		const bool bHold = QuickBar &&
+			(QuickBar->GetSelectedSlot().ItemKey == TEXT("PottingSoil") ||
+			 QuickBar->HasSelectedWateringCan());
+		InteractionTargetWidget->SetLeftMousePrompt(
+			Prompt.ActionText, Prompt.TargetName, bHold);
 		return;
 	}
 
@@ -7135,7 +7182,7 @@ void ABotanicusPlayerController::BeginWorldItemMove(
 	}
 }
 
-void ABotanicusPlayerController::UpdateLocalWateringEffect(float DeltaTime)
+void ABotanicusPlayerController::UpdateWateringCanSpray(float DeltaTime)
 {
 	ABotanicusWateringCanActor* WateringCan =
 		Cast<ABotanicusWateringCanActor>(LocalEquippedQuickBarItem);
@@ -7150,14 +7197,9 @@ void ABotanicusPlayerController::UpdateLocalWateringEffect(float DeltaTime)
 		!QuickBar->HasSelectedWateringCan() ||
 		QuickBar->GetSelectedWateringCanWaterLevel() <= KINDA_SMALL_NUMBER)
 	{
-		if (WateringCan)
-		{
-			WateringCan->SetWateringEffectActive(false);
-		}
 		return;
 	}
 
-	FVector TargetLocation = FVector::ZeroVector;
 	bool bWateringAPlantedPot = false;
 	if (IsValid(LocalActivePlantPot))
 	{
@@ -7170,43 +7212,7 @@ void ABotanicusPlayerController::UpdateLocalWateringEffect(float DeltaTime)
 					return !Slot.PlantKey.IsNone();
 				})
 			: !LocalActivePlantPot->GetPlantKey().IsNone();
-		TargetLocation =
-			LocalActivePlantPot->GetActorLocation() +
-			FVector(
-				0.0f,
-				0.0f,
-				FMath::Max(
-					4.0f,
-					LocalActivePlantPot->GetSoilMaximumHeight()));
 	}
-	else
-	{
-		const FVector ViewLocation = PlayerCameraManager
-			? PlayerCameraManager->GetCameraLocation()
-			: BotanicusCharacter->GetPawnViewLocation();
-		const FVector ViewDirection = PlayerCameraManager
-			? PlayerCameraManager->GetCameraRotation().Vector()
-			: BotanicusCharacter->GetViewRotation().Vector();
-		const FVector TraceEnd =
-			ViewLocation + ViewDirection * 1600.0f;
-		FCollisionQueryParams QueryParams(
-			SCENE_QUERY_STAT(BotanicusWateringCanSprayAim),
-			true);
-		QueryParams.AddIgnoredActor(BotanicusCharacter);
-		QueryParams.AddIgnoredActor(WateringCan);
-		FHitResult Hit;
-		TargetLocation =
-			GetWorld() && GetWorld()->LineTraceSingleByChannel(
-				Hit,
-				ViewLocation,
-				TraceEnd,
-				ECC_Visibility,
-				QueryParams)
-				? Hit.ImpactPoint
-				: ViewLocation + ViewDirection * 700.0f;
-	}
-
-	WateringCan->SetWateringEffectActive(true, TargetLocation);
 
 	// A planted pot consumes water in its authoritative primary-use logic.
 	// Free spraying (including empty pots, scenery and other players) consumes
@@ -7249,11 +7255,6 @@ void ABotanicusPlayerController::EndWateringCanSpray()
 {
 	bWateringCanSprayHeld = false;
 	WateringCanSprayRequestAccumulator = 0.0f;
-	if (ABotanicusWateringCanActor* WateringCan =
-			Cast<ABotanicusWateringCanActor>(LocalEquippedQuickBarItem))
-	{
-		WateringCan->SetWateringEffectActive(false);
-	}
 }
 
 void ABotanicusPlayerController::BeginHeldWorldItemPlacement()
@@ -9622,6 +9623,7 @@ bool ABotanicusPlayerController::TryBeginNearbyPlantPotAction()
 	}
 
 	ABotanicusPlantPotActor* NearestPot = nullptr;
+	ABotanicusIllegalPlanterActor* NearestIllegalPlanter = nullptr;
 	float BestDistanceSquared = FMath::Square(400.0f);
 
 	// When an interaction target is outlined, the click must belong to that
@@ -9632,17 +9634,20 @@ bool ABotanicusPlayerController::TryBeginNearbyPlantPotAction()
 	{
 		ABotanicusPlantPotActor* HighlightedPot =
 			Cast<ABotanicusPlantPotActor>(HighlightedActor);
-		if (!IsValid(HighlightedPot))
+		ABotanicusIllegalPlanterActor* HighlightedIllegalPlanter =
+			Cast<ABotanicusIllegalPlanterActor>(HighlightedActor);
+		if (!IsValid(HighlightedPot) && !IsValid(HighlightedIllegalPlanter))
 		{
 			return false;
 		}
 		const float DistanceSquared = FVector::DistSquared(
 			GetPawn()->GetActorLocation(),
-			HighlightedPot->GetActorLocation());
+			HighlightedActor->GetActorLocation());
 		if (DistanceSquared <= BestDistanceSquared &&
-			IsLookingAtWorldItem(HighlightedPot, 400.0f))
+			IsLookingAtWorldItem(HighlightedActor, 400.0f))
 		{
 			NearestPot = HighlightedPot;
+			NearestIllegalPlanter = HighlightedIllegalPlanter;
 		}
 	}
 	else
@@ -9661,17 +9666,40 @@ bool ABotanicusPlayerController::TryBeginNearbyPlantPotAction()
 				NearestPot = *PotIt;
 			}
 		}
+		for (TActorIterator<ABotanicusIllegalPlanterActor> PlanterIt(GetWorld());
+			 PlanterIt;
+			 ++PlanterIt)
+		{
+			const float DistanceSquared = FVector::DistSquared(
+				GetPawn()->GetActorLocation(),
+				PlanterIt->GetActorLocation());
+			if (DistanceSquared <= BestDistanceSquared &&
+				IsLookingAtWorldItem(*PlanterIt, 400.0f))
+			{
+				BestDistanceSquared = DistanceSquared;
+				NearestPot = nullptr;
+				NearestIllegalPlanter = *PlanterIt;
+			}
+		}
 	}
 
-	if (!NearestPot)
+	if (!NearestPot && !NearestIllegalPlanter)
 	{
 		return false;
 	}
 
 	LocalActivePlantPot = NearestPot;
+	LocalActiveIllegalPlanter = NearestIllegalPlanter;
 	PlantPotActionHoldElapsed = 0.0f;
 	bPlantPotActionHeld = true;
-	ServerBeginPlantPotAction(NearestPot);
+	if (NearestPot)
+	{
+		ServerBeginPlantPotAction(NearestPot);
+	}
+	else
+	{
+		ServerBeginIllegalPlanterAction(NearestIllegalPlanter);
+	}
 	return true;
 }
 
@@ -9964,8 +9992,13 @@ void ABotanicusPlayerController::EndPlantPotAction()
 	{
 		ServerEndSalePotAction(LocalActiveSalePot);
 	}
+	if (IsValid(LocalActiveIllegalPlanter))
+	{
+		ServerEndIllegalPlanterAction(LocalActiveIllegalPlanter);
+	}
 	LocalActivePlantPot = nullptr;
 	LocalActiveSalePot = nullptr;
+	LocalActiveIllegalPlanter = nullptr;
 	PlantPotActionHoldElapsed = 0.0f;
 	bPlantPotActionHeld = false;
 	if (InteractionTargetWidget)
@@ -14186,6 +14219,44 @@ void ABotanicusPlayerController::
 	{
 		PlantPot->EndPrimaryUse(GetPawn());
 	}
+}
+
+void ABotanicusPlayerController::
+	ServerBeginIllegalPlanterAction_Implementation(
+		ABotanicusIllegalPlanterActor* IllegalPlanter)
+{
+	APawn* ControlledPawn = GetPawn();
+	if (!IsValid(IllegalPlanter) || !ControlledPawn ||
+		IllegalPlanter->ActorHasTag(TEXT("BotanicusPlacementPreview")) ||
+		!IsLookingAtWorldItem(IllegalPlanter, 450.0f))
+	{
+		return;
+	}
+	IllegalPlanter->BeginPrimaryUse(ControlledPawn);
+}
+
+void ABotanicusPlayerController::
+	ServerEndIllegalPlanterAction_Implementation(
+		ABotanicusIllegalPlanterActor* IllegalPlanter)
+{
+	if (IsValid(IllegalPlanter))
+	{
+		IllegalPlanter->EndPrimaryUse(GetPawn());
+	}
+}
+
+void ABotanicusPlayerController::
+ServerSellIllegalOrder_Implementation(
+		ABotanicusIllegalCustomerCharacter* Customer)
+{
+	APawn* ControlledPawn = GetPawn();
+	if (!IsValid(Customer) || !IsValid(ControlledPawn) ||
+		!Customer->CanInteract_Implementation(ControlledPawn) ||
+		!IsLookingAtWorldItem(Customer, 450.0f))
+	{
+		return;
+	}
+	IBotanicusInteractable::Execute_Interact(Customer, ControlledPawn);
 }
 
 void ABotanicusPlayerController::

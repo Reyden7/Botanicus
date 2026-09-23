@@ -42,6 +42,8 @@ class ABotanicusLargeEquipmentActor;
 class ABotanicusClimateDeviceActor;
 class ABotanicusPlaceableItemActor;
 class ABotanicusPlantPotActor;
+class ABotanicusIllegalPlanterActor;
+class ABotanicusIllegalCustomerCharacter;
 class ABotanicusSalesDisplayActor;
 struct FBotanicusQuickBarSlot;
 class ABotanicusSalePotActor;
@@ -622,7 +624,7 @@ protected:
 		ABotanicusPlaceableItemActor* Preview) const;
 	void UpdateEquippedQuickBarItem();
 	void DestroyEquippedQuickBarItem();
-	void UpdateLocalWateringEffect(float DeltaTime);
+	void UpdateWateringCanSpray(float DeltaTime);
 
 	UFUNCTION()
 	void HandleEquippedQuickBarChanged();
@@ -771,6 +773,18 @@ protected:
 	UFUNCTION(Server, Reliable)
 	void ServerEndPlantPotAction(
 		ABotanicusPlantPotActor* PlantPot);
+
+	UFUNCTION(Server, Reliable)
+	void ServerBeginIllegalPlanterAction(
+		ABotanicusIllegalPlanterActor* IllegalPlanter);
+
+	UFUNCTION(Server, Reliable)
+	void ServerEndIllegalPlanterAction(
+		ABotanicusIllegalPlanterActor* IllegalPlanter);
+
+	UFUNCTION(Server, Reliable)
+	void ServerSellIllegalOrder(
+		ABotanicusIllegalCustomerCharacter* Customer);
 
 	UFUNCTION(Server, Reliable)
 	void ServerBeginSalePotAction(
@@ -1380,6 +1394,10 @@ protected:
 	UPROPERTY(Transient)
 	TObjectPtr<ABotanicusPlantPotActor>
 		LocalActivePlantPot;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ABotanicusIllegalPlanterActor>
+		LocalActiveIllegalPlanter;
 
 	UPROPERTY(Transient)
 	TObjectPtr<ABotanicusPlantPotActor>

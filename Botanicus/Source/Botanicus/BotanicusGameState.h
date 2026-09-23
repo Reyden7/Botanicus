@@ -9,6 +9,12 @@
 
 struct FBotanicusItemDefinition;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FBotanicusShopClosedSignature);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+	FBotanicusIllegalTradeStateChangedSignature,
+	bool,
+	bActive);
+
 /** Replicated, server-authoritative state shared by the whole nursery. */
 UCLASS()
 class BOTANICUS_API ABotanicusGameState : public AGameStateBase
@@ -88,6 +94,18 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="Botanicus|Day")
 	float GetDayTimeMinutes() const { return DayTimeMinutes; }
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Illegal Trade")
+	bool IsIllegalTradeActive() const { return bIllegalTradeActive; }
+
+	UFUNCTION(BlueprintPure, Category="Botanicus|Illegal Trade")
+	int32 GetSuspicion() const { return Suspicion; }
+
+	UPROPERTY(BlueprintAssignable, Category="Botanicus|Shop")
+	FBotanicusShopClosedSignature OnShopClosed;
+
+	UPROPERTY(BlueprintAssignable, Category="Botanicus|Illegal Trade")
+	FBotanicusIllegalTradeStateChangedSignature OnIllegalTradeStateChanged;
 
 	UFUNCTION(BlueprintPure, Category="Botanicus|Season")
 	FBotanicusOutdoorEnvironmentState GetOutdoorEnvironment() const
@@ -212,6 +230,10 @@ public:
 		int32 InDayStartReputation,
 		float InDayTimeMinutes);
 	void SetMainShopOpen(bool bInOpen);
+	void InitializeIllegalTrade(int32 InSuspicion);
+	void AddSuspicion(int32 Amount);
+	void SetDayTimeMinutesForDevelopment(float InDayTimeMinutes);
+	void SetSuspicionForDevelopment(int32 InSuspicion);
 	void SetDevelopmentTimeScale(float InTimeScale);
 	void SetMainShopLevelForDevelopment(int32 InLevel);
 
@@ -249,12 +271,17 @@ private:
 	UFUNCTION()
 	void OnRep_DevelopmentTimeScale();
 
+	UFUNCTION()
+	void OnRep_IllegalTradeState();
+
 	void NotifyFundsChanged();
 	void RotateShopTrends();
 	void BeginShopDay();
 	void FinishShopDay();
 	void ApplyDevelopmentTimeScale();
 	void RefreshOutdoorEnvironment();
+	void RefreshIllegalTradeState();
+	void SetIllegalTradeActive(bool bActive);
 	bool DidClockCrossMinute(
 		float PreviousMinute,
 		float CurrentMinute,
@@ -323,6 +350,12 @@ private:
 	UPROPERTY(ReplicatedUsing=OnRep_SharedFunds)
 	float DayTimeMinutes = 420.0f;
 
+	UPROPERTY(ReplicatedUsing=OnRep_IllegalTradeState)
+	bool bIllegalTradeActive = false;
+
+	UPROPERTY(ReplicatedUsing=OnRep_SharedFunds)
+	int32 Suspicion = 0;
+
 	UPROPERTY(Replicated)
 	FBotanicusOutdoorEnvironmentState OutdoorEnvironment;
 
@@ -362,5 +395,6 @@ private:
 	bool bDayCycleInitialized = false;
 	bool bShopReputationInitialized = false;
 	bool bShopTrendsInitialized = false;
+	bool bIllegalTradeInitialized = false;
 	FTimerHandle TrendRotationTimer;
 };

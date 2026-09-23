@@ -7,7 +7,7 @@
 #include "BotanicusWateringCanActor.generated.h"
 
 class ABotanicusCharacter;
-class UNiagaraComponent;
+class USceneComponent;
 
 /** Replicated physical watering can that must stay in a player's hand to water. */
 UCLASS()
@@ -18,7 +18,6 @@ class BOTANICUS_API ABotanicusWateringCanActor
 
 public:
 	ABotanicusWateringCanActor();
-	virtual void Tick(float DeltaSeconds) override;
 
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -31,10 +30,17 @@ public:
 	void Refill();
 	void RestoreWaterLevel(float InWaterLevel);
 
-	/** Local cosmetic stream shown while this watering can is being used. */
+	/**
+	 * Compatibility entry point kept for existing callers.
+	 * Water VFX are intentionally disabled until the replacement is rebuilt.
+	 */
 	void SetWateringEffectActive(
 		bool bActive,
 		const FVector& TargetWorldLocation = FVector::ZeroVector);
+
+	/** Sole future origin of water. Position it at the spout in the Blueprint. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Botanicus|Water")
+	TObjectPtr<USceneComponent> WaterNozzle;
 
 	ABotanicusCharacter* GetCarrier() const { return Carrier; }
 	float GetWaterLevel() const { return WaterLevel; }
@@ -46,7 +52,6 @@ private:
 	void OnRep_Carrier();
 
 	void ApplyCarrierState();
-	void RefreshWateringEffect(float DeltaSeconds);
 
 	UPROPERTY(ReplicatedUsing=OnRep_Carrier)
 	TObjectPtr<ABotanicusCharacter> Carrier;
@@ -54,20 +59,4 @@ private:
 	UPROPERTY(Replicated)
 	float WaterLevel = 1.0f;
 
-	/** Continuous Niagara stream emitted from the watering-can spout. */
-	UPROPERTY(VisibleAnywhere, Category="Botanicus|Water Effect")
-	TObjectPtr<UNiagaraComponent> WaterJetEffect;
-
-	/** Niagara splash played where the stream touches the soil. */
-	UPROPERTY(VisibleAnywhere, Category="Botanicus|Water Effect")
-	TObjectPtr<UNiagaraComponent> WaterImpactEffect;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Botanicus|Water Effect", meta=(AllowPrivateAccess="true", Units="cm"))
-	float WaterStreamThickness = 7.0f;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Botanicus|Water Effect", meta=(AllowPrivateAccess="true", Units="cm"))
-	float WaterStreamArcHeight = 18.0f;
-
-	bool bWateringEffectActive = false;
-	FVector WateringEffectTarget = FVector::ZeroVector;
 };

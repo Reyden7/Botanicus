@@ -20,6 +20,8 @@
 #include "Growing/BotanicusPlantPotActor.h"
 #include "Growing/BotanicusMultiPlantPotActor.h"
 #include "Growing/BotanicusWateringCanActor.h"
+#include "IllegalTrade/BotanicusIllegalPlanterActor.h"
+#include "IllegalTrade/BotanicusIllegalTradeManager.h"
 #include "Sales/BotanicusSalesDisplayActor.h"
 #include "Sales/BotanicusSalePotActor.h"
 #include "Sales/BotanicusCashRegisterActor.h"
@@ -96,6 +98,11 @@ void ABotanicusGameMode::BeginPlay()
 			{
 				World->SpawnActor<ABotanicusVisitorManager>();
 			}
+			TActorIterator<ABotanicusIllegalTradeManager> IllegalManagerIt(World);
+			if (!IllegalManagerIt)
+			{
+				World->SpawnActor<ABotanicusIllegalTradeManager>();
+			}
 
 			for (FConstPlayerControllerIterator ControllerIt =
 					 World->GetPlayerControllerIterator();
@@ -122,6 +129,54 @@ void ABotanicusGameMode::BeginPlay()
 				2.0f);
 		}
 		bAutosaveReady = true;
+	}
+}
+
+void ABotanicusGameMode::SetTime(float Hour)
+{
+	if (ABotanicusGameState* State = GetGameState<ABotanicusGameState>())
+	{
+		State->SetDayTimeMinutesForDevelopment(FMath::Fmod(FMath::Max(0.0f, Hour), 24.0f) * 60.0f);
+		ScheduleInventoryAutosave();
+	}
+}
+
+void ABotanicusGameMode::SetSuspicion(int32 Value)
+{
+	if (ABotanicusGameState* State = GetGameState<ABotanicusGameState>())
+	{
+		State->SetSuspicionForDevelopment(Value);
+		ScheduleInventoryAutosave();
+	}
+}
+
+void ABotanicusGameMode::SpawnIllegalCustomer()
+{
+	if (!GetWorld()) return;
+	for (TActorIterator<ABotanicusIllegalTradeManager> It(GetWorld()); It; ++It)
+	{
+		It->DebugSpawnCustomer();
+		return;
+	}
+	ABotanicusIllegalTradeManager* Manager = GetWorld()->SpawnActor<ABotanicusIllegalTradeManager>();
+	if (Manager) Manager->DebugSpawnCustomer();
+}
+
+void ABotanicusGameMode::SetIllegalPlantGrowth(float Percent)
+{
+	if (!GetWorld()) return;
+	for (TActorIterator<ABotanicusIllegalPlanterActor> It(GetWorld()); It; ++It)
+	{
+		It->SetAllGrowthForDevelopment(Percent / 100.0f);
+	}
+}
+
+void ABotanicusGameMode::FillIllegalPlanterWater()
+{
+	if (!GetWorld()) return;
+	for (TActorIterator<ABotanicusIllegalPlanterActor> It(GetWorld()); It; ++It)
+	{
+		It->FillWaterForDevelopment();
 	}
 }
 
@@ -511,7 +566,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 
 	CurrentSaveGame->MapName =
 		UGameplayStatics::GetCurrentLevelName(this, true);
-	CurrentSaveGame->SaveVersion = 31;
+	CurrentSaveGame->SaveVersion = 32;
 	if (const ABotanicusGameState* BotanicusGameState =
 		World->GetGameState<ABotanicusGameState>())
 	{
@@ -537,6 +592,8 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 			BotanicusGameState->GetDayStartReputation();
 		CurrentSaveGame->DayTimeMinutes =
 			BotanicusGameState->GetDayTimeMinutes();
+		CurrentSaveGame->Suspicion =
+			BotanicusGameState->GetSuspicion();
 		CurrentSaveGame->TotalPlantsSold =
 			BotanicusGameState->GetTotalPlantsSold();
 		CurrentSaveGame->TotalCatalogOrders =
@@ -750,7 +807,20 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		SavedItem.Transform = ItemIt->GetActorTransform();
 		SavedItem.ItemKey = ItemIt->GetItemKey();
 		SavedItem.Quantity = ItemIt->GetQuantity();
-		if (const ABotanicusMultiPlantPotActor* MultiPlanter =
+		if (const ABotanicusIllegalPlanterActor* IllegalPlanter =
+			Cast<ABotanicusIllegalPlanterActor>(*ItemIt))
+		{
+			SavedItem.IllegalPlanterLevel = IllegalPlanter->GetPlanterLevel();
+			SavedItem.IllegalPlanterSoilUnits = IllegalPlanter->GetSoilUnits();
+			SavedItem.IllegalPlanterWaterAmount = IllegalPlanter->GetWaterAmount();
+			for (const FBotanicusIllegalPlantSlotState& Slot : IllegalPlanter->GetPlantSlots())
+			{
+				SavedItem.IllegalPlanterPlantIds.Add(Slot.PlantId);
+				SavedItem.IllegalPlanterGrowthProgress.Add(Slot.GrowthProgress);
+				SavedItem.IllegalPlanterSlotWaterAmounts.Add(Slot.WaterAmount);
+			}
+		}
+		else if (const ABotanicusMultiPlantPotActor* MultiPlanter =
 			Cast<ABotanicusMultiPlantPotActor>(*ItemIt))
 		{
 			SavedItem.MultiPlanterSoilUnits =
@@ -1071,6 +1141,10 @@ void ABotanicusGameMode::InitializeSharedEconomy()
 		CurrentSaveGame->SaveVersion >= 31
 			? CurrentSaveGame->DiscoveredDiseaseKeys
 			: TArray<FName>());
+	BotanicusGameState->InitializeIllegalTrade(
+		CurrentSaveGame->SaveVersion >= 32
+			? CurrentSaveGame->Suspicion
+			: 0);
 	UE_LOG(
 		LogBotanicus,
 		Display,
@@ -1473,6 +1547,27 @@ void ABotanicusGameMode::RestoreWorldState()
 				ItemClass = PlantPotBlueprintClass;
 			}
 		}
+		// Migrate clandestine planters created before the editable Blueprint
+		// existed so old saves receive the same authored appearance.
+		else if (RestoredItemKey == TEXT("IllegalPlanter_L1"))
+		{
+			const UBotanicusItemCatalogSubsystem* Catalog =
+				World->GetGameInstance()
+					? World->GetGameInstance()->GetSubsystem<
+						UBotanicusItemCatalogSubsystem>()
+					: nullptr;
+			const FBotanicusItemDefinition* Definition =
+				Catalog ? Catalog->FindItem(RestoredItemKey) : nullptr;
+			UClass* IllegalPlanterBlueprintClass = Definition
+				? Definition->WorldActorClass.LoadSynchronous()
+				: nullptr;
+			if (IllegalPlanterBlueprintClass &&
+				IllegalPlanterBlueprintClass->IsChildOf(
+					ABotanicusIllegalPlanterActor::StaticClass()))
+			{
+				ItemClass = IllegalPlanterBlueprintClass;
+			}
+		}
 		// SalePot used to be restored as its native fallback class, which
 		// discarded the mesh authored in BP_Item_SalePot.
 		else if (SavedItem.ItemKey == TEXT("SalePot"))
@@ -1550,7 +1645,28 @@ void ABotanicusGameMode::RestoreWorldState()
 			PlacedItem->InitializePlacedItem(
 				SavedItem.ItemKey,
 				SavedItem.Quantity);
-			if (ABotanicusMultiPlantPotActor* MultiPlanter =
+			if (ABotanicusIllegalPlanterActor* IllegalPlanter =
+				Cast<ABotanicusIllegalPlanterActor>(PlacedItem))
+			{
+				TArray<FBotanicusIllegalPlantSlotState> Slots;
+				for (int32 Index = 0; Index < SavedItem.IllegalPlanterPlantIds.Num(); ++Index)
+				{
+					FBotanicusIllegalPlantSlotState& Slot = Slots.AddDefaulted_GetRef();
+					Slot.PlantId = SavedItem.IllegalPlanterPlantIds[Index];
+					Slot.GrowthProgress = SavedItem.IllegalPlanterGrowthProgress.IsValidIndex(Index)
+						? SavedItem.IllegalPlanterGrowthProgress[Index]
+						: 0.0f;
+					Slot.WaterAmount = SavedItem.IllegalPlanterSlotWaterAmounts.IsValidIndex(Index)
+						? SavedItem.IllegalPlanterSlotWaterAmounts[Index]
+						: 0.0f;
+				}
+				IllegalPlanter->RestoreIllegalPlanterState(
+					SavedItem.IllegalPlanterLevel,
+					SavedItem.IllegalPlanterSoilUnits,
+					SavedItem.IllegalPlanterWaterAmount,
+					Slots);
+			}
+			else if (ABotanicusMultiPlantPotActor* MultiPlanter =
 				Cast<ABotanicusMultiPlantPotActor>(PlacedItem))
 			{
 				TArray<FBotanicusMultiPlantSlotState> Slots;

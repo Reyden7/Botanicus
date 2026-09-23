@@ -216,6 +216,10 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Botanicus|Inventory")
 	bool RemoveQuantity(int32 SlotIndex, int32 Quantity);
 
+	/** Atomically removes a stackable item across several slots. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Botanicus|Inventory")
+	bool RemoveItem(FName ItemKey, int32 Quantity);
+
 	bool SetCarriedItemState(
 		int32 SlotIndex,
 		const FBotanicusCarriedItemState& State);

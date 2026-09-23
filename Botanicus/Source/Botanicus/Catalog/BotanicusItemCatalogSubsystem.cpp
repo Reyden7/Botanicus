@@ -561,8 +561,8 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	WateringCan.WorldMesh = TSoftObjectPtr<UStaticMesh>(
 		FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube.Cube")));
 	WateringCan.WorldScale = FVector(0.38f, 0.2f, 0.28f);
-	// Spawn the editable Blueprint so its Niagara component transform is used
-	// by the held item, placement preview and replicated world actor.
+	// Spawn the editable Blueprint so its authored mesh and nozzle transform are
+	// used by the held item, placement preview and replicated world actor.
 	WateringCan.WorldActorClass = TSoftClassPtr<AActor>(
 		FSoftObjectPath(TEXT(
 			"/Game/Botanicus/blueprints/BP_Item_WateringCan.BP_Item_WateringCan_C")));
@@ -1057,6 +1057,60 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	SelfCheckout.DeliveryDelaySeconds = 5.0f;
 	SelfCheckout.CollisionHalfExtentOverride =
 		FVector(30.0f, 20.0f, 100.0f);
+
+	FBotanicusItemDefinition& IllegalPlanter =
+		NativeFallbackItems.AddDefaulted_GetRef();
+	IllegalPlanter.ItemKey = TEXT("IllegalPlanter_L1");
+	IllegalPlanter.DisplayName = NSLOCTEXT(
+		"BotanicusCatalog", "IllegalPlanter", "Jardinière clandestine");
+	IllegalPlanter.Category = EBotanicusItemCategory::Equipment;
+	IllegalPlanter.CatalogTabs =
+		static_cast<int32>(EBotanicusCatalogTab::GardeningTools);
+	IllegalPlanter.WorldMesh = TSoftObjectPtr<UStaticMesh>(
+		FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube.Cube")));
+	IllegalPlanter.WorldScale = FVector(2.4f, 0.75f, 0.35f);
+	IllegalPlanter.WorldActorClass = TSoftClassPtr<AActor>(
+		FSoftObjectPath(TEXT(
+			"/Game/Botanicus/blueprints/BP_Item_IllegalPlanter.BP_Item_IllegalPlanter_C")));
+	IllegalPlanter.MaximumStack = 1;
+	IllegalPlanter.WeightClass = EBotanicusItemWeightClass::Hotbar;
+	IllegalPlanter.Price = 300;
+	IllegalPlanter.DeliveryQuantity = 1;
+	IllegalPlanter.DeliveryDelaySeconds = 4.0f;
+	IllegalPlanter.CollisionHalfExtentOverride = FVector(120.0f, 38.0f, 18.0f);
+
+	FBotanicusItemDefinition& NoctifloreSeeds =
+		NativeFallbackItems.AddDefaulted_GetRef();
+	NoctifloreSeeds.ItemKey = TEXT("SeedPacket_Noctiflore");
+	NoctifloreSeeds.DisplayName = NSLOCTEXT(
+		"BotanicusCatalog", "NoctifloreSeeds", "Graines de Noctiflore");
+	NoctifloreSeeds.Category = EBotanicusItemCategory::Supply;
+	NoctifloreSeeds.CatalogTabs =
+		static_cast<int32>(EBotanicusCatalogTab::Seeds);
+	NoctifloreSeeds.WorldMesh = TSoftObjectPtr<UStaticMesh>(
+		FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube.Cube")));
+	NoctifloreSeeds.WorldScale = FVector(0.18f, 0.08f, 0.25f);
+	NoctifloreSeeds.MaximumStack = 10;
+	NoctifloreSeeds.WeightClass = EBotanicusItemWeightClass::Hotbar;
+	NoctifloreSeeds.Price = 90;
+	NoctifloreSeeds.DeliveryQuantity = 5;
+	NoctifloreSeeds.DeliveryDelaySeconds = 3.0f;
+
+	FBotanicusItemDefinition& NoctifloreProduct =
+		NativeFallbackItems.AddDefaulted_GetRef();
+	NoctifloreProduct.ItemKey = TEXT("IllegalPlantProduct_Noctiflore");
+	NoctifloreProduct.DisplayName = NSLOCTEXT(
+		"BotanicusCatalog", "NoctifloreProduct", "Noctiflore récoltée");
+	NoctifloreProduct.Category = EBotanicusItemCategory::Supply;
+	NoctifloreProduct.CatalogTabs =
+		static_cast<int32>(EBotanicusCatalogTab::Seeds);
+	NoctifloreProduct.WorldMesh = TSoftObjectPtr<UStaticMesh>(
+		FSoftObjectPath(TEXT("/Engine/BasicShapes/Cone.Cone")));
+	NoctifloreProduct.WorldScale = FVector(0.3f);
+	NoctifloreProduct.MaximumStack = 20;
+	NoctifloreProduct.WeightClass = EBotanicusItemWeightClass::Hotbar;
+	NoctifloreProduct.SalePrice = 150;
+	NoctifloreProduct.bPurchasable = false;
 }
 
 const FBotanicusItemDefinition*

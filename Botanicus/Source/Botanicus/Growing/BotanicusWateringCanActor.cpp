@@ -3,93 +3,29 @@
 #include "Growing/BotanicusWateringCanActor.h"
 
 #include "BotanicusCharacter.h"
+#include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
-#include "NiagaraComponent.h"
-#include "NiagaraSystem.h"
-#include "UObject/ConstructorHelpers.h"
 
 ABotanicusWateringCanActor::ABotanicusWateringCanActor()
 {
-	PrimaryActorTick.bCanEverTick = true;
-	PrimaryActorTick.bStartWithTickEnabled = true;
+	PrimaryActorTick.bCanEverTick = false;
 
-	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> WaterJetFinder(
-		TEXT("/Game/Botanicus/VFX/Watering/NS_AnimeWater.NS_AnimeWater"));
-
-	WaterJetEffect = CreateDefaultSubobject<UNiagaraComponent>(TEXT("Water Jet Niagara"));
-	WaterJetEffect->SetupAttachment(SceneRoot);
-	WaterJetEffect->SetAutoActivate(false);
-	WaterJetEffect->SetCastShadow(false);
-	WaterJetEffect->bEditableWhenInherited = true;
-	if (WaterJetFinder.Succeeded())
-	{
-		WaterJetEffect->SetAsset(WaterJetFinder.Object);
-	}
-
-	WaterImpactEffect = CreateDefaultSubobject<UNiagaraComponent>(TEXT("Water Impact Niagara"));
-	WaterImpactEffect->SetupAttachment(SceneRoot);
-	WaterImpactEffect->SetAutoActivate(false);
-	WaterImpactEffect->SetCastShadow(false);
-}
-
-void ABotanicusWateringCanActor::Tick(float DeltaSeconds)
-{
-	Super::Tick(DeltaSeconds);
-	RefreshWateringEffect(DeltaSeconds);
+	WaterNozzle = CreateDefaultSubobject<USceneComponent>(TEXT("Water Nozzle"));
+	WaterNozzle->SetupAttachment(SceneRoot);
+	WaterNozzle->bEditableWhenInherited = true;
 }
 
 void ABotanicusWateringCanActor::SetWateringEffectActive(
 	bool bActive,
 	const FVector& TargetWorldLocation)
 {
-	bWateringEffectActive = bActive && WaterJetEffect && WaterJetEffect->GetAsset();
-	if (bWateringEffectActive)
-	{
-		WateringEffectTarget = TargetWorldLocation;
-		if (!WaterJetEffect->IsActive())
-		{
-			WaterJetEffect->Activate(true);
-		}
-		if (WaterImpactEffect && WaterImpactEffect->GetAsset() &&
-			!WaterImpactEffect->IsActive())
-		{
-			WaterImpactEffect->Activate(true);
-		}
-	}
-	else
-	{
-		if (WaterJetEffect)
-		{
-			WaterJetEffect->DeactivateImmediate();
-		}
-		if (WaterImpactEffect)
-		{
-			WaterImpactEffect->DeactivateImmediate();
-		}
-	}
-}
-
-void ABotanicusWateringCanActor::RefreshWateringEffect(float DeltaSeconds)
-{
-	if (!bWateringEffectActive || !WaterJetEffect)
-	{
-		return;
-	}
-
-	(void)DeltaSeconds;
-	// Do not modify the jet component transform here. Its position, rotation
-	// and scale are authored directly on Water Jet Effect in the Blueprint.
-	WaterJetEffect->SetVariableFloat(TEXT("User.ArcHeight"), WaterStreamArcHeight);
-	if (WaterImpactEffect && WaterImpactEffect->GetAsset())
-	{
-		WaterImpactEffect->SetWorldLocationAndRotation(
-			WateringEffectTarget + FVector(0.0f, 0.0f, 2.5f),
-			FRotator::ZeroRotator);
-		WaterImpactEffect->SetWorldScale3D(FVector(0.10f));
-	}
+	// Kept to avoid breaking existing input/gameplay call sites.  The visual
+	// implementation is intentionally absent while the new water VFX is paused.
+	(void)bActive;
+	(void)TargetWorldLocation;
 }
 
 void ABotanicusWateringCanActor::GetLifetimeReplicatedProps(

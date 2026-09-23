@@ -25,9 +25,6 @@
 #include "Engine/Texture2D.h"
 #include "Fonts/CompositeFont.h"
 #include "Kismet2/KismetEditorUtilities.h"
-#include "NiagaraEmitter.h"
-#include "NiagaraEmitterHandle.h"
-#include "NiagaraSystem.h"
 #include "UObject/SavePackage.h"
 #include "UI/BotanicusOrderCatalogWidget.h"
 #include "UI/BotanicusBotanistNotebookWidget.h"
@@ -402,7 +399,6 @@ bool UBotanicusCommandWidgetBuilder::UpgradeCommandComputerCareTab()
 	return false;
 #endif
 }
-
 bool UBotanicusCommandWidgetBuilder::UpgradeCommandComputerTabIcons()
 {
 #if WITH_EDITOR
@@ -919,56 +915,3 @@ bool UBotanicusCommandWidgetBuilder::UpgradeBotanistNotebookRichNotes()
 	return false;
 #endif
 }
-
-bool UBotanicusCommandWidgetBuilder::MakeAnimeWaterLocalSpace()
-{
-#if WITH_EDITOR
-	const TCHAR* AssetPath =
-		TEXT("/Game/Botanicus/VFX/Watering/NS_AnimeWater.NS_AnimeWater");
-	UNiagaraSystem* System = LoadObject<UNiagaraSystem>(nullptr, AssetPath);
-	if (!System)
-	{
-		return false;
-	}
-
-	System->Modify();
-	bool bFoundEmitter = false;
-	for (FNiagaraEmitterHandle& Handle : System->GetEmitterHandles())
-	{
-		FVersionedNiagaraEmitterData* EmitterData = Handle.GetEmitterData();
-		if (!EmitterData)
-		{
-			continue;
-		}
-
-		bFoundEmitter = true;
-		if (UNiagaraEmitter* Emitter =
-				Cast<UNiagaraEmitter>(Handle.GetEmitterBase()))
-		{
-			Emitter->Modify();
-		}
-		EmitterData->bLocalSpace = true;
-	}
-
-	if (!bFoundEmitter)
-	{
-		return false;
-	}
-
-	System->RequestCompile(true);
-	System->WaitForCompilationComplete(true, false);
-	System->MarkPackageDirty();
-	const FString PackageName = System->GetOutermost()->GetName();
-	const FString PackageFilename = FPackageName::LongPackageNameToFilename(
-		PackageName,
-		FPackageName::GetAssetPackageExtension());
-	return UPackage::SavePackage(
-		System->GetOutermost(),
-		System,
-		*PackageFilename,
-		FSavePackageArgs());
-#else
-	return false;
-#endif
-}
-
