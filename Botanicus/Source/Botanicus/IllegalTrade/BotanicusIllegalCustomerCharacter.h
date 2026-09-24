@@ -71,6 +71,8 @@ private:
 	void BeginLeaving(bool bOrderSold);
 	void RefreshOrderText();
 
+	// Kept for compatibility with existing Blueprint instances. The skeletal
+	// character mesh is the only visible body.
 	UPROPERTY(VisibleAnywhere, Category="Components")
 	TObjectPtr<UStaticMeshComponent> BodyVisual;
 

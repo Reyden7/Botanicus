@@ -3,14 +3,17 @@
 #include "IllegalTrade/BotanicusIllegalCustomerCharacter.h"
 
 #include "AIController.h"
+#include "Animation/AnimInstance.h"
 #include "BotanicusCharacter.h"
 #include "BotanicusGameMode.h"
 #include "BotanicusGameState.h"
 #include "Blueprint/UserWidget.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/WidgetComponent.h"
+#include "Engine/SkeletalMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
@@ -31,6 +34,7 @@ ABotanicusIllegalCustomerCharacter::ABotanicusIllegalCustomerCharacter()
 	AIControllerClass = AAIController::StaticClass();
 	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
 	GetCharacterMovement()->MaxWalkSpeed = 190.0f;
+	GetCapsuleComponent()->InitCapsuleSize(34.0f, 88.0f);
 	GetCapsuleComponent()->SetCollisionProfileName(TEXT("Pawn"));
 	GetCapsuleComponent()->SetCollisionResponseToChannel(
 		ECC_Visibility, ECR_Block);
@@ -38,11 +42,24 @@ ABotanicusIllegalCustomerCharacter::ABotanicusIllegalCustomerCharacter()
 	BodyVisual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BodyVisual"));
 	BodyVisual->SetupAttachment(GetCapsuleComponent());
 	BodyVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	BodyVisual->SetRelativeScale3D(FVector(0.42f, 0.42f, 0.9f));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CapsuleFinder(
-		TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
-	if (CapsuleFinder.Succeeded()) BodyVisual->SetStaticMesh(CapsuleFinder.Object);
-	BodyVisual->SetRelativeLocation(FVector(0.0f, 0.0f, -5.0f));
+	BodyVisual->SetVisibility(false);
+	BodyVisual->SetHiddenInGame(true);
+
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> MeshFinder(
+		TEXT("/Game/Characters/Mannequins/Meshes/SKM_Manny_Simple.SKM_Manny_Simple"));
+	if (MeshFinder.Succeeded())
+	{
+		GetMesh()->SetSkeletalMesh(MeshFinder.Object);
+		GetMesh()->SetRelativeLocation(FVector(0.0f, 0.0f, -88.0f));
+		GetMesh()->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
+	}
+	GetMesh()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	static ConstructorHelpers::FClassFinder<UAnimInstance> AnimFinder(
+		TEXT("/Game/Characters/Mannequins/Anims/Unarmed/ABP_Unarmed"));
+	if (AnimFinder.Succeeded())
+	{
+		GetMesh()->SetAnimInstanceClass(AnimFinder.Class);
+	}
 
 	OrderWidget = CreateDefaultSubobject<UWidgetComponent>(TEXT("OrderWidget"));
 	OrderWidget->SetupAttachment(GetCapsuleComponent());
@@ -59,6 +76,23 @@ ABotanicusIllegalCustomerCharacter::ABotanicusIllegalCustomerCharacter()
 void ABotanicusIllegalCustomerCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+	// Existing Blueprint instances may still serialize the old empty
+	// CharacterMesh0 template. Restore the visitor mannequin at runtime too.
+	if (GetMesh())
+	{
+		if (!GetMesh()->GetSkeletalMeshAsset())
+		{
+			GetMesh()->SetSkeletalMesh(LoadObject<USkeletalMesh>(nullptr,
+				TEXT("/Game/Characters/Mannequins/Meshes/SKM_Manny_Simple.SKM_Manny_Simple")));
+		}
+		if (!GetMesh()->GetAnimClass())
+		{
+			GetMesh()->SetAnimInstanceClass(LoadClass<UAnimInstance>(nullptr,
+				TEXT("/Game/Characters/Mannequins/Anims/Unarmed/ABP_Unarmed_C")));
+		}
+		GetMesh()->SetRelativeLocation(FVector(0.0f, 0.0f, -88.0f));
+		GetMesh()->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
+	}
 	if (OrderWidget)
 	{
 		if (UClass* WidgetClass = LoadClass<UUserWidget>(nullptr,
@@ -303,6 +337,9 @@ void ABotanicusIllegalCustomerCharacter::RefreshOrderText()
 {
 	if (OrderWidget)
 	{
+		// A fulfilled or expired order must not keep looking actionable.
+		OrderWidget->SetVisibility(
+			CustomerState != EBotanicusIllegalCustomerState::Leaving);
 		if (UBotanicusIllegalOrderWidget* Widget =
 				Cast<UBotanicusIllegalOrderWidget>(OrderWidget->GetWidget()))
 		{

@@ -1249,12 +1249,36 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 
 		!bFurnitureMoveModeActive)
 	{
-		if (ABotanicusIllegalCustomerCharacter* Customer =
-				Cast<ABotanicusIllegalCustomerCharacter>(
-					LocalInteractionHighlightActor.Get());
-			IsValid(Customer) &&
-			Customer->CanInteract_Implementation(GetPawn()))
+		ABotanicusIllegalCustomerCharacter* Customer =
+			Cast<ABotanicusIllegalCustomerCharacter>(
+				LocalInteractionHighlightActor.Get());
+		if (!IsValid(Customer) && GetWorld() && GetPawn())
 		{
+			FVector ViewLocation;
+			FRotator ViewRotation;
+			GetPlayerViewPoint(ViewLocation, ViewRotation);
+			FCollisionQueryParams QueryParams(
+				SCENE_QUERY_STAT(BotanicusIllegalCustomerAim), false);
+			QueryParams.AddIgnoredActor(GetPawn());
+			if (IsValid(LocalQuickBarItemPreview))
+			{
+				QueryParams.AddIgnoredActor(LocalQuickBarItemPreview);
+			}
+			FHitResult Hit;
+			if (GetWorld()->LineTraceSingleByChannel(
+					Hit, ViewLocation,
+					ViewLocation + ViewRotation.Vector() *
+						(MaximumWorldInteractionDistance + 200.0f),
+					ECC_Visibility, QueryParams))
+			{
+				Customer = Cast<ABotanicusIllegalCustomerCharacter>(
+					Hit.GetActor());
+			}
+		}
+		if (IsValid(Customer))
+		{
+			// The world-space order widget can advertise E before the HUD's
+			// cached highlight updates. The server validates the actual hit.
 			ServerSellIllegalOrder(Customer);
 			return true;
 		}
@@ -11149,10 +11173,31 @@ ServerSellIllegalOrder_Implementation(
 		ABotanicusIllegalCustomerCharacter* Customer)
 {
 	APawn* ControlledPawn = GetPawn();
-	if (!IsValid(Customer) || !IsValid(ControlledPawn) ||
-		!Customer->CanInteract_Implementation(ControlledPawn) ||
-		!IsLookingAtWorldItem(Customer, 450.0f))
+	if (!IsValid(Customer) || !IsValid(ControlledPawn))
 	{
+		return;
+	}
+	if (!Customer->CanInteract_Implementation(ControlledPawn))
+	{
+		ClientMessage(TEXT("Le client clandestin n'est plus disponible."));
+		return;
+	}
+
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	GetPlayerViewPoint(ViewLocation, ViewRotation);
+	FCollisionQueryParams QueryParams(
+		SCENE_QUERY_STAT(BotanicusIllegalCustomerSale), false);
+	QueryParams.AddIgnoredActor(ControlledPawn);
+	FHitResult Hit;
+	if (!GetWorld()->LineTraceSingleByChannel(
+			Hit, ViewLocation,
+			ViewLocation + ViewRotation.Vector() *
+				(MaximumWorldInteractionDistance + 200.0f),
+			ECC_Visibility, QueryParams) ||
+		Hit.GetActor() != Customer)
+	{
+		ClientMessage(TEXT("Regardez directement le client clandestin pour vendre."));
 		return;
 	}
 	IBotanicusInteractable::Execute_Interact(Customer, ControlledPawn);

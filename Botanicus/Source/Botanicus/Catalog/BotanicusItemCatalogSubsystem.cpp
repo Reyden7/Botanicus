@@ -1105,8 +1105,9 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	NoctifloreProduct.CatalogTabs =
 		static_cast<int32>(EBotanicusCatalogTab::Seeds);
 	NoctifloreProduct.WorldMesh = TSoftObjectPtr<UStaticMesh>(
-		FSoftObjectPath(TEXT("/Engine/BasicShapes/Cone.Cone")));
-	NoctifloreProduct.WorldScale = FVector(0.3f);
+		FSoftObjectPath(TEXT(
+			"/Game/Botanicus/Items/itemsMesh/Trafic/plantes/3/3.3")));
+	NoctifloreProduct.WorldScale = FVector(0.22f);
 	NoctifloreProduct.MaximumStack = 20;
 	NoctifloreProduct.WeightClass = EBotanicusItemWeightClass::Hotbar;
 	NoctifloreProduct.SalePrice = 150;
