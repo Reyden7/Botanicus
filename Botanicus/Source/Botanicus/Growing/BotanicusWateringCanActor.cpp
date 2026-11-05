@@ -7,6 +7,8 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
+#include "NiagaraComponent.h"
+#include "Visuals/BotanicusJuiceSettings.h"
 #include "Net/UnrealNetwork.h"
 
 ABotanicusWateringCanActor::ABotanicusWateringCanActor()
@@ -187,4 +189,21 @@ void ABotanicusWateringCanActor::ApplyCarrierState()
 		DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 		SetActorEnableCollision(true);
 	}
+}
+
+void ABotanicusWateringCanActor::BeginPlay()
+{
+    Super::BeginPlay();
+    bUseMeshNozzleFallback=WaterNozzle && WaterNozzle->GetRelativeLocation().IsNearlyZero();
+    // Neutralise legacy Blueprint Niagara components; the single juice owner renders the replacement.
+    TArray<UNiagaraComponent*> Legacy; GetComponents(Legacy);
+    for (auto* Component : Legacy)
+    {
+        Component->bAutoActivate=false; Component->DeactivateImmediate(); Component->SetVisibility(false);
+    }
+}
+FVector ABotanicusWateringCanActor::GetJuiceNozzleLocation() const
+{
+    if (bUseMeshNozzleFallback && Mesh) return Mesh->GetComponentTransform().TransformPosition(GetDefault<UBotanicusJuiceSettings>()->NozzleMeshLocalOffset);
+    return WaterNozzle ? WaterNozzle->GetComponentLocation() : GetActorLocation();
 }

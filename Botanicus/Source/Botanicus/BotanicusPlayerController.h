@@ -88,10 +88,15 @@ class BOTANICUS_API ABotanicusPlayerController : public APlayerController
 	GENERATED_BODY()
 	
 public:
+	friend class UBotanicusJuiceValidation;
 
 	/** Private transaction confirmation; world events use the shared audio relay. */
 	UFUNCTION(Client, Reliable)
 	void ClientPlayFeedbackAudio(FName EventId);
+
+	/** Read-only access to the existing local equipped representation. */
+	ABotanicusWateringCanActor* GetJuiceWateringCan() const;
+	bool IsJuiceWaterInputHeld() const { return bPlantPotActionHeld || bWateringCanSprayHeld; }
 
 	/** Constructor */
 	ABotanicusPlayerController();

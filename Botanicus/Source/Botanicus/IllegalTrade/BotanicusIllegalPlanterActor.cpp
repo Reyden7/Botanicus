@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "IllegalTrade/BotanicusIllegalPlanterActor.h"
+#include "Visuals/BotanicusJuiceWorldSubsystem.h"
 #include "Audio/BotanicusAudioWorldSubsystem.h"
 
 #include "BotanicusCharacter.h"
@@ -401,6 +402,8 @@ void ABotanicusIllegalPlanterActor::Interact_Implementation(AActor* Interactor)
 				{
 					Slot->PlantId = Plant->PlantId;
 					UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Plant"), GetActorLocation());
+					const float JuiceX = (SlotIndex - .5f * (PlantSlots.Num() - 1)) * GetPlantSlotSpacing();
+					UBotanicusJuiceWorldSubsystem::PlantSucceeded(this, GetActorTransform().TransformPosition(FVector(JuiceX, 0, SoilBottomHeight + SoilVolumeHeight)));
 					Slot->GrowthProgress = 0.0f;
 					UE_LOG(LogBotanicusIllegalTrade, Display,
 						TEXT("Plant created: %s."), *Plant->PlantId.ToString());

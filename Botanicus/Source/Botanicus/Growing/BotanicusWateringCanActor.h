@@ -18,6 +18,8 @@ class BOTANICUS_API ABotanicusWateringCanActor
 
 public:
 	ABotanicusWateringCanActor();
+	virtual void BeginPlay() override;
+	FVector GetJuiceNozzleLocation() const;
 
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -32,13 +34,13 @@ public:
 
 	/**
 	 * Compatibility entry point kept for existing callers.
-	 * Water VFX are intentionally disabled until the replacement is rebuilt.
+	 * Water VFX are driven centrally from accepted watering state; this legacy hook stays inert.
 	 */
 	void SetWateringEffectActive(
 		bool bActive,
 		const FVector& TargetWorldLocation = FVector::ZeroVector);
 
-	/** Sole future origin of water. Position it at the spout in the Blueprint. */
+	/** Authored nozzle; the mesh-local calibration is used when this is left at the actor origin. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Botanicus|Water")
 	TObjectPtr<USceneComponent> WaterNozzle;
 
@@ -48,6 +50,7 @@ public:
 	bool IsFull() const { return WaterLevel >= 1.0f - KINDA_SMALL_NUMBER; }
 
 private:
+	bool bUseMeshNozzleFallback=false;
 	UFUNCTION()
 	void OnRep_Carrier();
 

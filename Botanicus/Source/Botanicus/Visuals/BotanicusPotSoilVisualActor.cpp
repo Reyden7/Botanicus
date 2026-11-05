@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Visuals/BotanicusPotSoilVisualActor.h"
+#include "Visuals/BotanicusJuiceWorldSubsystem.h"
 
 #include "Components/SceneComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -47,6 +48,9 @@ void ABotanicusPotSoilVisualActor::ConfigureSoilShape(
 	bool bSquareProfile,
 	float Wetness)
 {
+	const bool bShapeChanged = !CurrentBottomRadii.Equals(BottomRadii) || !CurrentTopRadii.Equals(TopRadii) ||
+		!FMath::IsNearlyEqual(CurrentFullHeight, FullHeight) || !FMath::IsNearlyEqual(CurrentFillAlpha, FillAlpha) ||
+		bCurrentVisible != bVisible || bCurrentSquareProfile != bSquareProfile;
 	CurrentBottomRadii = FVector2D(
 		FMath::Max(0.5f, BottomRadii.X),
 		FMath::Max(0.5f, BottomRadii.Y));
@@ -58,12 +62,15 @@ void ABotanicusPotSoilVisualActor::ConfigureSoilShape(
 	bCurrentVisible = bVisible;
 	bCurrentSquareProfile = bSquareProfile;
 	CurrentWetness = FMath::Clamp(Wetness, 0.0f, 1.0f);
-	RebuildSoilMesh();
+	// Retain the surface dimensions for authoritative event placement, without rendering soil on a server.
+	if (GetNetMode() == NM_DedicatedServer) return;
+	if (bShapeChanged) RebuildSoilMesh();
+	else RefreshSoilMaterial();
 }
 
 void ABotanicusPotSoilVisualActor::RefreshSoilMaterial()
 {
-	if (!SoilMesh || !SoilMaterial)
+	if (GetNetMode() == NM_DedicatedServer || !SoilMesh || !SoilMaterial)
 	{
 		return;
 	}
@@ -74,18 +81,15 @@ void ABotanicusPotSoilVisualActor::RefreshSoilMaterial()
 	}
 	if (SoilDynamicMaterial)
 	{
-		const float VisualWetness = FMath::Pow(
-			CurrentWetness,
+		UBotanicusJuiceWorldSubsystem::SetSoilWetness(this, SoilDynamicMaterial, CurrentWetness,
 			FMath::Clamp(WetnessResponseExponent, 0.1f, 2.0f));
-		SoilDynamicMaterial->SetScalarParameterValue(
-			TEXT("Wetness"),
-			VisualWetness);
 		SoilMesh->SetMaterial(0, SoilDynamicMaterial);
 	}
 }
 
 void ABotanicusPotSoilVisualActor::RebuildSoilMesh()
 {
+	if (GetNetMode() == NM_DedicatedServer) return;
 	if (!SoilMesh)
 	{
 		return;
@@ -225,4 +229,10 @@ void ABotanicusPotSoilVisualActor::RebuildSoilMesh()
 		Tangents,
 		false);
 	RefreshSoilMaterial();
+}
+
+FVector ABotanicusPotSoilVisualActor::GetSurfaceCentre() const
+{
+	const float Fill = FMath::Lerp(FMath::Clamp(MinimumFillFraction, .001f, .25f), 1.f, CurrentFillAlpha);
+	return GetActorTransform().TransformPosition(FVector(0, 0, CurrentFullHeight * Fill));
 }

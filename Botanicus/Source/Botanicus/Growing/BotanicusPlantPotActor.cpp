@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Growing/BotanicusPlantPotActor.h"
+#include "Visuals/BotanicusJuiceWorldSubsystem.h"
 #include "Audio/BotanicusAudioWorldSubsystem.h"
 
 #include "Botanicus.h"
@@ -991,6 +992,7 @@ void ABotanicusPlantPotActor::BeginPrimaryUse(AActor* Interactor)
 		}
 		PlantKey = Definition->PlantKey;
 		UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Plant"), GetActorLocation());
+		UBotanicusJuiceWorldSubsystem::PlantSucceeded(this, UBotanicusJuiceWorldSubsystem::SoilSurface(this, GetActorLocation()));
 		DiseaseState = FBotanicusPlantDiseaseState();
 		PlantingStartServerTime = GetWorld()
 			? GetWorld()->GetTimeSeconds()

@@ -11664,3 +11664,8 @@ void ABotanicusPlayerController::ClientPlayFeedbackAudio_Implementation(FName Ev
 {
 	if (auto* Audio = GetWorld()->GetSubsystem<UBotanicusAudioWorldSubsystem>()) Audio->PlayPrivate(EventId);
 }
+
+ABotanicusWateringCanActor* ABotanicusPlayerController::GetJuiceWateringCan() const
+{
+	return Cast<ABotanicusWateringCanActor>(LocalEquippedQuickBarItem);
+}

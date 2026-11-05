@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Growing/BotanicusMultiPlantPotActor.h"
+#include "Visuals/BotanicusJuiceWorldSubsystem.h"
 #include "Audio/BotanicusAudioWorldSubsystem.h"
 
 #include "BotanicusCharacter.h"
@@ -651,6 +652,7 @@ void ABotanicusMultiPlantPotActor::BeginPrimaryUse(
 		}
 		Slot.PlantKey = Definition->PlantKey;
 		UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Plant"), GetActorTransform().TransformPosition(GetSlotLocalLocation(SlotIndex)));
+		UBotanicusJuiceWorldSubsystem::PlantSucceeded(this, UBotanicusJuiceWorldSubsystem::SoilSurface(this, GetActorTransform().TransformPosition(GetSlotLocalLocation(SlotIndex))));
 		Slot.DiseaseState = FBotanicusPlantDiseaseState();
 		Slot.bElementalDead = false;
 		Slot.GrowthProgress = 0.02f;
@@ -1247,9 +1249,7 @@ void ABotanicusMultiPlantPotActor::RefreshVisuals()
 		const float AverageWetness = PlantedCount > 0
 			? TotalSoilWetness / static_cast<float>(PlantedCount)
 			: 0.0f;
-		MultiSoilDynamicMaterial->SetScalarParameterValue(
-			TEXT("Wetness"),
-			FMath::Sqrt(AverageWetness));
+		UBotanicusJuiceWorldSubsystem::SetSoilWetness(this, MultiSoilDynamicMaterial, AverageWetness);
 	}
 	if (MultiStatusText)
 	{

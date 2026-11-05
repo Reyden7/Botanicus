@@ -22,6 +22,7 @@ class BOTANICUS_API ABotanicusPotSoilVisualActor : public AActor
 
 public:
 	ABotanicusPotSoilVisualActor();
+	FVector GetSurfaceCentre() const;
 
 	void ConfigureSoilShape(
 		const FVector2D& BottomRadii,

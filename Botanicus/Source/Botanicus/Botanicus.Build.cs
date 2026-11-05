@@ -25,6 +25,7 @@ public class Botanicus : ModuleRules
 			"GameplayStateTreeModule",
 			"Landscape",
 			"ProceduralMeshComponent",
+            "Niagara",
 			"UMG",
 			"Slate",
 			"SlateCore"
@@ -35,6 +36,7 @@ public class Botanicus : ModuleRules
 		{
 			PrivateDependencyModuleNames.AddRange(new string[] {
 				"AssetTools",
+                "NiagaraEditor",
 				"Kismet",
 				"UnrealEd",
 				"UMGEditor"
