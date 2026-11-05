@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Growing/BotanicusMultiPlantPotActor.h"
+#include "Audio/BotanicusAudioWorldSubsystem.h"
 
 #include "BotanicusCharacter.h"
 #include "BotanicusGameState.h"
@@ -456,6 +457,7 @@ void ABotanicusMultiPlantPotActor::Tick(float DeltaSeconds)
 				0.0f,
 				1.0f);
 		}
+		UBotanicusAudioWorldSubsystem::Growth(this, PreviousGrowth, Slot.GrowthProgress, GetActorTransform().TransformPosition(GetSlotLocalLocation(Index)));
 		bChanged |=
 			!FMath::IsNearlyEqual(
 				PreviousWater,
@@ -648,6 +650,7 @@ void ABotanicusMultiPlantPotActor::BeginPrimaryUse(
 			return;
 		}
 		Slot.PlantKey = Definition->PlantKey;
+		UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Plant"), GetActorTransform().TransformPosition(GetSlotLocalLocation(SlotIndex)));
 		Slot.DiseaseState = FBotanicusPlantDiseaseState();
 		Slot.bElementalDead = false;
 		Slot.GrowthProgress = 0.02f;
@@ -701,6 +704,7 @@ void ABotanicusMultiPlantPotActor::EndPrimaryUse(
 	{
 		return;
 	}
+	UBotanicusAudioWorldSubsystem::WaterEnd(ActiveUser.Get());
 	ActiveUser.Reset();
 	ActiveUseMode = EUseMode::None;
 	ActiveSlotIndex = INDEX_NONE;
@@ -811,9 +815,12 @@ bool ABotanicusMultiPlantPotActor::UpdateActiveUse(
 		if (WaterActuallyAdded > KINDA_SMALL_NUMBER &&
 			RequestedWater > KINDA_SMALL_NUMBER)
 		{
-			QuickBar->ConsumeSelectedWateringCanWater(
+			if (QuickBar->ConsumeSelectedWateringCanWater(
 				0.12f * DeltaSeconds *
-					(WaterActuallyAdded / RequestedWater));
+					(WaterActuallyAdded / RequestedWater)))
+			{
+				UBotanicusAudioWorldSubsystem::WaterPulse(Character);
+			}
 		}
 		if (Slot.WaterLevel >= 1.0f - KINDA_SMALL_NUMBER)
 		{
@@ -848,6 +855,7 @@ bool ABotanicusMultiPlantPotActor::UpdateActiveUse(
 			EndPrimaryUse(Character);
 			return true;
 		}
+		UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Harvest"), GetActorTransform().TransformPosition(GetSlotLocalLocation(ActiveSlotIndex)));
 		Slot = FBotanicusMultiPlantSlotState();
 		EndPrimaryUse(Character);
 	}

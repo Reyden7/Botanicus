@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "IllegalTrade/BotanicusIllegalPlanterActor.h"
+#include "Audio/BotanicusAudioWorldSubsystem.h"
 
 #include "BotanicusCharacter.h"
 #include "BotanicusGameMode.h"
@@ -238,12 +239,14 @@ void ABotanicusIllegalPlanterActor::Tick(float DeltaSeconds)
 			: 1.0f;
 		Slot.WaterAmount = FMath::Max(
 			0.0f, Slot.WaterAmount - RequestedWater * GrowthFraction);
+		const float AudioPreviousGrowth = Slot.GrowthProgress;
 		const int32 PreviousStage = GetGrowthStage(Slot.GrowthProgress);
 		Slot.GrowthProgress = FMath::Clamp(
 			Slot.GrowthProgress + DeltaSeconds * GrowthFraction /
 				FMath::Max(1.0f, Plant->GrowthDurationSeconds),
 			0.0f,
 			1.0f);
+		UBotanicusAudioWorldSubsystem::Growth(this, AudioPreviousGrowth, Slot.GrowthProgress, GetActorLocation());
 		bStageChanged |= PreviousStage != GetGrowthStage(Slot.GrowthProgress);
 		bAnyGrowing = true;
 	}
@@ -384,6 +387,7 @@ void ABotanicusIllegalPlanterActor::Interact_Implementation(AActor* Interactor)
 					UE_LOG(LogBotanicusIllegalTrade, Display,
 						TEXT("Plant harvested: %s x%d."),
 						*Plant->ProductItemKey.ToString(), Plant->HarvestQuantity);
+					UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Harvest"), GetActorLocation());
 					*Slot = FBotanicusIllegalPlantSlotState();
 				}
 			}
@@ -396,6 +400,7 @@ void ABotanicusIllegalPlanterActor::Interact_Implementation(AActor* Interactor)
 				if (QuickBar->ConsumeSelectedItem())
 				{
 					Slot->PlantId = Plant->PlantId;
+					UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Plant"), GetActorLocation());
 					Slot->GrowthProgress = 0.0f;
 					UE_LOG(LogBotanicusIllegalTrade, Display,
 						TEXT("Plant created: %s."), *Plant->PlantId.ToString());
@@ -413,6 +418,7 @@ void ABotanicusIllegalPlanterActor::Interact_Implementation(AActor* Interactor)
 				QuickBar->ConsumeSelectedWateringCanWater(Transfer))
 			{
 				Slot->WaterAmount += Transfer;
+				UBotanicusAudioWorldSubsystem::WaterPulse(Interactor);
 			}
 		}
 	}
@@ -506,6 +512,7 @@ void ABotanicusIllegalPlanterActor::EndPrimaryUse(AActor* Interactor)
 	{
 		return;
 	}
+	UBotanicusAudioWorldSubsystem::WaterEnd(ActivePrimaryUser.Get());
 	ActivePrimaryUser.Reset();
 	ActivePrimaryUseMode = EPrimaryUseMode::None;
 	ActiveWaterSlotIndex = INDEX_NONE;
@@ -559,6 +566,7 @@ bool ABotanicusIllegalPlanterActor::UpdatePrimaryUse(float DeltaSeconds)
 		}
 
 		Slot->WaterAmount = FMath::Min(Slot->WaterAmount + Transfer, MaximumWater);
+		UBotanicusAudioWorldSubsystem::WaterPulse(Character);
 		if (Slot->WaterAmount >= MaximumWater - KINDA_SMALL_NUMBER)
 		{
 			EndPrimaryUse(Character);

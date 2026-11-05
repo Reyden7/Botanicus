@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Growing/BotanicusPlantPotActor.h"
+#include "Audio/BotanicusAudioWorldSubsystem.h"
 
 #include "Botanicus.h"
 #include "BotanicusCharacter.h"
@@ -677,6 +678,7 @@ void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 			1.0f);
 	}
 
+	UBotanicusAudioWorldSubsystem::Growth(this, PreviousGrowth, GrowthProgress, GetActorLocation());
 	if (!FMath::IsNearlyEqual(PreviousWater, WaterLevel, 0.0001f) ||
 		!FMath::IsNearlyEqual(PreviousGrowth, GrowthProgress, 0.0001f) ||
 		!FMath::IsNearlyEqual(PreviousCareScore, CareScore, 0.0001f) ||
@@ -988,6 +990,7 @@ void ABotanicusPlantPotActor::BeginPrimaryUse(AActor* Interactor)
 			return;
 		}
 		PlantKey = Definition->PlantKey;
+		UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Plant"), GetActorLocation());
 		DiseaseState = FBotanicusPlantDiseaseState();
 		PlantingStartServerTime = GetWorld()
 			? GetWorld()->GetTimeSeconds()
@@ -1105,6 +1108,7 @@ void ABotanicusPlantPotActor::EndPrimaryUse(AActor* Interactor)
 			TEXT("Recolte annulee."));
 	}
 
+	UBotanicusAudioWorldSubsystem::WaterEnd(ActivePrimaryUser.Get());
 	ActivePrimaryUser.Reset();
 	PrimaryUseMode = EPrimaryUseMode::None;
 	HarvestProgress = 0.0f;
@@ -1240,6 +1244,7 @@ bool ABotanicusPlantPotActor::UpdatePrimaryUse(float DeltaSeconds)
 				GetPlantQualityLabel();
 			const int32 HarvestedQuantity =
 				FMath::Max(1, Definition->HarvestQuantity);
+			UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Harvest"), GetActorLocation());
 			PlantKey = NAME_None;
 			PlantingStartServerTime = 0.0f;
 			bInspectionVisible = false;
@@ -1323,9 +1328,12 @@ bool ABotanicusPlantPotActor::UpdatePrimaryUse(float DeltaSeconds)
 	if (WaterActuallyAdded > KINDA_SMALL_NUMBER &&
 		RequestedWater > KINDA_SMALL_NUMBER)
 	{
-		QuickBar->ConsumeSelectedWateringCanWater(
+		if (QuickBar->ConsumeSelectedWateringCanWater(
 			0.12f * DeltaSeconds *
-				(WaterActuallyAdded / RequestedWater));
+				(WaterActuallyAdded / RequestedWater)))
+		{
+			UBotanicusAudioWorldSubsystem::WaterPulse(Character);
+		}
 	}
 	if (WaterLevel >= 1.0f - KINDA_SMALL_NUMBER)
 	{

@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Sales/BotanicusSalesDisplayActor.h"
+#include "Audio/BotanicusAudioWorldSubsystem.h"
 
 #include "BotanicusCharacter.h"
 #include "BotanicusGameState.h"
@@ -457,6 +458,7 @@ bool ABotanicusSalesDisplayActor::TryMountSalePotState(
 		? FName(TEXT("SalePot"))
 		: SalePotItemKey;
 	SellerController = Seller;
+	UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Listed"), GetActorLocation());
 	SaleEndServerTime = 0.0f;
 	bVisitorEnRoute = false;
 	bPlantTakenByVisitor = false;

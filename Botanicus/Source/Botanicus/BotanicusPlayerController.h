@@ -89,6 +89,10 @@ class BOTANICUS_API ABotanicusPlayerController : public APlayerController
 	
 public:
 
+	/** Private transaction confirmation; world events use the shared audio relay. */
+	UFUNCTION(Client, Reliable)
+	void ClientPlayFeedbackAudio(FName EventId);
+
 	/** Constructor */
 	ABotanicusPlayerController();
 

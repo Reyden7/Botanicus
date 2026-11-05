@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Sales/BotanicusSalePotActor.h"
+#include "Audio/BotanicusAudioWorldSubsystem.h"
 
 #include "BotanicusCharacter.h"
 #include "Camera/PlayerCameraManager.h"
@@ -349,6 +350,7 @@ void ABotanicusSalePotActor::BeginPrimaryUse(AActor* Interactor)
 		return;
 	}
 	PlantItemKey = SelectedKey;
+	UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Prepared"), GetActorLocation());
 	RefreshVisuals();
 	ForceNetUpdate();
 	SendInteractorMessage(

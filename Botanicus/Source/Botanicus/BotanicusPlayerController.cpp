@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "BotanicusPlayerController.h"
+#include "Audio/BotanicusAudioWorldSubsystem.h"
 #include "BotanicusCharacter.h"
 #include "QuickBar/BotanicusQuickBarComponent.h"
 #include "Sales/BotanicusSalesDisplayActor.h"
@@ -3748,6 +3749,7 @@ void ABotanicusPlayerController::CreditPlantSale(
 		return;
 	}
 	AddSharedFunds(this, SalePrice);
+	ClientPlayFeedbackAudio(TEXT("Sale"));
 	if (ABotanicusGameState* GameState = GetSharedGameState(this))
 	{
 		GameState->RecordPlantSale(SalePrice);
@@ -9115,6 +9117,7 @@ void ABotanicusPlayerController::ServerPlaceCatalogOrder_Implementation(
 		*FString::Printf(
 			TEXT("Commande confirmee : livraison dans %.1f secondes."),
 			Delay));
+	ClientPlayFeedbackAudio(TEXT("Purchase"));
 	UE_LOG(
 		LogBotanicus,
 		Display,
@@ -9526,6 +9529,7 @@ void ABotanicusPlayerController::CompleteCatalogOrder(
 	{
 		ClientMessage(
 			TEXT("Commande livree sur la zone de livraison."));
+		ClientPlayFeedbackAudio(TEXT("Delivery"));
 	}
 	ForceNetUpdate();
 	OnRep_OrderState();
@@ -9921,6 +9925,7 @@ void ABotanicusPlayerController::
 	if (bIsValid)
 	{
 		Equipment->ConfirmPlacement();
+		UBotanicusAudioWorldSubsystem::Emit(this, TEXT("EquipmentPlace"), Equipment->GetActorLocation());
 		if (ABotanicusGameMode* GameMode =
 				GetWorld()->GetAuthGameMode<
 					ABotanicusGameMode>())
@@ -10315,6 +10320,7 @@ void ABotanicusPlayerController::
 
 	if (!bMountedOnSalesDisplay && IsValid(PlacedItem))
 	{
+		UBotanicusAudioWorldSubsystem::Emit(this, UBotanicusAudioWorldSubsystem::PlacementEvent(PlacedItem), PlacementTransform.GetLocation());
 		PlacedItem->SetOwner(nullptr);
 		PlacedItem->SetNetDormancy(DORM_Awake);
 		PlacedItem->FlushNetDormancy();
@@ -10794,6 +10800,7 @@ void ABotanicusPlayerController::
 		return;
 	}
 
+	UBotanicusAudioWorldSubsystem::Emit(this, UBotanicusAudioWorldSubsystem::PlacementEvent(WorldItem), PlacementTransform.GetLocation());
 	WorldItem->SetActorTransform(
 		PlacementTransform,
 		false,
@@ -11104,8 +11111,11 @@ void ABotanicusPlayerController::
 				0.075f,
 				0.15f);
 	LastServerWateringCanSprayPulseTime = CurrentServerTime;
-	QuickBar->ConsumeSelectedWateringCanWater(
-		0.12f * AcceptedDeltaTime);
+	if (QuickBar->ConsumeSelectedWateringCanWater(
+		0.12f * AcceptedDeltaTime))
+	{
+		UBotanicusAudioWorldSubsystem::WaterPulse(BotanicusCharacter);
+	}
 }
 
 void ABotanicusPlayerController::
@@ -11358,6 +11368,7 @@ void ABotanicusPlayerController::
 			PlantPot->RestoreWateringCount(
 				CarriedTransplantWateringCount);
 			ClearCarriedTransplant();
+			UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Transfer"), TargetPot->GetActorLocation());
 			ClientMessage(TEXT("Plante rempotee dans le pot de culture."));
 		}
 		else if (ABotanicusSalePotActor* SalePot =
@@ -11381,6 +11392,7 @@ void ABotanicusPlayerController::
 				SalePot->GetSoilItemKey(),
 				CarriedTransplantItemKey);
 			ClearCarriedTransplant();
+			UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Prepared"), TargetPot->GetActorLocation());
 			ClientMessage(TEXT("Plante rempotee dans le pot de vente."));
 		}
 		return;
@@ -11453,6 +11465,7 @@ void ABotanicusPlayerController::
 		PlantPot->RestoreWateringCount(0);
 		OnRep_CarriedTransplantState();
 		ForceNetUpdate();
+		UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Remove"), TargetPot->GetActorLocation());
 		ClientMessage(
 			TEXT("Plante depotee : rempotez-la obligatoirement dans un autre pot."));
 	}
@@ -11478,6 +11491,7 @@ void ABotanicusPlayerController::
 			NAME_None);
 		OnRep_CarriedTransplantState();
 		ForceNetUpdate();
+		UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Remove"), TargetPot->GetActorLocation());
 		ClientMessage(
 			TEXT("Plante retiree du pot de vente : rempotez-la dans un autre pot."));
 	}
@@ -11644,4 +11658,9 @@ ABotanicusPlayerController::GetBotanicusMultiplayerSubsystem() const
 
 	UE_LOG(LogBotanicus, Error, TEXT("Botanicus multiplayer subsystem is unavailable."));
 	return nullptr;
+}
+
+void ABotanicusPlayerController::ClientPlayFeedbackAudio_Implementation(FName EventId)
+{
+	if (auto* Audio = GetWorld()->GetSubsystem<UBotanicusAudioWorldSubsystem>()) Audio->PlayPrivate(EventId);
 }
