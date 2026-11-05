@@ -459,6 +459,7 @@ void ABotanicusMultiPlantPotActor::Tick(float DeltaSeconds)
 				1.0f);
 		}
 		UBotanicusAudioWorldSubsystem::Growth(this, PreviousGrowth, Slot.GrowthProgress, GetActorTransform().TransformPosition(GetSlotLocalLocation(Index)));
+		UBotanicusJuiceWorldSubsystem::Growth(this, PreviousGrowth, Slot.GrowthProgress, MultiFlowerMeshes.IsValidIndex(Index) ? MultiFlowerMeshes[Index].Get() : nullptr);
 		bChanged |=
 			!FMath::IsNearlyEqual(
 				PreviousWater,
@@ -858,6 +859,7 @@ bool ABotanicusMultiPlantPotActor::UpdateActiveUse(
 			return true;
 		}
 		UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Harvest"), GetActorTransform().TransformPosition(GetSlotLocalLocation(ActiveSlotIndex)));
+		UBotanicusJuiceWorldSubsystem::HarvestSucceeded(this, MultiFlowerMeshes.IsValidIndex(ActiveSlotIndex) ? MultiFlowerMeshes[ActiveSlotIndex].Get() : nullptr);
 		Slot = FBotanicusMultiPlantSlotState();
 		EndPrimaryUse(Character);
 	}
@@ -1152,6 +1154,7 @@ void ABotanicusMultiPlantPotActor::RefreshVisuals()
 					0.16f * Growth * BehaviourHorizontalScale,
 					0.16f * Growth * BehaviourVerticalScale));
 		}
+		if (bUsesStageMesh) UBotanicusJuiceWorldSubsystem::BindFoliage(MultiFlowerMeshes[Index], !Slot.bElementalDead);
 		if (SlotGrowthWidgets.IsValidIndex(Index) &&
 			SlotGrowthWidgets[Index])
 		{

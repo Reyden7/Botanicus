@@ -1,0 +1,252 @@
+{
+  "engine": "5.8.2, changelist 56702186",
+  "head_before_work": "22aa81093abb7b5377bac81847806996935975e2",
+  "tests": {
+    "growth": {
+      "passed": true,
+      "assertions": 153,
+      "errors": []
+    },
+    "network_save": {
+      "passed": true,
+      "assertions": 10,
+      "errors": []
+    },
+    "regression_3a": {
+      "passed": true,
+      "assertions": 247,
+      "errors": []
+    },
+    "motion": {
+      "passed": true,
+      "assertions": 0,
+      "errors": []
+    }
+  },
+  "motion": {
+    "errors": [],
+    "amplitudes_off": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "transforms_and_collision_unchanged": true,
+    "active_bursts": 0,
+    "amplitudes_on": [
+      0.25,
+      0.25,
+      0.25,
+      0.25
+    ],
+    "amplitudes_low": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "low_quality_disables_motion": true
+  },
+  "performance": {
+    "3a": [
+      {
+        "block": 0,
+        "enabled": false,
+        "n": 75,
+        "median": [
+          19.35989761352539,
+          19.54640007019043,
+          9.999999747378752e-05,
+          13.127599716186523
+        ],
+        "p95": [
+          27.59910011291504,
+          29.282699584960938,
+          0.0005000000237487257,
+          14.288000106811523
+        ],
+        "waters": [
+          0
+        ],
+        "max_particles": 0,
+        "new_can_names": 300
+      },
+      {
+        "block": 1,
+        "enabled": true,
+        "n": 74,
+        "median": [
+          20.565349578857422,
+          20.767699241638184,
+          9.999999747378752e-05,
+          13.331199645996094
+        ],
+        "p95": [
+          30.065900802612305,
+          28.847299575805664,
+          0.0006000000284984708,
+          14.473699569702148
+        ],
+        "waters": [
+          4
+        ],
+        "max_particles": 131,
+        "new_can_names": 308
+      },
+      {
+        "block": 2,
+        "enabled": true,
+        "n": 74,
+        "median": [
+          20.676599502563477,
+          20.1518497467041,
+          9.999999747378752e-05,
+          13.543200016021729
+        ],
+        "p95": [
+          27.425003051757812,
+          29.12689971923828,
+          0.0005000000237487257,
+          14.358799934387207
+        ],
+        "waters": [
+          4
+        ],
+        "max_particles": 131,
+        "new_can_names": 296
+      },
+      {
+        "block": 3,
+        "enabled": false,
+        "n": 75,
+        "median": [
+          19.777801513671875,
+          20.451000213623047,
+          9.999999747378752e-05,
+          13.082500457763672
+        ],
+        "p95": [
+          28.11680030822754,
+          27.342100143432617,
+          0.0006000000284984708,
+          14.457500457763672
+        ],
+        "waters": [
+          0
+        ],
+        "max_particles": 0,
+        "new_can_names": 300
+      }
+    ],
+    "3b": [
+      {
+        "block": 0,
+        "enabled": false,
+        "n": 72,
+        "median": [
+          43.13640022277832,
+          33.314849853515625,
+          9.999999747378752e-05,
+          19.270299911499023
+        ],
+        "p95": [
+          49.003997802734375,
+          39.11819839477539,
+          0.0005000000237487257,
+          20.252099990844727
+        ],
+        "waters": [
+          4
+        ],
+        "max_particles": 118,
+        "new_can_names": 300
+      },
+      {
+        "block": 1,
+        "enabled": true,
+        "n": 72,
+        "median": [
+          43.32379913330078,
+          33.177650451660156,
+          9.999999747378752e-05,
+          19.254350662231445
+        ],
+        "p95": [
+          49.2140007019043,
+          40.96739959716797,
+          0.00039999998989515007,
+          20.35689926147461
+        ],
+        "waters": [
+          4
+        ],
+        "max_particles": 118,
+        "new_can_names": 288
+      },
+      {
+        "block": 2,
+        "enabled": true,
+        "n": 71,
+        "median": [
+          43.666900634765625,
+          32.038700103759766,
+          9.999999747378752e-05,
+          19.216999053955078
+        ],
+        "p95": [
+          47.679996490478516,
+          40.312198638916016,
+          0.0005000000237487257,
+          20.489999771118164
+        ],
+        "waters": [
+          4
+        ],
+        "max_particles": 118,
+        "new_can_names": 284
+      },
+      {
+        "block": 3,
+        "enabled": false,
+        "n": 72,
+        "median": [
+          42.86654853820801,
+          31.00374984741211,
+          9.999999747378752e-05,
+          19.031350135803223
+        ],
+        "p95": [
+          47.539302825927734,
+          40.58610153198242,
+          0.00039999998989515007,
+          20.449199676513672
+        ],
+        "waters": [
+          4
+        ],
+        "max_particles": 118,
+        "new_can_names": 288
+      }
+    ]
+  },
+  "preservation": {
+    "baseline_files": 1252,
+    "unchanged": 1240,
+    "modified": [
+      "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\Source\\Botanicus\\Editor\\BotanicusJuiceValidation.cpp",
+      "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\Source\\Botanicus\\Editor\\BotanicusJuiceValidation.h",
+      "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\Source\\Botanicus\\Growing\\BotanicusMultiPlantPotActor.cpp",
+      "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\Source\\Botanicus\\Growing\\BotanicusPlantPotActor.cpp",
+      "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\Source\\Botanicus\\IllegalTrade\\BotanicusIllegalPlanterActor.cpp",
+      "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\Source\\Botanicus\\Visuals\\BotanicusJuiceRelay.cpp",
+      "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\Source\\Botanicus\\Visuals\\BotanicusJuiceRelay.h",
+      "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\Source\\Botanicus\\Visuals\\BotanicusJuiceSettings.cpp",
+      "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\Source\\Botanicus\\Visuals\\BotanicusJuiceSettings.h",
+      "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\Source\\Botanicus\\Visuals\\BotanicusJuiceWorldSubsystem.cpp",
+      "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\Source\\Botanicus\\Visuals\\BotanicusJuiceWorldSubsystem.h",
+      "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\Config\\DefaultGame.ini"
+    ],
+    "missing": [],
+    "preexisting_binary_or_saves_modified": []
+  }
+}

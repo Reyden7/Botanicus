@@ -680,6 +680,7 @@ void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 	}
 
 	UBotanicusAudioWorldSubsystem::Growth(this, PreviousGrowth, GrowthProgress, GetActorLocation());
+	UBotanicusJuiceWorldSubsystem::Growth(this, PreviousGrowth, GrowthProgress, FoliageMesh);
 	if (!FMath::IsNearlyEqual(PreviousWater, WaterLevel, 0.0001f) ||
 		!FMath::IsNearlyEqual(PreviousGrowth, GrowthProgress, 0.0001f) ||
 		!FMath::IsNearlyEqual(PreviousCareScore, CareScore, 0.0001f) ||
@@ -1247,6 +1248,7 @@ bool ABotanicusPlantPotActor::UpdatePrimaryUse(float DeltaSeconds)
 			const int32 HarvestedQuantity =
 				FMath::Max(1, Definition->HarvestQuantity);
 			UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Harvest"), GetActorLocation());
+			UBotanicusJuiceWorldSubsystem::HarvestSucceeded(this, FoliageMesh);
 			PlantKey = NAME_None;
 			PlantingStartServerTime = 0.0f;
 			bInspectionVisible = false;
@@ -2099,6 +2101,7 @@ void ABotanicusPlantPotActor::RefreshVisuals()
 					MeshBounds.Min.Z * BehaviourScale.Z));
 			FoliageTop = ConfiguredPlantBaseHeight +
 				DesiredHeight * BehaviourVerticalScale;
+			UBotanicusJuiceWorldSubsystem::BindFoliage(FoliageMesh, !bElementalDead);
 			if (bElementalDead)
 			{
 				FoliageMesh->SetVectorParameterValueOnMaterials(

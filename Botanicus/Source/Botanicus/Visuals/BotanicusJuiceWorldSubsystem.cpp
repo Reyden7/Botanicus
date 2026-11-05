@@ -19,6 +19,9 @@
 #include "NiagaraSystemInstance.h"
 #include "NiagaraEmitterInstance.h"
 #include "TimerManager.h"
+#include "Audio/BotanicusAudioWorldSubsystem.h"
+#include "Materials/MaterialParameterCollectionInstance.h"
+#include "Scalability.h"
 
 bool UBotanicusJuiceWorldSubsystem::DoesSupportWorldType(EWorldType::Type Type) const
 {
@@ -30,6 +33,8 @@ void UBotanicusJuiceWorldSubsystem::OnWorldBeginPlay(UWorld& World)
 	if(World.GetNetMode()!=NM_Client) GetRelay();
 	if(World.GetNetMode()==NM_DedicatedServer) return;
 	const auto* Settings=GetDefault<UBotanicusJuiceSettings>();
+	MotionCatalog=Settings->MotionCatalog.LoadSynchronous();
+	UpdateMotionParameters();
 	WaterSystem=Settings->WaterSystem.LoadSynchronous();BurstSystem=Settings->BurstSystem.LoadSynchronous();
 	World.GetTimerManager().SetTimer(ReconcileTimer,this,&UBotanicusJuiceWorldSubsystem::ReconcileWater,.1f,true);
 }
@@ -106,6 +111,7 @@ bool UBotanicusJuiceWorldSubsystem::IsTickable() const
 }
 void UBotanicusJuiceWorldSubsystem::ReconcileWater()
 {
+	UpdateMotionParameters();
 	const auto* S=GetDefault<UBotanicusJuiceSettings>();
 	for(auto& Pair:Water) Pair.Value.bDesired=false;
 	if(!AudioRelay.IsValid()) for(TActorIterator<ABotanicusAudioRelay> It(GetWorld());It;++It) {AudioRelay=*It;break;}
@@ -218,4 +224,68 @@ void UBotanicusJuiceWorldSubsystem::Deinitialize()
 	for(auto& Pair:Water) {if(Pair.Value.Drops) {Pair.Value.Drops->DeactivateImmediate();Pair.Value.Drops->DestroyComponent();}if(IsValid(Pair.Value.RemoteCan)) Pair.Value.RemoteCan->Destroy();}
 	for(auto& Burst:Bursts) if(Burst.Component) {Burst.Component->DeactivateImmediate();Burst.Component->DestroyComponent();}
 	Water.Reset();Bursts.Reset();WetnessTransitions.Reset();Super::Deinitialize();
+}
+
+namespace
+{
+FVector LifecyclePosition(AActor* Pot,UStaticMeshComponent* Foliage)
+{
+	return IsValid(Foliage) ? Foliage->Bounds.Origin+FVector(0,0,Foliage->Bounds.BoxExtent.Z*.35f) : Pot->GetActorLocation()+FVector(0,0,35);
+}
+}
+void UBotanicusJuiceWorldSubsystem::Growth(AActor* Pot,float Before,float After,UStaticMeshComponent* Foliage)
+{
+	if(!IsValid(Pot) || !Pot->HasAuthority()) return;
+	// Share the established audio thresholds without emitting another sound.
+	const FName Event=UBotanicusAudioWorldSubsystem::GrowthEvent(Before,After);
+	const uint8 Id=Event==TEXT("Mature") ? 3 : Event==TEXT("GrowthLarge") ? 2 : Event==TEXT("GrowthYoung") ? 1 : 0;
+	if(Id) if(auto* Juice=Pot->GetWorld()->GetSubsystem<UBotanicusJuiceWorldSubsystem>())
+		if(auto* Events=Juice->GetRelay()) Events->Lifecycle(Pot,Id,LifecyclePosition(Pot,Foliage));
+}
+void UBotanicusJuiceWorldSubsystem::HarvestSucceeded(AActor* Pot,UStaticMeshComponent* Foliage)
+{
+	if(IsValid(Pot) && Pot->HasAuthority()) if(auto* Juice=Pot->GetWorld()->GetSubsystem<UBotanicusJuiceWorldSubsystem>())
+		if(auto* Events=Juice->GetRelay()) Events->Lifecycle(Pot,4,LifecyclePosition(Pot,Foliage));
+}
+void UBotanicusJuiceWorldSubsystem::ReceiveLifecycle(uint32 Sequence,AActor* Pot,uint8 Event,const FVector& Position)
+{
+	if(Sequence==0 || static_cast<int32>(Sequence-LastLifecycleSequence)<=0) return;
+	LastLifecycleSequence=Sequence;
+	const auto* S=GetDefault<UBotanicusJuiceSettings>();
+	if(!S->bEnabled || !S->bLifecycleBursts || S->TransitionIntensity<=0 || !IsValid(Pot) || Event<1 || Event>4 || FVector::DistSquared(ListenerPosition(),Position)>FMath::Square(S->GrowthDisplayDistance)) return;
+	const int32 Count=FMath::Clamp(FMath::RoundToInt((Event==1 ? S->YoungCount : Event==2 ? S->DevelopedCount : Event==3 ? S->MatureCount : S->HarvestCount)*S->TransitionIntensity),0,16);
+	if(Count==0) return;
+	const int32 Previous=Bursts.Num();
+	SpawnBurst(Pot,Position,Event==3 ? S->MatureTint : Event==4 ? S->HarvestTint : S->GrowthTint,Count,1.3f*S->TransitionIntensity,Event==3 ? S->MatureLifetime : Event==4 ? S->HarvestLifetime : S->TransitionLifetime,Event==3 ? 32.f : 24.f);
+	if(Bursts.Num()>Previous) {++LifecycleBursts;LastLifecycleEvent=Event;}
+}
+void UBotanicusJuiceWorldSubsystem::UpdateMotionParameters()
+{
+	if(!MotionCatalog || !MotionCatalog->Parameters) return;
+	const auto* S=GetDefault<UBotanicusJuiceSettings>();
+	const bool bEnabled=S->bEnabled && S->bOrganicMotion && (!S->bDisableMotionOnLowEffectsQuality || Scalability::GetQualityLevels().EffectsQuality>0);
+	const FVector Values(bEnabled ? FMath::Clamp(S->MotionAmplitude,0.f,.75f) : 0.f,FMath::Clamp(S->MotionSpeed,.1f,2.f),FMath::Max(100.f,S->GrowthDisplayDistance));
+	if(Values.Equals(CachedMotionParameters)) return;
+	if(auto* Instance=GetWorld()->GetParameterCollectionInstance(MotionCatalog->Parameters))
+	{
+		Instance->SetScalarParameterValue(TEXT("BotanicusMotionAmplitude"),Values.X);
+		Instance->SetScalarParameterValue(TEXT("BotanicusMotionSpeed"),Values.Y);
+		Instance->SetScalarParameterValue(TEXT("BotanicusMotionDistance"),Values.Z);
+		CachedMotionParameters=Values;
+	}
+}
+void UBotanicusJuiceWorldSubsystem::BindFoliage(UStaticMeshComponent* Foliage,bool bAlive)
+{
+	if(!IsValid(Foliage) || !Foliage->GetWorld() || Foliage->GetWorld()->GetNetMode()==NM_DedicatedServer || !Foliage->GetStaticMesh()) return;
+	auto* Juice=Foliage->GetWorld()->GetSubsystem<UBotanicusJuiceWorldSubsystem>();
+	if(!Juice || !Juice->MotionCatalog) return;
+	for(int32 Index=0;Index<Foliage->GetNumMaterials();++Index)
+	{
+		UMaterialInterface* Original=Foliage->GetStaticMesh()->GetMaterial(Index);
+		const auto* Variant=Juice->MotionCatalog->Variants.Find(Original);if(!Variant || !*Variant) continue;
+		auto* MID=Cast<UMaterialInstanceDynamic>(Foliage->GetMaterial(Index));
+		if(!MID || MID->Parent!=*Variant) {MID=UMaterialInstanceDynamic::Create(*Variant,Foliage);Foliage->SetMaterial(Index,MID);}
+		const float Alive=bAlive ? 1.f : 0.f;
+		if(MID->K2_GetScalarParameterValue(TEXT("BotanicusMotionAlive"))!=Alive) MID->SetScalarParameterValue(TEXT("BotanicusMotionAlive"),Alive);
+	}
 }

@@ -2,6 +2,8 @@
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "BotanicusJuiceWorldSubsystem.generated.h"
+class UBotanicusPlantMotionCatalog;
+class UStaticMeshComponent;
 class UNiagaraComponent;
 class UNiagaraSystem;
 class ABotanicusJuiceRelay;
@@ -49,6 +51,13 @@ public:
 	virtual void Tick(float DeltaTime) override;
 	virtual TStatId GetStatId() const override {RETURN_QUICK_DECLARE_CYCLE_STAT(UBotanicusJuiceWorldSubsystem,STATGROUP_Tickables);}
 	virtual bool IsTickable() const override;
+	/** Called only by the authoritative simulation / successful inventory branch. */
+	static void Growth(AActor* Pot,float Before,float After,UStaticMeshComponent* Foliage);
+	static void HarvestSucceeded(AActor* Pot,UStaticMeshComponent* Foliage);
+	static void BindFoliage(UStaticMeshComponent* Foliage,bool bAlive=true);
+	void ReceiveLifecycle(uint32 Sequence,AActor* Pot,uint8 Event,const FVector& Position);
+	UFUNCTION(BlueprintPure,Category="Botanicus|Juice|Diagnostics") int32 GetLifecycleBurstCount() const {return LifecycleBursts;}
+	UFUNCTION(BlueprintPure,Category="Botanicus|Juice|Diagnostics") int32 GetLastLifecycleEvent() const {return LastLifecycleEvent;}
 	static void PlantSucceeded(AActor* Pot,const FVector& Position);
 	static void SetSoilWetness(UObject* Owner,UMaterialInstanceDynamic* Material,float Wetness,float Exponent=.5f);
 	static FVector SoilSurface(AActor* Pot,const FVector& Hint);
@@ -61,7 +70,13 @@ public:
 	UFUNCTION(BlueprintPure,Category="Botanicus|Juice|Diagnostics") int32 GetParticleCount() const;
 	UFUNCTION(BlueprintPure,Category="Botanicus|Juice|Diagnostics") int32 GetWetnessTransitionCount() const {return WetnessTransitions.Num();}
 private:
+	void UpdateMotionParameters();
 	void ReconcileWater();
+	UPROPERTY(Transient) TObjectPtr<UBotanicusPlantMotionCatalog> MotionCatalog;
+	FVector CachedMotionParameters=FVector(-1,-1,-1);
+	uint32 LastLifecycleSequence=0;
+	int32 LifecycleBursts=0;
+	uint8 LastLifecycleEvent=0;
 	void UpdateWater(float DeltaTime);
 	void SpawnBurst(AActor* Surface,const FVector& Position,const FLinearColor& Tint,int32 Count,float Size,float Lifetime,float Speed,AActor* Source=nullptr);
 	UNiagaraComponent* CreateEffect(UNiagaraSystem* System);

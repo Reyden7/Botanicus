@@ -248,6 +248,8 @@ void ABotanicusIllegalPlanterActor::Tick(float DeltaSeconds)
 			0.0f,
 			1.0f);
 		UBotanicusAudioWorldSubsystem::Growth(this, AudioPreviousGrowth, Slot.GrowthProgress, GetActorLocation());
+		const int32 VisualIndex=static_cast<int32>(&Slot-PlantSlots.GetData());
+		UBotanicusJuiceWorldSubsystem::Growth(this, AudioPreviousGrowth, Slot.GrowthProgress, PlantVisuals.IsValidIndex(VisualIndex) ? PlantVisuals[VisualIndex].Get() : nullptr);
 		bStageChanged |= PreviousStage != GetGrowthStage(Slot.GrowthProgress);
 		bAnyGrowing = true;
 	}
@@ -389,6 +391,7 @@ void ABotanicusIllegalPlanterActor::Interact_Implementation(AActor* Interactor)
 						TEXT("Plant harvested: %s x%d."),
 						*Plant->ProductItemKey.ToString(), Plant->HarvestQuantity);
 					UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Harvest"), GetActorLocation());
+					UBotanicusJuiceWorldSubsystem::HarvestSucceeded(this, PlantVisuals.IsValidIndex(SlotIndex) ? PlantVisuals[SlotIndex].Get() : nullptr);
 					*Slot = FBotanicusIllegalPlantSlotState();
 				}
 			}
@@ -767,6 +770,8 @@ void ABotanicusIllegalPlanterActor::RefreshVisuals()
 				PlantBaseHeight - Bounds.Min.Z * Scale));
 		}
 	}
+	for (int32 Index=0;Index<PlantVisuals.Num();++Index)
+		if(PlantSlots.IsValidIndex(Index) && !PlantSlots[Index].PlantId.IsNone()) UBotanicusJuiceWorldSubsystem::BindFoliage(PlantVisuals[Index]);
 	const int32 WaterPercent = FMath::RoundToInt(100.0f * AverageWaterRatio);
 	StatusText->SetText(FText::Format(
 		NSLOCTEXT("BotanicusIllegalTrade", "PlanterStatus", "NOCTIFLORE  |  Eau moy. {0}%  |  Mûres {1}/{2}"),

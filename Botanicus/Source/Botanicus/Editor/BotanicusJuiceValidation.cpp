@@ -24,13 +24,17 @@
 #include "Misc/Paths.h"
 #if WITH_EDITOR
 #include "UnrealClient.h"
+#include "Editor.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/LocalPlayer.h"
 #include "HighResScreenshot.h"
+#include "ImageUtils.h"
+#include "Misc/FileHelper.h"
 #endif
 namespace
 {
 FName TestTargetName;
+FVector RememberedTargetPosition;
 bool IsJuiceTest(UWorld* World)
 {
 #if WITH_EDITOR
@@ -115,10 +119,57 @@ bool UBotanicusJuiceValidation::Step(UObject* Context,FName Action)
 	}
 	if(Action==TEXT("WaterFourEnd")) {for(FConstPlayerControllerIterator It=World->GetPlayerControllerIterator();It;++It) Audio::WaterEnd(It->Get()->GetPawn());return true;}
 	if(Action==TEXT("RefillFour")) {for(FConstPlayerControllerIterator It=World->GetPlayerControllerIterator();It;++It) if(auto* Character=Cast<ABotanicusCharacter>(It->Get()->GetPawn())) {auto* Inventory=Character->GetQuickBarComponent();auto State=Inventory->GetSelectedSlot().CarriedState;State.bHasWateringCanState=true;State.WateringCanWaterLevel=1;Inventory->SetCarriedItemState(Inventory->GetSelectedSlotIndex(),State);}return true;}
+
+	if(Action==TEXT("LateJoin")) {if(!GEditor) return false;GEditor->RequestLateJoin();return true;}
+	if(Action==TEXT("FindRemembered"))
+	{
+		for(TActorIterator<AActor> It(World);It;++It) if((It->IsA<ABotanicusPlantPotActor>() || It->IsA<ABotanicusIllegalPlanterActor>()) && It->GetActorLocation().Equals(RememberedTargetPosition,.1f)) {TestTargetName=It->GetFName();return true;}
+		return false;
+	}
 	if(!Target) return false;
+	if(Action==TEXT("RememberTarget")) {RememberedTargetPosition=Target->GetActorLocation();return true;}
 	const FVector Surface=Juice::SoilSurface(Target,Target->GetActorLocation()+FVector(0,0,25));PC->SetControlRotation((Surface-Pawn->GetPawnViewLocation()).Rotation());
 	auto Begin=[&](){if(auto* Illegal=Cast<ABotanicusIllegalPlanterActor>(Target)) Illegal->BeginPrimaryUse(Pawn);else CastChecked<ABotanicusPlantPotActor>(Target)->BeginPrimaryUse(Pawn);};
 	auto End=[&](){if(auto* Illegal=Cast<ABotanicusIllegalPlanterActor>(Target)) Illegal->EndPrimaryUse(Pawn);else CastChecked<ABotanicusPlantPotActor>(Target)->EndPrimaryUse(Pawn);};
+
+	if(Action==TEXT("LifecycleOn") || Action==TEXT("LifecycleOff"))
+	{
+		auto* S=GetMutableDefault<UBotanicusJuiceSettings>();S->bOrganicMotion=Action==TEXT("LifecycleOn");S->bLifecycleBursts=S->bOrganicMotion;return true;
+	}
+
+	if(Action==TEXT("Garden"))
+	{
+		UClass* Class=LoadClass<ABotanicusPlantPotActor>(nullptr,TEXT("/Game/Botanicus/blueprints/BP_Item_PlantPot.BP_Item_PlantPot_C"));
+		const FVector Forward=Pawn->GetActorForwardVector(),Right=Pawn->GetActorRightVector();
+		for(int32 I=0;I<32;++I)
+		{
+			auto* P=World->SpawnActor<ABotanicusPlantPotActor>(Class);if(!P) return false;
+			P->SetActorLocation(Pawn->GetPawnViewLocation()+Forward*(320+(I/8)*70)+Right*((I%8-3.5f)*65)-FVector(0,0,80));
+			P->Tags.Add(TEXT("JuiceGarden"));P->InitializePlacedItem(TEXT("PlantPot"),1);P->SetActorTickEnabled(false);
+			P->RestoreGrowingState(true,Definition->PlantKey,.5f,(I%4+1)*.25f,.1f);P->ForceNetUpdate();
+		}
+		return true;
+	}
+	if(Action==TEXT("Grow")) {Target->Tick(.5f);Target->ForceNetUpdate();return true;}
+	if(Action==TEXT("FastGrow")) {Target->Tick(300.f);Target->ForceNetUpdate();return true;}
+	if(Action==TEXT("Harvest") || Action==TEXT("HarvestRefused"))
+	{
+		Clear();if(!Select(Definition->HarvestToolItemKey)) return false;
+		if(Action==TEXT("HarvestRefused"))
+			for(int32 I=0;I<Bar->SlotCount-1;++I) {int32 Added;FBotanicusCarriedItemState State;State.bHasWateringCanState=true;State.WateringCanWaterLevel=1;if(!Bar->AddUniqueItem(TEXT("WateringCan"),State,Added)) return false;}
+
+		// Aim at the populated slot, rather than the centre seam between slots.
+		if(Target->IsA<ABotanicusMultiPlantPotActor>())
+		{
+			TArray<UMeshComponent*> Meshes;Target->GetComponents(Meshes);
+			for(auto* C:Meshes) if(C->GetFName()==TEXT("MultiFlower_0")) PC->SetControlRotation((Juice::SoilSurface(Target,C->Bounds.Origin)-Pawn->GetPawnViewLocation()).Rotation());
+		}
+		Begin();Target->Tick(3.f);End();return true;
+	}
+	if(Action==TEXT("DuplicateLifecycle"))
+	{
+		auto* J=GetJuice(World);const int32 Before=J->GetLifecycleBurstCount();J->ReceiveLifecycle(1,Target,3,Target->GetActorLocation());return J->GetLifecycleBurstCount()==Before;
+	}
 	if(Action==TEXT("Plant"))
 	{
 		const int32 Quantity=Bar->GetSelectedSlot().Quantity;Begin();return Bar->GetSelectedSlot().Quantity==Quantity-1;
@@ -163,4 +214,64 @@ TArray<float> UBotanicusJuiceValidation::ReadFrameMetrics(UObject* Context)
 	if(auto* PC=World->GetFirstPlayerController()) if(auto* Local=PC->GetLocalPlayer()) if(UGameViewportClient* View=Local->ViewportClient) if(auto* Data=View->GetStatUnitData()) return {Data->RawFrameTime,Data->RawGameThreadTime,Data->RawRenderThreadTime,Data->RawGPUFrameTime[0]};
 #endif
 	return {};
+}
+
+AActor* UBotanicusJuiceValidation::GetTarget(UObject* Context)
+{
+#if WITH_EDITOR
+	UWorld* World=GEngine->GetWorldFromContextObject(Context,EGetWorldErrorMode::ReturnNull);if(!IsJuiceTest(World)) return nullptr;
+	for(TActorIterator<AActor> It(World);It;++It) if(It->GetFName()==TestTargetName) return *It;
+#endif
+	return nullptr;
+}
+bool UBotanicusJuiceValidation::RestoreGrowth(UObject* Context,float Progress)
+{
+#if WITH_EDITOR
+	UWorld* World=GEngine->GetWorldFromContextObject(Context,EGetWorldErrorMode::ReturnNull);if(!IsJuiceTest(World) || World->GetNetMode()==NM_Client) return false;
+	TGuardValue<bool> Routing(GAllowActorScriptExecutionInEditor,false);
+	AActor* Target=GetTarget(Context);if(!Target) return false;
+	const auto Definitions=World->GetGameInstance()->GetSubsystem<UBotanicusPlantSubsystem>()->GetAllPlants();
+	const auto* D=Definitions.FindByPredicate([](const auto& P){return P.Element==EBotanicusPlantElement::Normal;});if(!D) return false;
+	if(auto* Multi=Cast<ABotanicusMultiPlantPotActor>(Target))
+	{
+		TArray<FBotanicusMultiPlantSlotState> Slots;Slots.SetNum(2);Slots[0].PlantKey=D->PlantKey;Slots[0].WaterLevel=.5f;Slots[0].GrowthProgress=Progress;
+		Multi->RestoreMultiPlantState(2,Slots);
+	}
+	else if(auto* Pot=Cast<ABotanicusPlantPotActor>(Target)) Pot->RestoreGrowingState(true,D->PlantKey,.5f,Progress,.1f);
+	else if(auto* Illegal=Cast<ABotanicusIllegalPlanterActor>(Target))
+	{
+		TArray<FBotanicusIllegalPlantSlotState> Slots;Slots.SetNum(4);Slots[0].PlantId=TEXT("Noctiflore");Slots[0].GrowthProgress=Progress;Slots[0].WaterAmount=1;
+		Illegal->RestoreIllegalPlanterState(1,4,0,Slots);
+	}
+	else return false;
+	Target->ForceNetUpdate();return true;
+#else
+	return false;
+#endif
+}
+
+TArray<float> UBotanicusJuiceValidation::ReadGrowth(UObject* Context)
+{
+	AActor* Target=GetTarget(Context);
+	TArray<float> Values;
+	if(auto* Multi=Cast<ABotanicusMultiPlantPotActor>(Target)) for(const auto& S:Multi->GetPlantSlots()) Values.Add(S.GrowthProgress);
+	else if(auto* Pot=Cast<ABotanicusPlantPotActor>(Target)) Values.Add(Pot->GetGrowthProgress());
+	else if(auto* Illegal=Cast<ABotanicusIllegalPlanterActor>(Target)) for(const auto& S:Illegal->GetPlantSlots()) Values.Add(S.GrowthProgress);
+	return Values;
+}
+
+bool UBotanicusJuiceValidation::CaptureFrame(UObject* Context,const FString& Filename)
+{
+#if WITH_EDITOR
+	UWorld* World=GEngine->GetWorldFromContextObject(Context,EGetWorldErrorMode::ReturnNull);if(!IsJuiceTest(World)) return false;
+	if(auto* PC=World->GetFirstPlayerController()) if(auto* Local=PC->GetLocalPlayer()) if(UGameViewportClient* View=Local->ViewportClient)
+		if(View->Viewport)
+		{
+			TArray<FColor> Pixels;if(!View->Viewport->ReadPixels(Pixels)) return false;
+			const FIntPoint Size=View->Viewport->GetSizeXY();TArray64<uint8> PNG;
+			FImageUtils::PNGCompressImageArray(Size.X,Size.Y,TArrayView64<const FColor>(Pixels),PNG);
+			return FFileHelper::SaveArrayToFile(PNG,*Filename);
+		}
+#endif
+	return false;
 }
