@@ -2,6 +2,7 @@
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "Visuals/BotanicusPlacementJuiceTypes.h"
+#include "Visuals/BotanicusCheckoutVisualTypes.h"
 #include "BotanicusJuiceWorldSubsystem.generated.h"
 class UBotanicusPlantMotionCatalog;
 class UStaticMeshComponent;
@@ -61,6 +62,10 @@ class BOTANICUS_API UBotanicusJuiceWorldSubsystem : public UTickableWorldSubsyst
     friend class UBotanicusPlacementValidation;
 	GENERATED_BODY()
 public:
+    void StartCheckoutScan(ABotanicusCheckoutScanner* Scanner,const FVector& Start,const FVector& End,float Age);
+    int32 GetCheckoutBeamCount() const {return CheckoutBeams.Num();}
+    int32 GetCheckoutScanCount() const {return CheckoutScansStarted;}
+
 	virtual bool DoesSupportWorldType(EWorldType::Type Type) const override;
 	virtual void OnWorldBeginPlay(UWorld& World) override;
 	virtual void Deinitialize() override;
@@ -104,6 +109,12 @@ public:
     UFUNCTION(BlueprintPure,Category="Botanicus|Noctiflore|Diagnostics") int32 GetSporeParticleCount() const;
     UFUNCTION(BlueprintPure,Category="Botanicus|Noctiflore|Diagnostics") int32 GetNoctifloreCandidateCount() const {return NoctifloreCandidates.Num();}
 private:
+    void UpdateCheckoutBeams();
+    void ClearCheckoutBeams();
+    UPROPERTY(Transient) TArray<FBotanicusCheckoutBeam> CheckoutBeams;
+    UPROPERTY(Transient) TObjectPtr<UMaterialInterface> CheckoutBeamMaterial;
+    int32 CheckoutScansStarted=0;
+
     void UpdatePlacementJuice(float DeltaTime);
     bool BeginPlacementAnimation(const FBotanicusPendingPlacement& Pending);
     void FinishPlacementAnimation(int32 Index,bool bContact);

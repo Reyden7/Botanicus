@@ -9,6 +9,9 @@
 class ABotanicusSalesDisplayActor;
 class ABotanicusSelfCheckoutActor;
 class UStaticMeshComponent;
+class UBoxComponent;
+class UPrimitiveComponent;
+struct FBotanicusCheckoutReceipt;
 class UTextRenderComponent;
 class UWidgetComponent;
 class UMaterialInstanceDynamic;
@@ -70,8 +73,8 @@ public:
 	}
 	bool IsInCheckoutQueue() const
 	{
-		return VisitorState == EBotanicusVisitorState::CheckoutQueue ||
-			VisitorState == EBotanicusVisitorState::Paying;
+		return !ManualCheckoutId.IsValid() && (VisitorState == EBotanicusVisitorState::CheckoutQueue ||
+			VisitorState == EBotanicusVisitorState::Paying);
 	}
 	float GetCheckoutQueueArrivalTime() const
 	{
@@ -82,9 +85,15 @@ public:
 		bool bIsFront);
 	bool CanUsePlayerCheckout() const
 	{
-		return VisitorState == EBotanicusVisitorState::Paying &&
+		return !ManualCheckoutId.IsValid() && CheckoutStage==0 && VisitorState == EBotanicusVisitorState::Paying &&
 			bCarryingPlant;
 	}
+    FGuid GetCheckoutCustomerId() const {return CheckoutCustomerId;}
+    FName GetCarriedCheckoutPlantKey() const {return CarriedPlantItemKey;}
+    FVector GetCheckoutPlantLocation() const;
+    bool IsCheckoutPlantHit(const UPrimitiveComponent* Component) const;
+    bool CommitManualCheckout(FBotanicusCheckoutReceipt& Out);
+    void RecordManualCheckoutOutcome() {if(HasAuthority() && ManualCheckoutId.IsValid()) RecordVisitOutcome(true);}
 	void HandlePlayerCheckoutAction();
 	bool AssignSelfCheckout(
 		ABotanicusSelfCheckoutActor* InSelfCheckout);
@@ -94,10 +103,10 @@ public:
 	}
 	bool IsWaitingForCheckoutAssignment() const
 	{
-		return VisitorState ==
+		return !ManualCheckoutId.IsValid() && (VisitorState ==
 				EBotanicusVisitorState::CheckoutQueue ||
 			(VisitorState == EBotanicusVisitorState::Paying &&
-			 CheckoutStage == 0);
+			 CheckoutStage == 0));
 	}
 	int32 GetCheckoutPrice() const;
 	bool IsCheckoutPlantScanned() const
@@ -108,6 +117,11 @@ public:
 	void BeginShopClosureDeparture();
 
 private:
+    friend class UBotanicusCashRegisterValidation;
+    void RefreshCheckoutScanTarget();
+    UPROPERTY(VisibleAnywhere) TObjectPtr<UBoxComponent> CheckoutScanTarget;
+    UPROPERTY(Replicated) FGuid CheckoutCustomerId;
+    FGuid ManualCheckoutId;
 	void MoveTowards(
 		const FVector& Destination,
 		float DeltaSeconds);

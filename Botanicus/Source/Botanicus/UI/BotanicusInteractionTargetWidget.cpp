@@ -100,6 +100,7 @@ void UBotanicusInteractionTargetWidget::SetLayoutOwner(
 
 void UBotanicusInteractionTargetWidget::SetTargetName(const FText& TargetName)
 {
+    RestoreContextDecorations();
 	if (!TargetNameText || TargetName.IsEmpty())
 	{
 		ClearTarget();
@@ -140,6 +141,7 @@ void UBotanicusInteractionTargetWidget::SetKeyboardPrompt(
 	const FText& InActionText,
 	const FText& InTargetName)
 {
+    RestoreContextDecorations();
 	if (!TargetNameText || InActionText.IsEmpty() || InTargetName.IsEmpty())
 	{
 		ClearTarget();
@@ -272,6 +274,7 @@ void UBotanicusInteractionTargetWidget::SetLeftMousePrompt(
 	const FText& InTargetName,
 	bool bRequiresHold)
 {
+    RestoreContextDecorations();
 	if (!TargetNameText || InActionText.IsEmpty())
 	{
 		ClearTarget();
@@ -522,4 +525,26 @@ void UBotanicusInteractionTargetWidget::ApplyPanelSize(
 	{
 		LayoutOwner->SetInteractionSize(FVector2D(NewWidth, NewHeight));
 	}
+}
+
+void UBotanicusInteractionTargetWidget::RestoreContextDecorations()
+{
+    if(!bPlainCheckoutStatus) return;bPlainCheckoutStatus=false;
+    if(KeyIcon) KeyIcon->SetVisibility(ContextKeyVisibility);
+    if(ActionLabel) ActionLabel->SetVisibility(ContextActionVisibility);
+    if(ActionBackground) ActionBackground->SetVisibility(ContextBackgroundVisibility);
+}
+void UBotanicusInteractionTargetWidget::SetContextStatus(const FText& Status)
+{
+    if(!TargetNameText || Status.IsEmpty()) {ClearTarget();return;}
+    if(!bPlainCheckoutStatus)
+    {
+        ContextKeyVisibility=KeyIcon ? KeyIcon->GetVisibility() : ESlateVisibility::HitTestInvisible;
+        ContextActionVisibility=ActionLabel ? ActionLabel->GetVisibility() : ESlateVisibility::HitTestInvisible;
+        ContextBackgroundVisibility=ActionBackground ? ActionBackground->GetVisibility() : ESlateVisibility::HitTestInvisible;
+    }
+    bPlainCheckoutStatus=true;bLocalHoldProgressActive=false;bShowHoldProgress=false;HoldProgress=0;
+    TargetNameText->SetText(Status);if(KeyIcon) KeyIcon->SetVisibility(ESlateVisibility::Collapsed);
+    if(ActionLabel) ActionLabel->SetVisibility(ESlateVisibility::Collapsed);if(ActionBackground) ActionBackground->SetVisibility(ESlateVisibility::Collapsed);
+    RefreshHoldRing();UpdateAdaptiveHeight();SetVisibility(ESlateVisibility::HitTestInvisible);
 }

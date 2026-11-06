@@ -1,0 +1,62 @@
+[
+  {
+    "id": "ScannerBeep",
+    "source": "C:\\Users\\quent\\Documents\\Botanicus\\sons\\scaner bip.mp3",
+    "source_sha256": "fef38e83de67a096494b3b0ae7fc0e5a5a84df59cfa1e3ea65fd5d06595e9f8a",
+    "wav": "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\SourceArt\\Audio\\Checkout\\SW_CheckoutScannerBeep.wav",
+    "source_mono_duration": 1.272,
+    "trim_start": 0.0,
+    "trim_end": 0.7922916666666666,
+    "duration": 0.47970833333333335,
+    "gain_db": -7.975628891139244,
+    "original_mono_peak_dbfs": 1.9756288911392437,
+    "original_mono_rms_dbfs": -17.682042329888176,
+    "output_peak_dbfs": -6.000477743319013,
+    "output_rms_dbfs": -21.422839984406146
+  },
+  {
+    "id": "RegisterOpen",
+    "source": "C:\\Users\\quent\\Documents\\Botanicus\\sons\\cash registrer open.mp3",
+    "source_sha256": "e333904c44faaff86f8ddb3b292295d111b142c974a2d092d5041a9dd2116f97",
+    "wav": "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\SourceArt\\Audio\\Checkout\\SW_CheckoutRegisterOpen.wav",
+    "source_mono_duration": 2.0898125,
+    "trim_start": 0.03904166666666667,
+    "trim_end": 0.2444375,
+    "duration": 1.8063333333333333,
+    "gain_db": -8.48750029154608,
+    "original_mono_peak_dbfs": 2.4875002915460795,
+    "original_mono_rms_dbfs": -21.946247705346256,
+    "output_peak_dbfs": -6.000477743319013,
+    "output_rms_dbfs": -29.80092269139963
+  },
+  {
+    "id": "CoinPickup",
+    "source": "C:\\Users\\quent\\Documents\\Botanicus\\sons\\money pickup.mp3",
+    "source_sha256": "0d8034f8a9f18365b3d96892644fbb8e7d7507cd6f27183767520adc03ab9216",
+    "wav": "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\SourceArt\\Audio\\Checkout\\SW_CheckoutCoinPickup.wav",
+    "source_mono_duration": 0.36572916666666666,
+    "trim_start": 0.0,
+    "trim_end": 0.0,
+    "duration": 0.36572916666666666,
+    "gain_db": -6.518782930538084,
+    "original_mono_peak_dbfs": 0.5187829305380839,
+    "original_mono_rms_dbfs": -28.356253251541133,
+    "output_peak_dbfs": -6.000477743319013,
+    "output_rms_dbfs": -34.87532187976754
+  },
+  {
+    "id": "RegisterClose",
+    "source": "C:\\Users\\quent\\Documents\\Botanicus\\sons\\close Caisse.mp3",
+    "source_sha256": "58c42e8355aadc86f7d86d87be5d0ecfa11817da6e498c839bfadb942596536b",
+    "wav": "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\SourceArt\\Audio\\Checkout\\SW_CheckoutRegisterClose.wav",
+    "source_mono_duration": 1.488,
+    "trim_start": 0.11416666666666667,
+    "trim_end": 0.4544166666666667,
+    "duration": 0.9194166666666667,
+    "gain_db": 6.0,
+    "original_mono_peak_dbfs": -15.241210029772482,
+    "original_mono_rms_dbfs": -36.38002451328471,
+    "output_peak_dbfs": -9.24128270284472,
+    "output_rms_dbfs": -28.289738038892857
+  }
+]

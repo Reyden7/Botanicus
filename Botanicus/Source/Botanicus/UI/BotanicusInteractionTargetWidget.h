@@ -20,6 +20,7 @@ class BOTANICUS_API UBotanicusInteractionTargetWidget
 
 public:
 	void SetTargetName(const FText& TargetName);
+    void SetContextStatus(const FText& Status);
 	void SetKeyboardPrompt(
 		const FText& ActionText,
 		const FText& TargetName);
@@ -49,6 +50,11 @@ protected:
 		bool bParentEnabled) const override;
 
 private:
+    void RestoreContextDecorations();
+    bool bPlainCheckoutStatus=false;
+    ESlateVisibility ContextKeyVisibility=ESlateVisibility::HitTestInvisible;
+    ESlateVisibility ContextActionVisibility=ESlateVisibility::HitTestInvisible;
+    ESlateVisibility ContextBackgroundVisibility=ESlateVisibility::HitTestInvisible;
 	void UpdateAdaptiveHeight();
 	void ApplyPanelSize(float NewWidth, float NewHeight);
 	void EnsureHoldRing();

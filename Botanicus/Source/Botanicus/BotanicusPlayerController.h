@@ -44,6 +44,9 @@ class ABotanicusSalesDisplayActor;
 struct FBotanicusQuickBarSlot;
 class ABotanicusSalePotActor;
 class ABotanicusCashRegisterActor;
+class ABotanicusCheckoutScanner;
+class ABotanicusPaymentCoins;
+class ABotanicusVisitorCharacter;
 class ABotanicusWateringCanActor;
 class ABotanicusWaterReserveActor;
 class ABotanicusComputerActor;
@@ -90,6 +93,19 @@ class BOTANICUS_API ABotanicusPlayerController : public APlayerController
 	GENERATED_BODY()
 	
 public:
+    friend class UBotanicusCashRegisterValidation;
+    ABotanicusCheckoutScanner* GetCheckoutScanner() const;
+    void SetCheckoutScannerReference(ABotanicusCheckoutScanner* Scanner);
+    bool CanTakeCheckoutScanner() const;
+    bool TryCheckoutInput(const FInputKeyEventArgs& Params);
+    bool TraceCheckoutAim(FHitResult& Hit) const;
+    bool TryRefreshCheckoutContext();
+    void UpdateCheckoutEquipmentPresentation();
+    UFUNCTION(Server,Reliable) void ServerTakeCheckoutScanner(ABotanicusCheckoutScanner* Scanner);
+    UFUNCTION(Server,Reliable) void ServerReturnCheckoutScanner(ABotanicusCheckoutScanner* Scanner);
+    UFUNCTION(Server,Reliable) void ServerScanCheckoutCustomer(ABotanicusCheckoutScanner* Scanner,ABotanicusVisitorCharacter* Customer,FGuid ExpectedCustomer,FName ExpectedPlant);
+    UFUNCTION(Server,Reliable) void ServerCollectCheckoutCoins(ABotanicusPaymentCoins* Coins,FGuid ExpectedTransaction);
+
 	friend class UBotanicusJuiceValidation;
 	friend class UBotanicusEquipmentValidation;
 	friend class UBotanicusPlacementValidation;
@@ -305,7 +321,7 @@ public:
 		int32 RestoredBuildingProgressionLevel = 1);
 
 	/** Server-only reward issued when a prepared plant is sold. */
-	void CreditPlantSale(FName PlantItemKey, int32 SalePrice);
+	void CreditPlantSale(FName PlantItemKey, int32 SalePrice,bool bPlaySaleFeedback=true);
 
 	FName GetCarriedTransplantPlantKey() const
 	{
@@ -348,6 +364,11 @@ public:
 	bool IsMovingWorldItemOutsideInventory() const;
 
 protected:
+    TWeakObjectPtr<ABotanicusCheckoutScanner> LocalCheckoutScanner;
+    TWeakObjectPtr<ABotanicusPlaceableItemActor> CheckoutSuppressedEquipment;
+    bool bCheckoutEquipmentWasHidden=false;
+    bool bCheckoutContextBlocked=false;
+
 
 	/** Input Mapping Contexts */
 	UPROPERTY(EditAnywhere, Category="Input|Input Mappings")

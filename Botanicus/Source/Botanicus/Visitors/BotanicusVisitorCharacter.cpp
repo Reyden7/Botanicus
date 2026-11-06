@@ -1,6 +1,8 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Visitors/BotanicusVisitorCharacter.h"
+#include "Components/BoxComponent.h"
+#include "Sales/Checkout/BotanicusCheckoutTypes.h"
 
 #include "BotanicusGameState.h"
 #include "Components/CapsuleComponent.h"
@@ -149,6 +151,8 @@ ABotanicusVisitorCharacter::ABotanicusVisitorCharacter()
 	CarriedPlantVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	CarriedPlantVisual->SetVisibility(false);
 
+    CheckoutScanTarget=CreateDefaultSubobject<UBoxComponent>(TEXT("Checkout Plant Target"));CheckoutScanTarget->SetupAttachment(CarriedPlantVisual);
+    CheckoutScanTarget->SetCollisionEnabled(ECollisionEnabled::NoCollision);CheckoutScanTarget->SetCollisionResponseToAllChannels(ECR_Ignore);CheckoutScanTarget->SetCollisionResponseToChannel(ECC_Visibility,ECR_Block);CheckoutScanTarget->SetGenerateOverlapEvents(false);
 	SpeechBubbleComponent = CreateDefaultSubobject<UWidgetComponent>(
 		TEXT("VisitorSpeechBubble"));
 	SpeechBubbleComponent->SetupAttachment(GetCapsuleComponent());
@@ -166,6 +170,7 @@ ABotanicusVisitorCharacter::ABotanicusVisitorCharacter()
 void ABotanicusVisitorCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+    if(HasAuthority() && !CheckoutCustomerId.IsValid()) CheckoutCustomerId=FGuid::NewGuid();
 	OnRep_SpeechLine();
 	RefreshCarriedPlantVisuals();
 }
@@ -340,31 +345,20 @@ int32 ABotanicusVisitorCharacter::GetCheckoutPrice() const
 		: 0;
 }
 
-void ABotanicusVisitorCharacter::HandlePlayerCheckoutAction()
+void ABotanicusVisitorCharacter::HandlePlayerCheckoutAction() { /* Manual sale now requires the validated scanner RPC. */ }
+bool ABotanicusVisitorCharacter::CommitManualCheckout(FBotanicusCheckoutReceipt& Out)
 {
-	if (!HasAuthority() || !CanUsePlayerCheckout())
-	{
-		return;
-	}
-
-	if (CheckoutStage == 0)
-	{
-		CheckoutStage = 1;
-		SetSpeechLine(
-			FString::Printf(
-				TEXT("Plante scannee : %d credits."),
-				GetCheckoutPrice()));
-		RefreshStatusText();
-		ForceNetUpdate();
-		return;
-	}
-
-	if (TargetDisplay &&
-		TargetDisplay->CompleteVisitorPurchase(this))
-	{
-		return;
-	}
-	SetSpeechLine(TEXT("Il y a un probleme avec cette vente."));
+    if(!HasAuthority() || !CanUsePlayerCheckout() || CheckoutStage!=0 || !TargetDisplay || !Out.TransactionId.IsValid()) return false;
+    if(!TargetDisplay->TransferVisitorPayment(this,Out)) return false;
+    ManualCheckoutId=Out.TransactionId;CheckoutStage=2;SetSpeechLine(TEXT("Merci, voici le paiement."));RefreshCheckoutScanTarget();RefreshStatusText();ForceNetUpdate();return true;
+}
+FVector ABotanicusVisitorCharacter::GetCheckoutPlantLocation() const {return CarriedPlantVisual ? CarriedPlantVisual->Bounds.Origin : GetActorLocation();}
+bool ABotanicusVisitorCharacter::IsCheckoutPlantHit(const UPrimitiveComponent* Component) const {return Component==CheckoutScanTarget;}
+void ABotanicusVisitorCharacter::RefreshCheckoutScanTarget()
+{
+    if(!CheckoutScanTarget || !CarriedPlantVisual) return;
+    if(UStaticMesh* FoliageAsset=CarriedPlantVisual->GetStaticMesh()) {const FBoxSphereBounds B=FoliageAsset->GetBounds();CheckoutScanTarget->SetRelativeLocation(B.Origin);const FVector Size=B.BoxExtent.GetAbs()+FVector(1);if(!CheckoutScanTarget->GetUnscaledBoxExtent().Equals(Size,.01f)) CheckoutScanTarget->SetBoxExtent(Size,false);}
+    CheckoutScanTarget->SetCollisionEnabled(CanUsePlayerCheckout() && CheckoutStage==0 ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
 }
 
 bool ABotanicusVisitorCharacter::AssignSelfCheckout(
@@ -395,6 +389,7 @@ void ABotanicusVisitorCharacter::GetLifetimeReplicatedProps(
 	TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+    DOREPLIFETIME(ABotanicusVisitorCharacter,CheckoutCustomerId);
 	DOREPLIFETIME(
 		ABotanicusVisitorCharacter,
 		VisitorState);
@@ -421,6 +416,7 @@ void ABotanicusVisitorCharacter::GetLifetimeReplicatedProps(
 void ABotanicusVisitorCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+    RefreshCheckoutScanTarget();
 	if (!HasAuthority())
 	{
 		return;

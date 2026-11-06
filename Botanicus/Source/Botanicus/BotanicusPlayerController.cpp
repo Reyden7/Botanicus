@@ -939,6 +939,7 @@ void ABotanicusPlayerController::PlayerTick(float DeltaTime)
 	UpdateHeldWorldItemPreview();
 	UpdateQuickBarItemPlacement(DeltaTime);
 	UpdateEquippedQuickBarItem();
+    UpdateCheckoutEquipmentPresentation();
 	UpdateWateringCanSpray(DeltaTime);
 	UpdateThrowPowerWidget();
 	UpdateDeliveryParcelPlacement(DeltaTime);
@@ -1218,6 +1219,8 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 	{
 		return true;
 	}
+
+    if(TryCheckoutInput(Params)) return true;
 
 	// Old Blueprint input mappings cannot re-enable construction.
 	if (Params.Key == EKeys::T)
@@ -1845,6 +1848,7 @@ void ABotanicusPlayerController::RefreshInteractionTargetHighlight()
 		(ClimateDeviceControlWidget &&
 		 ClimateDeviceControlWidget->IsInViewport());
 
+    bCheckoutContextBlocked=bInteractionViewBlocked;
 	if (!bInteractionViewBlocked && GetWorld() && GetPawn())
 	{
 		FVector ViewLocation;
@@ -2070,6 +2074,8 @@ void ABotanicusPlayerController::RefreshInteractionTargetName(
 	{
 		return;
 	}
+    if(TryRefreshCheckoutContext()) return;
+
 	if (!IsValid(TargetActor))
 	{
 		InteractionTargetWidget->ClearTarget();
@@ -3748,14 +3754,14 @@ void ABotanicusPlayerController::RestoreCatalogOrderState(
 
 void ABotanicusPlayerController::CreditPlantSale(
 	FName PlantItemKey,
-	int32 SalePrice)
+	int32 SalePrice,bool bPlaySaleFeedback)
 {
 	if (!HasAuthority() || SalePrice <= 0)
 	{
 		return;
 	}
 	AddSharedFunds(this, SalePrice);
-	ClientPlayFeedbackAudio(TEXT("Sale"));
+	if(bPlaySaleFeedback) ClientPlayFeedbackAudio(TEXT("Sale"));
 	if (ABotanicusGameState* GameState = GetSharedGameState(this))
 	{
 		GameState->RecordPlantSale(SalePrice);

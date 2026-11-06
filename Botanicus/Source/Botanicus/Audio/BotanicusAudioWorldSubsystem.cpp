@@ -98,7 +98,11 @@ void UBotanicusAudioWorldSubsystem::PlayPlacementContact(FName Id,const FVector&
     if(Id==TEXT("PotPlace") || Id==TEXT("EquipmentPlace")) PlayFeedback(Id,Position,true);
 }
 void UBotanicusAudioWorldSubsystem::PlayPrivate(FName Id) {PlayFeedback(Id,FVector::ZeroVector,false);}
-void UBotanicusAudioWorldSubsystem::PlayFeedback(FName Id,const FVector& Position,bool bSpatial)
+void UBotanicusAudioWorldSubsystem::PlayCheckoutContact(FName Id,const FVector& Position,float PitchMultiplier)
+{
+    if(Id==TEXT("CoinPickup")) PlayFeedback(Id,Position,true,FMath::Clamp(PitchMultiplier,.9f,1.1f));
+}
+void UBotanicusAudioWorldSubsystem::PlayFeedback(FName Id,const FVector& Position,bool bSpatial,float PitchMultiplier)
 {
 	if (GetWorld()->GetNetMode()==NM_DedicatedServer) return;
 	LoadCatalog(); if (!Catalog) return;
@@ -111,8 +115,8 @@ void UBotanicusAudioWorldSubsystem::PlayFeedback(FName Id,const FVector& Positio
 	if (Cooldowns.Num()>256) Cooldowns.Reset();
 	Cooldowns.FindOrAdd(Key)=Now;
 	UAudioComponent* Voice=bSpatial
-		? UGameplayStatics::SpawnSoundAtLocation(GetWorld(),Entry->Sound,Position,FRotator::ZeroRotator,Entry->Volume,Entry->Pitch,0,Catalog->InteractionAttenuation,Entry->Concurrency)
-		: UGameplayStatics::SpawnSound2D(GetWorld(),Entry->Sound,Entry->Volume,Entry->Pitch,0,Entry->Concurrency);
+		? UGameplayStatics::SpawnSoundAtLocation(GetWorld(),Entry->Sound,Position,FRotator::ZeroRotator,Entry->Volume,Entry->Pitch*PitchMultiplier,0,Catalog->InteractionAttenuation,Entry->Concurrency)
+		: UGameplayStatics::SpawnSound2D(GetWorld(),Entry->Sound,Entry->Volume,Entry->Pitch*PitchMultiplier,0,Entry->Concurrency);
 	if (Voice && Voice->IsPlaying()) ++PlayCounts.FindOrAdd(Id);
 }
 UAudioComponent* UBotanicusAudioWorldSubsystem::CreateLoop(USoundBase* Sound,bool bSpatial)

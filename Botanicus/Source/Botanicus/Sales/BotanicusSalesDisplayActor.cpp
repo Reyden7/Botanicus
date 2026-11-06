@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Sales/BotanicusSalesDisplayActor.h"
+#include "Sales/Checkout/BotanicusCheckoutTypes.h"
 #include "Audio/BotanicusAudioWorldSubsystem.h"
 
 #include "BotanicusCharacter.h"
@@ -452,6 +453,7 @@ bool ABotanicusSalesDisplayActor::TryMountSalePotState(
 	{
 		return false;
 	}
+	SaleLotId=FGuid::NewGuid();
 	DisplayedPlantItemKey = PlantItemKey;
 	DisplayedSoilItemKey = SoilItemKey;
 	DisplayedPotItemKey = SalePotItemKey.IsNone()
@@ -468,6 +470,17 @@ bool ABotanicusSalesDisplayActor::TryMountSalePotState(
 		TEXT(
 			"Pot installé : un visiteur va venir voir cette plante."));
 	return true;
+}
+
+bool ABotanicusSalesDisplayActor::TransferVisitorPayment(ABotanicusVisitorCharacter* Visitor,FBotanicusCheckoutReceipt& Out)
+{
+    if(!HasAuthority() || !IsValid(Visitor) || Visitor!=ActiveVisitor || !bPlantTakenByVisitor || DisplayedPlantItemKey.IsNone() || DisplayedPlantItemKey!=Visitor->GetCarriedCheckoutPlantKey()) return false;
+    const auto* D=GetDisplayedPlantDefinition();const auto* GS=GetWorld()->GetGameState<ABotanicusGameState>();
+    const int32 Amount=D ? (GS ? GS->GetTrendAdjustedSalePrice(*D) : FMath::Max(0,D->SalePrice)) : 0;
+    if(Amount<=0) return false;if(!SaleLotId.IsValid()) SaleLotId=FGuid::NewGuid();
+    Out.Amount=Amount;Out.PlantItemKey=DisplayedPlantItemKey;Out.PlantInstanceId=SaleLotId;Out.CustomerId=Visitor->GetCheckoutCustomerId();
+    DisplayedPlantItemKey=NAME_None;DisplayedSoilItemKey=NAME_None;DisplayedPotItemKey=TEXT("SalePot");SaleEndServerTime=0;
+    bVisitorEnRoute=false;bPlantTakenByVisitor=false;SellerController=nullptr;ActiveVisitor=nullptr;RefreshVisuals();ForceNetUpdate();return true;
 }
 
 bool ABotanicusSalesDisplayActor::CompleteVisitorPurchase(

@@ -15,6 +15,7 @@ class UMaterialInterface;
 class ABotanicusSalePotActor;
 class ABotanicusPlayerController;
 class ABotanicusVisitorCharacter;
+struct FBotanicusCheckoutReceipt;
 struct FBotanicusItemDefinition;
 
 /** Small nursery display that accepts one complete harvested plant. */
@@ -70,6 +71,9 @@ public:
 		ABotanicusVisitorCharacter* Visitor);
 	bool CompleteVisitorPurchase(
 		ABotanicusVisitorCharacter* Visitor);
+    bool TransferVisitorPayment(ABotanicusVisitorCharacter* Visitor,FBotanicusCheckoutReceipt& Out);
+    FGuid GetSaleLotId() const {return SaleLotId;}
+    void RestoreSaleLotId(FGuid Id) {if(HasAuthority() && Id.IsValid()) SaleLotId=Id;}
 	void NotifyVisitorEnded(
 		ABotanicusVisitorCharacter* Visitor);
 
@@ -107,6 +111,8 @@ public:
 	float SalePotSlotHeight = 0.0f;
 
 private:
+    friend class UBotanicusCashRegisterValidation;
+    FGuid SaleLotId;
 	FName GetSelectedItemKey(AActor* Interactor) const;
 	const FBotanicusItemDefinition* GetSelectedPlantDefinition(
 		AActor* Interactor) const;

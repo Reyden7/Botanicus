@@ -6,6 +6,7 @@
 #include "GameFramework/SaveGame.h"
 #include "Growing/BotanicusPlantCatalog.h"
 #include "QuickBar/BotanicusQuickBarComponent.h"
+#include "Sales/Checkout/BotanicusCheckoutTypes.h"
 #include "BotanicusWorldSaveGame.generated.h"
 
 USTRUCT()
@@ -177,7 +178,7 @@ struct BOTANICUS_API FBotanicusSavedWorldItem
 
 	UPROPERTY()
 	FName ItemKey = NAME_None;
-
+    UPROPERTY() FGuid SaleLotId;
 	UPROPERTY()
 	int32 Quantity = 1;
 
@@ -296,7 +297,7 @@ class BOTANICUS_API UBotanicusWorldSaveGame : public USaveGame
 
 public:
 	UPROPERTY()
-	int32 SaveVersion = 32;
+	int32 SaveVersion = 33;
 
 	UPROPERTY()
 	FString MapName;
@@ -402,4 +403,5 @@ public:
 
 	UPROPERTY()
 	TArray<FBotanicusSavedWorldItem> WorldItems;
+    UPROPERTY() TArray<FBotanicusSavedCashRegister> CashRegisters;
 };

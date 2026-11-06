@@ -4,9 +4,15 @@
 
 #include "CoreMinimal.h"
 #include "Delivery/BotanicusPlaceableItemActor.h"
+#include "Sales/Checkout/BotanicusCheckoutTypes.h"
 #include "BotanicusCashRegisterActor.generated.h"
 
 class ABotanicusVisitorCharacter;
+class ABotanicusCheckoutScanner;
+class ABotanicusPaymentCoins;
+class ABotanicusPlayerController;
+class UBoxComponent;
+class UPrimitiveComponent;
 class UStaticMeshComponent;
 class UTextRenderComponent;
 
@@ -19,6 +25,27 @@ class BOTANICUS_API ABotanicusCashRegisterActor
 
 public:
 	ABotanicusCashRegisterActor();
+
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out) const override;
+    virtual void EndPlay(const EEndPlayReason::Type Reason) override;
+    const FBotanicusCheckoutReceipt& GetReceipt() const {return Receipt;}
+    bool TryScanCustomer(ABotanicusPlayerController* PC,ABotanicusVisitorCharacter* Customer);
+    bool TryCollectPayment(ABotanicusPlayerController* PC,const FGuid& ExpectedId);
+    double CheckoutServerTime() const;
+    FVector GetDrawerDepositLocation() const;
+    bool IsScannerDockHit(const UPrimitiveComponent* Component) const;
+    ABotanicusCheckoutScanner* GetDockScanner() const {return DockScanner;}
+    ABotanicusPaymentCoins* GetPaymentCoins() const {return PaymentCoins;}
+    FBotanicusSavedCashRegister CaptureCheckout() const;
+    void RestoreCheckout(const FBotanicusSavedCashRegister& Saved);
+    int32 GetAcceptedScans() const {return AcceptedScans;}
+    int32 GetAcceptedCollections() const {return AcceptedCollections;}
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Checkout Points") TObjectPtr<USceneComponent> ScannerDock;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Checkout Points") TObjectPtr<USceneComponent> CoinDropPoint;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Checkout Points") TObjectPtr<USceneComponent> DrawerTarget;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Checkout Points") TObjectPtr<USceneComponent> DrawerClosedTarget;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Checkout Points") TObjectPtr<USceneComponent> DrawerOpenTarget;
+
 
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void ConfigureAsLocalPreview(bool bIsValid) override;
@@ -41,6 +68,25 @@ protected:
 	virtual void BeginPlay() override;
 
 private:
+
+    friend class UBotanicusCashRegisterValidation;
+    void InitializeCheckoutComponents();
+    void BeginCheckout();
+    void TickCheckout(float DeltaSeconds);
+    void NotifyCheckoutChanged();
+    UFUNCTION() void OnRep_Checkout();
+    UPROPERTY(ReplicatedUsing=OnRep_Checkout) FBotanicusCheckoutReceipt Receipt;
+    UPROPERTY(Replicated) FGuid RegisterId;
+    UPROPERTY(ReplicatedUsing=OnRep_Checkout) TObjectPtr<ABotanicusCheckoutScanner> DockScanner;
+    UPROPERTY(ReplicatedUsing=OnRep_Checkout) TObjectPtr<ABotanicusPaymentCoins> PaymentCoins;
+    UPROPERTY(VisibleAnywhere) TObjectPtr<USceneComponent> DrawerVisualRoot;
+    UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> DrawerMesh;
+    UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> DrawerLip;
+    UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> ScannerDockMesh;
+    UPROPERTY(VisibleAnywhere) TObjectPtr<UBoxComponent> ScannerDockHit;
+    TWeakObjectPtr<ABotanicusVisitorCharacter> OpeningCustomer;
+    FGuid LastBeamTransaction;
+    int32 AcceptedScans=0,AcceptedCollections=0;
 	void InitializeVisualMaterials();
 	bool IsInsideCheckoutZone() const;
 	bool IsLocalPlayerTargetingRegister() const;

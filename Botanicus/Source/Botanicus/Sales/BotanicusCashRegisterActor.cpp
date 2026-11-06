@@ -115,6 +115,7 @@ ABotanicusCashRegisterActor::ABotanicusCashRegisterActor()
 		ECollisionEnabled::NoCollision);
 	SelfCheckoutZoneLabel->SetVisibility(false);
 
+	InitializeCheckoutComponents();
 	RefreshVisuals();
 }
 
@@ -126,6 +127,7 @@ void ABotanicusCashRegisterActor::BeginPlay()
 		InitializePlacedItem(TEXT("CashRegister"), 1);
 	}
 	InitializeVisualMaterials();
+	BeginCheckout();
 }
 
 void ABotanicusCashRegisterActor::InitializeVisualMaterials()
@@ -162,6 +164,7 @@ void ABotanicusCashRegisterActor::InitializeVisualMaterials()
 void ABotanicusCashRegisterActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	TickCheckout(DeltaSeconds);
 	RefreshVisuals();
 }
 
@@ -342,7 +345,7 @@ void ABotanicusCashRegisterActor::HandleCheckoutAction(
 	}
 	if (ABotanicusVisitorCharacter* Customer = GetCheckoutCustomer())
 	{
-		Customer->HandlePlayerCheckoutAction();
+		(void)Customer; // Scanner and receipt RPCs own the manual flow. Legacy clicks cannot credit.
 	}
 }
 
@@ -442,39 +445,6 @@ void ABotanicusCashRegisterActor::RefreshVisuals()
 			bShowSelfCheckoutSlots);
 	}
 
-	if (!IsInsideCheckoutZone())
-	{
-		StatusText->SetText(
-			FText::FromString(
-				TEXT("CAISSE\nA PLACER DANS LA ZONE CAISSE")));
-		StatusText->SetTextRenderColor(FColor(255, 150, 70));
-		ContextActionText->SetVisibility(false);
-		return;
-	}
-
-	ABotanicusVisitorCharacter* Customer = GetCheckoutCustomer();
-	if (!Customer)
-	{
-		StatusText->SetText(
-			FText::FromString(TEXT("CAISSE\nEN ATTENTE D'UN CLIENT")));
-		StatusText->SetTextRenderColor(FColor(160, 230, 180));
-		ContextActionText->SetVisibility(false);
-		return;
-	}
-
-	StatusText->SetText(
-		FText::FromString(
-			FString::Printf(
-				TEXT("CAISSE\nCLIENT : %d CREDITS"),
-				Customer->GetCheckoutPrice())));
-	StatusText->SetTextRenderColor(FColor(120, 245, 160));
-	const bool bTargeted = IsLocalPlayerTargetingRegister();
-	ContextActionText->SetVisibility(bTargeted);
-	ContextActionText->SetText(
-		FText::FromString(
-			Customer->IsCheckoutPlantScanned()
-				? FString::Printf(
-					TEXT("CLIQUE GAUCHE : ENCAISSER %d CREDITS"),
-					Customer->GetCheckoutPrice())
-				: TEXT("CLIQUE GAUCHE : SCANNER LA PLANTE")));
+    // A single contextual HUD card replaces the two overlapping manual labels.
+    StatusText->SetVisibility(false);ContextActionText->SetVisibility(false);
 }

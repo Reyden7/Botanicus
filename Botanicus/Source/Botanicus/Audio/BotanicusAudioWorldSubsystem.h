@@ -33,6 +33,7 @@ public:
 	static FName GrowthEvent(float Before,float After);
 	void ReceiveFeedback(uint32 Sequence,FName Id,const FVector& Position);
 	void PlayPrivate(FName Id);
+    void PlayCheckoutContact(FName Id,const FVector& Position,float PitchMultiplier=1.f);
 	/** Called by an already deduplicated cosmetic event, without sending another RPC. */
 	void PlayPlacementContact(FName Id,const FVector& Position);
 	void RefreshWaterLoops(ABotanicusAudioRelay* InRelay);
@@ -48,7 +49,7 @@ public:
 private:
 	void UpdateLocalAudio();
 	void LoadCatalog();
-	void PlayFeedback(FName Id,const FVector& Position,bool bSpatial);
+	void PlayFeedback(FName Id,const FVector& Position,bool bSpatial,float PitchMultiplier=1.f);
 	UAudioComponent* CreateLoop(USoundBase* Sound,bool bSpatial);
 	FVector ListenerPosition() const;
 	UPROPERTY(Transient) TObjectPtr<UBotanicusAudioCatalog> Catalog;

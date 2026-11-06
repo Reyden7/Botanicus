@@ -524,7 +524,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 
 	CurrentSaveGame->MapName =
 		UGameplayStatics::GetCurrentLevelName(this, true);
-	CurrentSaveGame->SaveVersion = 32;
+	CurrentSaveGame->SaveVersion = 33;
 	if (const ABotanicusGameState* BotanicusGameState =
 		World->GetGameState<ABotanicusGameState>())
 	{
@@ -580,6 +580,8 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 	CurrentSaveGame->bHasDeliveryZone = false;
 	CurrentSaveGame->DeliveryZoneTransform = FTransform::Identity;
 	CurrentSaveGame->WorldItems.Reset();
+    CurrentSaveGame->CashRegisters.Reset();
+    for(TActorIterator<ABotanicusCashRegisterActor> It(World);It;++It) if(!It->ActorHasTag(TEXT("BotanicusPlacementPreview"))) CurrentSaveGame->CashRegisters.Add(It->CaptureCheckout());
 	// Legacy construction fields stay in the save schema so old slots load,
 	// but the authored level owns all structural actor locations.
 	CurrentSaveGame->RemovedBuildingActorNames.Reset();
@@ -746,6 +748,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		else if (const ABotanicusSalesDisplayActor* SalesDisplay =
 			Cast<ABotanicusSalesDisplayActor>(*ItemIt))
 		{
+            SavedItem.SaleLotId=SalesDisplay->GetSaleLotId();
 			SavedItem.DisplayedPlantItemKey =
 				SalesDisplay->GetDisplayedPlantItemKey();
 			SavedItem.DisplayedSoilItemKey =
@@ -1069,6 +1072,13 @@ void ABotanicusGameMode::RestoreWorldState()
 		}
 	}
 
+    for(const auto& SavedCash:CurrentSaveGame->CashRegisters)
+    {
+        ABotanicusCashRegisterActor* Match=nullptr;
+        for(TActorIterator<ABotanicusCashRegisterActor> It(World);It;++It) if(It->GetFName()==SavedCash.ActorName) {Match=*It;break;}
+        if(!Match) for(TActorIterator<ABotanicusCashRegisterActor> It(World);It;++It) if(It->GetActorLocation().Equals(SavedCash.Transform.GetLocation(),1.f)) {Match=*It;break;}
+        if(Match) Match->RestoreCheckout(SavedCash);
+    }
 	TArray<AActor*> ExistingWorldItems;
 	for (TActorIterator<ABotanicusDeliveryParcelActor> ParcelIt(World);
 		 ParcelIt;
@@ -1343,6 +1353,7 @@ void ABotanicusGameMode::RestoreWorldState()
 					CurrentSaveGame->SaveVersion >= 26
 						? SavedItem.DisplayedPotItemKey
 						: FName(TEXT("SalePot")));
+                SalesDisplay->RestoreSaleLotId(SavedItem.SaleLotId);
 			}
 			else if (ABotanicusWateringCanActor* WateringCan =
 				Cast<ABotanicusWateringCanActor>(PlacedItem))
