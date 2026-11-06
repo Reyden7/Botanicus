@@ -32,6 +32,9 @@ struct BOTANICUS_API FBotanicusCheckoutReceipt
     UPROPERTY() FVector ScanOrigin=FVector::ZeroVector;
     UPROPERTY() FVector ScanTarget=FVector::ZeroVector;
     UPROPERTY() FVector CustomerHand=FVector::ZeroVector;
+    // Optional cosmetic anchor: old saves default to false and use CustomerHand.
+    UPROPERTY() FTransform PaymentAnchor=FTransform::Identity;
+    UPROPERTY() bool bHasPaymentAnchor=false;
     int32 VisualCount() const { return VisibleGoldCoins+(VoucherCredits>0 ? 1 : 0); }
 };
 

@@ -26,6 +26,8 @@ private:
     UFUNCTION() void OnRep_Register();
     void UpdatePresentation();
     FVector CounterPosition(int32 Index) const;
+    FVector FloatingPosition(int32 Index,double Time) const;
+    bool HasFloatingMotion() const;
     FVector DepositPosition(int32 Index,double Time) const;
     UPROPERTY(VisibleAnywhere) TObjectPtr<UBoxComponent> HitBox;
     UPROPERTY(VisibleAnywhere) TObjectPtr<UInstancedStaticMeshComponent> GoldCoins;

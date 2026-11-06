@@ -72,6 +72,7 @@ private:
     friend class UBotanicusCashRegisterValidation;
     void InitializeCheckoutComponents();
     void BeginCheckout();
+    void UpdatePaymentAnchor(ABotanicusVisitorCharacter* Customer);
     void TickCheckout(float DeltaSeconds);
     void NotifyCheckoutChanged();
     UFUNCTION() void OnRep_Checkout();

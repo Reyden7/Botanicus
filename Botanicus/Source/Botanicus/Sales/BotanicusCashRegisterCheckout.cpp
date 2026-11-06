@@ -10,6 +10,7 @@
 #include "Audio/BotanicusAudioWorldSubsystem.h"
 #include "Visuals/BotanicusJuiceWorldSubsystem.h"
 #include "Components/BoxComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -36,6 +37,12 @@ void ABotanicusCashRegisterActor::BeginCheckout()
 {
     if(ActorHasTag(TEXT("BotanicusPlacementPreview")) || ActorHasTag(TEXT("BotanicusEquippedPreview")) || !GetIsReplicated()) return;
     const auto* S=GetDefault<UBotanicusCheckoutSettings>();
+    const FTransform VisualPose(S->RegisterVisualRotation,S->RegisterVisualOffset,FVector(FMath::Clamp(S->RegisterVisualScale,.01f,2.f)));
+    ScannerDock->SetRelativeLocationAndRotation(S->ScannerDockOffset,S->ScannerDockRotation);
+    DrawerClosedTarget->SetRelativeLocation(VisualPose.GetLocation());
+    DrawerOpenTarget->SetRelativeLocation(VisualPose.TransformPosition(S->DrawerOpenOffset));
+    DrawerVisualRoot->SetRelativeTransform(VisualPose);
+    DrawerTarget->SetRelativeLocation(S->DrawerInteriorTarget);
     if(HasAuthority())
     {
         if(!RegisterId.IsValid()) RegisterId=FGuid::NewGuid();
@@ -48,9 +55,13 @@ void ABotanicusCashRegisterActor::BeginCheckout()
     }
     if(GetNetMode()!=NM_DedicatedServer)
     {
-        auto* Cube=LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Cube.Cube"));DrawerMesh->SetStaticMesh(Cube);DrawerLip->SetStaticMesh(Cube);ScannerDockMesh->SetStaticMesh(Cube);
+        auto* Body=S->RegisterBodyMesh.LoadSynchronous();auto* Tray=S->RegisterDrawerMesh.LoadSynchronous();
+        RegisterVisual->SetStaticMesh(Body);RegisterVisual->SetRelativeTransform(VisualPose);RegisterVisual->EmptyOverrideMaterials();
+        DrawerMesh->SetStaticMesh(Tray);DrawerMesh->SetRelativeTransform(FTransform::Identity);DrawerMesh->EmptyOverrideMaterials();
+        ScreenVisual->SetVisibility(false);DrawerLip->SetVisibility(false);
+        auto* Cube=LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Cube.Cube"));ScannerDockMesh->SetStaticMesh(Cube);
         if(auto* Base=S->BodyMaterial.LoadSynchronous())
-        {auto* MID=UMaterialInstanceDynamic::Create(Base,this);MID->SetVectorParameterValue(TEXT("Color"),FLinearColor(.06f,.17f,.14f));DrawerMesh->SetMaterial(0,MID);DrawerLip->SetMaterial(0,MID);ScannerDockMesh->SetMaterial(0,MID);}
+        {auto* MID=UMaterialInstanceDynamic::Create(Base,this);MID->SetVectorParameterValue(TEXT("Color"),FLinearColor(.06f,.17f,.14f));ScannerDockMesh->SetMaterial(0,MID);}
     }
     OnRep_Checkout();
 }
@@ -91,7 +102,7 @@ bool ABotanicusCashRegisterActor::TryScanCustomer(ABotanicusPlayerController* PC
     Candidate.CoinIntervalSeconds=FMath::Min(FMath::Clamp(S->CoinInterval,.03f,.2f),FMath::Max(.001f,(FMath::Clamp(S->MaximumCollectionSeconds,1.f,5.f)-Candidate.CoinFlightSeconds)/FMath::Max(1,Candidate.VisualCount()-1)));
     Candidate.CollectionSeconds=Candidate.CoinFlightSeconds+FMath::Max(0,Candidate.VisualCount()-1)*Candidate.CoinIntervalSeconds;
     Candidate.ScanOrigin=DockScanner->GetMuzzleLocation();Candidate.ScanTarget=Customer->GetCheckoutPlantLocation();Candidate.CustomerHand=Customer->GetCheckoutPlantLocation();
-    Receipt=Candidate;OpeningCustomer=Customer;Customer->RecordManualCheckoutOutcome();++AcceptedScans;NotifyCheckoutChanged();
+    Receipt=Candidate;UpdatePaymentAnchor(Customer);OpeningCustomer=Customer;Customer->RecordManualCheckoutOutcome();++AcceptedScans;NotifyCheckoutChanged();
     UBotanicusAudioWorldSubsystem::Emit(this,TEXT("ScannerBeep"),Receipt.ScanOrigin);UBotanicusAudioWorldSubsystem::Emit(this,TEXT("RegisterOpen"),GetDrawerDepositLocation());return true;
 }
 bool ABotanicusCashRegisterActor::TryCollectPayment(ABotanicusPlayerController* PC,const FGuid& ExpectedId)
@@ -112,7 +123,7 @@ void ABotanicusCashRegisterActor::TickCheckout(float DeltaSeconds)
         if(Receipt.Phase==EBotanicusCheckoutPhase::Opening && Now-Receipt.PhaseStartedAt>=Receipt.OpenSeconds)
         {
             Receipt.Phase=EBotanicusCheckoutPhase::AwaitingCollection;Receipt.PhaseStartedAt=Now;Receipt.OpenedAt=Now;
-            if(auto* Customer=OpeningCustomer.Get()) Customer->BeginDeparture(true);OpeningCustomer.Reset();NotifyCheckoutChanged();
+            UpdatePaymentAnchor(OpeningCustomer.Get());if(auto* Customer=OpeningCustomer.Get()) Customer->BeginDeparture(true);OpeningCustomer.Reset();NotifyCheckoutChanged();
         }
         else if(Receipt.Phase==EBotanicusCheckoutPhase::Collecting && Now-Receipt.CollectedAt>=Receipt.CollectionSeconds+Receipt.ClosePauseSeconds)
         {
@@ -146,10 +157,28 @@ void ABotanicusCashRegisterActor::RestoreCheckout(const FBotanicusSavedCashRegis
     if(Receipt.bCredited || Receipt.Phase==EBotanicusCheckoutPhase::Collecting || Receipt.Phase==EBotanicusCheckoutPhase::Closing) {Receipt.bCredited=true;Receipt.Phase=EBotanicusCheckoutPhase::Idle;}
     else if(Receipt.TransactionId.IsValid() && Receipt.Amount>0 && Receipt.Phase!=EBotanicusCheckoutPhase::Idle) {Receipt.Phase=EBotanicusCheckoutPhase::AwaitingCollection;Receipt.OpenedAt=CheckoutServerTime()-Receipt.DepositSeconds-.05;}
     else Receipt=FBotanicusCheckoutReceipt();
+    if(Receipt.TransactionId.IsValid() && !Receipt.bHasPaymentAnchor) UpdatePaymentAnchor(nullptr);
     LastBeamTransaction=Receipt.TransactionId;ForceNetUpdate();OnRep_Checkout();
 }
 bool ABotanicusCashRegisterActor::IsScannerDockHit(const UPrimitiveComponent* Component) const {return Component==ScannerDockHit;}
 void ABotanicusCashRegisterActor::EndPlay(const EEndPlayReason::Type Reason)
 {
     if(HasAuthority()) {if(DockScanner) DockScanner->Destroy();if(PaymentCoins) PaymentCoins->Destroy();}Super::EndPlay(Reason);
+}
+
+void ABotanicusCashRegisterActor::UpdatePaymentAnchor(ABotanicusVisitorCharacter* Customer)
+{
+    if(!HasAuthority()) return;
+    FVector Floor=Receipt.CustomerHand;
+    if(IsValid(Customer)) Floor=Customer->GetActorLocation()-FVector(0,0,Customer->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+    else if(Receipt.bHasPaymentAnchor) return;
+    else
+    {
+        // Legacy receipts persisted the carried plant point, but no customer root.
+        FHitResult Ground;FCollisionQueryParams Query(SCENE_QUERY_STAT(CheckoutLegacyFloor),false,this);
+        if(GetWorld()->LineTraceSingleByObjectType(Ground,Floor+FVector(0,0,100),Floor-FVector(0,0,500),FCollisionObjectQueryParams(ECC_WorldStatic),Query)) Floor.Z=Ground.ImpactPoint.Z;
+        else Floor.Z-=90.f;
+    }
+    Floor.Z+=FMath::Clamp(GetDefault<UBotanicusCheckoutSettings>()->CoinFloatHeight,30.f,160.f);
+    Receipt.PaymentAnchor=FTransform(GetActorQuat(),Floor);Receipt.bHasPaymentAnchor=true;
 }

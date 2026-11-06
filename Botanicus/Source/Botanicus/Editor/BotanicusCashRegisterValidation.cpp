@@ -93,7 +93,7 @@ bool UBotanicusCashRegisterValidation::Aim(UObject* Context,FName Target)
     if(Target==TEXT("Illegal")) {bool Found=false;for(TActorIterator<ABotanicusIllegalCustomerCharacter> It(W);It;++It) if(It->ActorHasTag(TEXT("CashIllegalRegression"))) {Point=It->GetActorLocation()+FVector(0,0,30);Found=true;break;}if(!Found) return false;}
     else if(Target==TEXT("Scanner")) {if(!Cash->GetDockScanner()) return false;Point=Cash->GetDockScanner()->GetActorLocation()+FVector(0,0,5);}
     else if(Target==TEXT("Dock")) Point=Cash->ScannerDock->GetComponentLocation();
-    else if(Target==TEXT("Coins")) Point=Cash->CoinDropPoint->GetComponentLocation();
+    else if(Target==TEXT("Coins")) Point=Cash->GetPaymentCoins() ? Cash->GetPaymentCoins()->GetActorLocation() : Cash->CoinDropPoint->GetComponentLocation();
     else if(auto* Customer=CashValidationCustomer(W)) Point=Target==TEXT("Wrong") ? Customer->GetActorLocation()-FVector(0,0,30) : Customer->GetCheckoutPlantLocation();
     else return false;
     FVector Eye;FRotator View;PC->GetPlayerViewPoint(Eye,View);PC->SetControlRotation((Point-Eye).Rotation());return true;
