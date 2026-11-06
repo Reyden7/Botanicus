@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Delivery/BotanicusPlaceableItemActor.h"
+#include "Visuals/BotanicusJuiceWorldSubsystem.h"
 
 #include "Catalog/BotanicusItemCatalogSubsystem.h"
 #include "Components/MeshComponent.h"
@@ -167,7 +168,15 @@ void ABotanicusPlaceableItemActor::ConfigureAsLocalPreview(
 	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	const bool bIsPlacementSilhouette =
 		ActorHasTag(TEXT("BotanicusPlacementPreview"));
-	UMaterialInterface* PreviewMaterial = bIsPlacementSilhouette
+    auto* Juice=GetWorld() ? GetWorld()->GetSubsystem<UBotanicusJuiceWorldSubsystem>() : nullptr;
+    if(Juice && bIsPlacementSilhouette && !ActorHasTag(TEXT("BotanicusEquippedPreview")) && !ActorHasTag(TEXT("BotanicusJuiceRemotePreview")) && Juice->SetPlacementHologram(this,bIsValid))
+    {
+        TArray<UMeshComponent*> Meshes;GatherPreviewMeshComponents(this,Meshes);
+        for(auto* Part:Meshes) if(Part) {Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);Part->SetRenderCustomDepth(false);}
+        return;
+    }
+    if(Juice) Juice->ClearPlacementHologram(this);
+    UMaterialInterface* PreviewMaterial = bIsPlacementSilhouette
 		? (bIsValid ? ValidPlacementMaterial : InvalidPlacementMaterial)
 		: nullptr;
 	if (PreviewMaterial)
@@ -195,6 +204,7 @@ void ABotanicusPlaceableItemActor::ConfigureAsLocalPreview(
 
 void ABotanicusPlaceableItemActor::ConfigureAsLocalInspection()
 {
+    if(GetWorld()) if(auto* Juice=GetWorld()->GetSubsystem<UBotanicusJuiceWorldSubsystem>()) Juice->ClearPlacementHologram(this);
 	SetReplicates(false);
 	SetActorEnableCollision(false);
 	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);

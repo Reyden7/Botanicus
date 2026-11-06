@@ -5,6 +5,7 @@
 #include "Editor/BotanicusEquipmentValidation.h"
 #endif
 #include "Audio/BotanicusAudioWorldSubsystem.h"
+#include "Visuals/BotanicusJuiceWorldSubsystem.h"
 #include "BotanicusCharacter.h"
 #include "QuickBar/BotanicusQuickBarComponent.h"
 #include "ItemDataAsset.h"
@@ -10067,7 +10068,7 @@ void ABotanicusPlayerController::
 	if (bIsValid)
 	{
 		Equipment->ConfirmPlacement();
-		UBotanicusAudioWorldSubsystem::Emit(this, TEXT("EquipmentPlace"), Equipment->GetActorLocation());
+		UBotanicusJuiceWorldSubsystem::PlacementSucceeded(Equipment,GetPawn());
 		if (ABotanicusGameMode* GameMode =
 				GetWorld()->GetAuthGameMode<
 					ABotanicusGameMode>())
@@ -10462,7 +10463,7 @@ void ABotanicusPlayerController::
 
 	if (!bMountedOnSalesDisplay && IsValid(PlacedItem))
 	{
-		UBotanicusAudioWorldSubsystem::Emit(this, UBotanicusAudioWorldSubsystem::PlacementEvent(PlacedItem), PlacementTransform.GetLocation());
+		UBotanicusJuiceWorldSubsystem::PlacementSucceeded(PlacedItem,GetPawn());
 		PlacedItem->SetOwner(nullptr);
 		PlacedItem->SetNetDormancy(DORM_Awake);
 		PlacedItem->FlushNetDormancy();
@@ -10942,7 +10943,6 @@ void ABotanicusPlayerController::
 		return;
 	}
 
-	UBotanicusAudioWorldSubsystem::Emit(this, UBotanicusAudioWorldSubsystem::PlacementEvent(WorldItem), PlacementTransform.GetLocation());
 	WorldItem->SetActorTransform(
 		PlacementTransform,
 		false,
@@ -10951,6 +10951,7 @@ void ABotanicusPlayerController::
 	WorldItem->SetNetDormancy(DORM_Awake);
 	WorldItem->FlushNetDormancy();
 	WorldItem->ForceNetUpdate();
+	UBotanicusJuiceWorldSubsystem::PlacementSucceeded(WorldItem,GetPawn());
 	ServerMovedPlaceableItem = nullptr;
 	if (ABotanicusGameMode* GameMode =
 			GetWorld()->GetAuthGameMode<ABotanicusGameMode>())

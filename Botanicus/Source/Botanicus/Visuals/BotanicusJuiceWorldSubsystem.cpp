@@ -1,5 +1,6 @@
 #include "Visuals/BotanicusJuiceWorldSubsystem.h"
 #include "Visuals/BotanicusJuiceSettings.h"
+#include "Visuals/BotanicusPlacementJuiceSettings.h"
 #include "Visuals/BotanicusJuiceRelay.h"
 #include "Visuals/BotanicusPotSoilVisualActor.h"
 #include "Audio/BotanicusAudioRelay.h"
@@ -22,6 +23,8 @@
 #include "Audio/BotanicusAudioWorldSubsystem.h"
 #include "Materials/MaterialParameterCollectionInstance.h"
 #include "Scalability.h"
+#include "Curves/CurveFloat.h"
+#include "Materials/MaterialInterface.h"
 #include "Visuals/BotanicusNoctifloreSettings.h"
 
 bool UBotanicusJuiceWorldSubsystem::DoesSupportWorldType(EWorldType::Type Type) const
@@ -33,6 +36,9 @@ void UBotanicusJuiceWorldSubsystem::OnWorldBeginPlay(UWorld& World)
 	Super::OnWorldBeginPlay(World);
 	if(World.GetNetMode()!=NM_Client) GetRelay();
 	if(World.GetNetMode()==NM_DedicatedServer) return;
+	const auto* Placement=GetDefault<UBotanicusPlacementJuiceSettings>();
+	PlacementHologramMaterial=Placement->HologramMaterial.LoadSynchronous();
+	PlacementFlightCurve=Placement->FlightCurve.LoadSynchronous();PlacementGrowthCurve=Placement->GrowthCurve.LoadSynchronous();PlacementBounceCurve=Placement->BounceCurve.LoadSynchronous();
 	const auto* Settings=GetDefault<UBotanicusJuiceSettings>();
 	MotionCatalog=Settings->MotionCatalog.LoadSynchronous();
 	NoctifloreCatalog=GetDefault<UBotanicusNoctifloreSettings>()->GlowCatalog.LoadSynchronous();
@@ -111,7 +117,7 @@ void UBotanicusJuiceWorldSubsystem::SetSoilWetness(UObject* Owner,UMaterialInsta
 }
 bool UBotanicusJuiceWorldSubsystem::IsTickable() const
 {
-	return Super::IsTickable() && GetWorld() && GetWorld()->GetNetMode()!=NM_DedicatedServer && (!Water.IsEmpty() || !Bursts.IsEmpty() || !WetnessTransitions.IsEmpty());
+	return Super::IsTickable() && GetWorld() && GetWorld()->GetNetMode()!=NM_DedicatedServer && (!Water.IsEmpty() || !Bursts.IsEmpty() || !WetnessTransitions.IsEmpty() || !PlacementHolograms.IsEmpty() || !PlacementAnimations.IsEmpty() || !PendingPlacements.IsEmpty());
 }
 void UBotanicusJuiceWorldSubsystem::ReconcileWater()
 {
@@ -199,6 +205,7 @@ void UBotanicusJuiceWorldSubsystem::UpdateWater(float DeltaTime)
 }
 void UBotanicusJuiceWorldSubsystem::Tick(float DeltaTime)
 {
+	UpdatePlacementJuice(DeltaTime);
 	UpdateWater(DeltaTime);const double Now=GetWorld()->GetTimeSeconds();
 	for(int32 I=Bursts.Num()-1;I>=0;--I) if(!Bursts[I].Surface.IsValid() || !Bursts[I].Source.IsValid() || Now>=Bursts[I].ExpireAt) {if(Bursts[I].Component) {Bursts[I].Component->DeactivateImmediate();Bursts[I].Component->DestroyComponent();}Bursts.RemoveAtSwap(I);}
 	for(auto It=WetnessTransitions.CreateIterator();It;++It)
@@ -225,6 +232,7 @@ int32 UBotanicusJuiceWorldSubsystem::GetParticleCount() const
 }
 void UBotanicusJuiceWorldSubsystem::Deinitialize()
 {
+	ClearPlacementJuice();
 	GetWorld()->GetTimerManager().ClearTimer(ReconcileTimer);
 	for(auto& Pair:Water) {if(Pair.Value.Drops) {Pair.Value.Drops->DeactivateImmediate();Pair.Value.Drops->DestroyComponent();}if(IsValid(Pair.Value.RemoteCan)) Pair.Value.RemoteCan->Destroy();}
 	for(auto& Burst:Bursts) if(Burst.Component) {Burst.Component->DeactivateImmediate();Burst.Component->DestroyComponent();}
@@ -288,12 +296,26 @@ void UBotanicusJuiceWorldSubsystem::BindFoliage(UStaticMeshComponent* Foliage,bo
 	if(bNoctiflore && bAlive) Juice->NoctifloreCandidates.FindOrAdd(Foliage);
 	else Juice->NoctifloreCandidates.Remove(Foliage);
 	const auto* Catalog=bNoctiflore && Juice->NoctifloreCatalog ? Juice->NoctifloreCatalog.Get() : Juice->MotionCatalog.Get();
+    // Keep the live 3B/3C MID behind the hologram, instead of creating it again
+    // whenever cultivation refreshes an item currently being previewed.
+    FBotanicusHologramMesh* HologramCache=nullptr;
+    for(auto& Pair:Juice->PlacementHolograms)
+    {
+        HologramCache=Pair.Value.Meshes.FindByPredicate([Foliage](const auto& R){return R.Mesh==Foliage;});
+        if(HologramCache) break;
+    }
+
 	for(int32 Index=0;Index<Foliage->GetNumMaterials();++Index)
 	{
 		UMaterialInterface* Original=Foliage->GetStaticMesh()->GetMaterial(Index);
 		const auto* Variant=Catalog->Variants.Find(Original);if(!Variant || !*Variant) continue;
-		auto* MID=Cast<UMaterialInstanceDynamic>(Foliage->GetMaterial(Index));
-		if(!MID || MID->Parent!=*Variant) {MID=UMaterialInstanceDynamic::Create(*Variant,Foliage);Foliage->SetMaterial(Index,MID);}
+		const bool bBehindHologram=HologramCache && HologramCache->Materials.IsValidIndex(Index);
+        auto* MID=Cast<UMaterialInstanceDynamic>(bBehindHologram ? HologramCache->Materials[Index].Get() : Foliage->GetMaterial(Index));
+        if(!MID || MID->Parent!=*Variant)
+        {
+            MID=UMaterialInstanceDynamic::Create(*Variant,Foliage);
+            if(bBehindHologram) HologramCache->Materials[Index]=MID;else Foliage->SetMaterial(Index,MID);
+        }
 		if(bNoctiflore) MID->SetScalarParameterValue(TEXT("NoctGrowthStrength"),FMath::Lerp(.65f,1.f,FMath::Clamp(Growth,0.f,1.f)));
 		const float Alive=bAlive ? 1.f : 0.f;
 		if(MID->K2_GetScalarParameterValue(TEXT("BotanicusMotionAlive"))!=Alive) MID->SetScalarParameterValue(TEXT("BotanicusMotionAlive"),Alive);

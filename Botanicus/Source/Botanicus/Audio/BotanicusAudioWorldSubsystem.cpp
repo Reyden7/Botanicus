@@ -93,6 +93,10 @@ void UBotanicusAudioWorldSubsystem::ReceiveFeedback(uint32 Sequence,FName Id,con
 	if (Sequence==0 || static_cast<int32>(Sequence-LastSequence)<=0) return;
 	LastSequence=Sequence; PlayFeedback(Id,Position,true);
 }
+void UBotanicusAudioWorldSubsystem::PlayPlacementContact(FName Id,const FVector& Position)
+{
+    if(Id==TEXT("PotPlace") || Id==TEXT("EquipmentPlace")) PlayFeedback(Id,Position,true);
+}
 void UBotanicusAudioWorldSubsystem::PlayPrivate(FName Id) {PlayFeedback(Id,FVector::ZeroVector,false);}
 void UBotanicusAudioWorldSubsystem::PlayFeedback(FName Id,const FVector& Position,bool bSpatial)
 {

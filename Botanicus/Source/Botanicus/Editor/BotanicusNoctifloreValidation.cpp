@@ -20,7 +20,7 @@
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
 namespace {
-UWorld* TestWorld(UObject* Context)
+UWorld* NoctifloreValidationWorld(UObject* Context)
 {
     UWorld* W=GEngine ? GEngine->GetWorldFromContextObject(Context,EGetWorldErrorMode::ReturnNull) : nullptr;
     FString Saved=FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir());FPaths::NormalizeDirectoryName(Saved);
@@ -31,7 +31,7 @@ UWorld* TestWorld(UObject* Context)
 bool UBotanicusNoctifloreValidation::Step(UObject* Context,FName Action)
 {
 #if WITH_EDITOR
-    UWorld* W=TestWorld(Context);if(!W) return false;
+    UWorld* W=NoctifloreValidationWorld(Context);if(!W) return false;
     auto* Settings=GetMutableDefault<UBotanicusNoctifloreSettings>();
     if(Action==TEXT("Off") || Action==TEXT("On")) {Settings->bEnabled=Action==TEXT("On");return true;}
     if(Action==TEXT("StressBudget")) {Settings->SporeInterval=.5f;Settings->SporeLifetime=5;Settings->SporeCount=6;return true;}
@@ -79,7 +79,7 @@ bool UBotanicusNoctifloreValidation::Step(UObject* Context,FName Action)
 FString UBotanicusNoctifloreValidation::Snapshot(UObject* Context)
 {
 #if WITH_EDITOR
-    UWorld* W=TestWorld(Context);if(!W) return TEXT("{}");
+    UWorld* W=NoctifloreValidationWorld(Context);if(!W) return TEXT("{}");
     auto Root=MakeShared<FJsonObject>();
     if(auto* J=W->GetSubsystem<UBotanicusJuiceWorldSubsystem>())
     {

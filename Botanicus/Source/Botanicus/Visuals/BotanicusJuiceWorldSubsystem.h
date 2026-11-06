@@ -1,9 +1,13 @@
 #pragma once
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
+#include "Visuals/BotanicusPlacementJuiceTypes.h"
 #include "BotanicusJuiceWorldSubsystem.generated.h"
 class UBotanicusPlantMotionCatalog;
 class UStaticMeshComponent;
+class APawn;
+class UCurveFloat;
+class UMaterialInterface;
 class UNiagaraComponent;
 class UNiagaraSystem;
 class ABotanicusJuiceRelay;
@@ -15,6 +19,7 @@ USTRUCT()
 struct FBotanicusWaterJuice
 {
 	GENERATED_BODY()
+
 	UPROPERTY() TObjectPtr<UNiagaraComponent> Drops;
 	UPROPERTY() TObjectPtr<ABotanicusWateringCanActor> RemoteCan;
 	TWeakObjectPtr<AActor> LastHit;
@@ -53,6 +58,7 @@ struct FBotanicusWetnessJuice
 UCLASS()
 class BOTANICUS_API UBotanicusJuiceWorldSubsystem : public UTickableWorldSubsystem
 {
+    friend class UBotanicusPlacementValidation;
 	GENERATED_BODY()
 public:
 	virtual bool DoesSupportWorldType(EWorldType::Type Type) const override;
@@ -61,7 +67,21 @@ public:
 	virtual void Tick(float DeltaTime) override;
 	virtual TStatId GetStatId() const override {RETURN_QUICK_DECLARE_CYCLE_STAT(UBotanicusJuiceWorldSubsystem,STATGROUP_Tickables);}
 	virtual bool IsTickable() const override;
-	/** Called only by the authoritative simulation / successful inventory branch. */
+    /** Reuses the existing successful placement branches and cosmetic relay. */
+    static void PlacementSucceeded(AActor* Item,APawn* Placer);
+    static FVector PlacementHandPosition(APawn* Pawn,FName ExpectedItem);
+    void ReceivePlacement(uint32 Sequence,AActor* Item,APawn* Placer,FName ItemKey,const FTransform& Final,const FVector& Start,FName AudioId);
+    bool SetPlacementHologram(AActor* Preview,bool bValid);
+    void ClearPlacementHologram(AActor* Preview);
+    UFUNCTION(BlueprintPure,Category="Botanicus|Placement|Diagnostics") int32 GetPlacementAnimationCount() const {return PlacementAnimations.Num();}
+    UFUNCTION(BlueprintPure,Category="Botanicus|Placement|Diagnostics") int32 GetPlacementHologramCount() const {return PlacementHolograms.Num();}
+    UFUNCTION(BlueprintPure,Category="Botanicus|Placement|Diagnostics") int32 GetPlacementCopyCount() const;
+    UFUNCTION(BlueprintPure,Category="Botanicus|Placement|Diagnostics") int32 GetPlacementStartedCount() const {return PlacementsStarted;}
+    UFUNCTION(BlueprintPure,Category="Botanicus|Placement|Diagnostics") int32 GetPlacementFinishedCount() const {return PlacementsFinished;}
+    UFUNCTION(BlueprintPure,Category="Botanicus|Placement|Diagnostics") int32 GetPlacementCreatedComponents() const {return PlacementComponentsCreated;}
+    UFUNCTION(BlueprintPure,Category="Botanicus|Placement|Diagnostics") int32 GetPlacementDestroyedComponents() const {return PlacementComponentsDestroyed;}
+    UFUNCTION(BlueprintPure,Category="Botanicus|Placement|Diagnostics") FVector GetPlacementPhaseSample() const;
+    /** Called only by the authoritative simulation / successful inventory branch. */
 	static void Growth(AActor* Pot,float Before,float After,UStaticMeshComponent* Foliage);
 	static void HarvestSucceeded(AActor* Pot,UStaticMeshComponent* Foliage);
 	static void BindFoliage(UStaticMeshComponent* Foliage,bool bAlive=true,bool bNoctiflore=false,float Growth=0.f);
@@ -84,6 +104,20 @@ public:
     UFUNCTION(BlueprintPure,Category="Botanicus|Noctiflore|Diagnostics") int32 GetSporeParticleCount() const;
     UFUNCTION(BlueprintPure,Category="Botanicus|Noctiflore|Diagnostics") int32 GetNoctifloreCandidateCount() const {return NoctifloreCandidates.Num();}
 private:
+    void UpdatePlacementJuice(float DeltaTime);
+    bool BeginPlacementAnimation(const FBotanicusPendingPlacement& Pending);
+    void FinishPlacementAnimation(int32 Index,bool bContact);
+    void ClearPlacementJuice();
+    void RefreshPlacementHologram(AActor* Preview,FBotanicusPlacementHologram& Hologram,float DeltaTime);
+    UPROPERTY(Transient) TObjectPtr<UMaterialInterface> PlacementHologramMaterial;
+    UPROPERTY(Transient) TMap<TWeakObjectPtr<AActor>,FBotanicusPlacementHologram> PlacementHolograms;
+    UPROPERTY(Transient) TArray<FBotanicusPlacementAnimation> PlacementAnimations;
+    UPROPERTY(Transient) TObjectPtr<UCurveFloat> PlacementFlightCurve;
+    UPROPERTY(Transient) TObjectPtr<UCurveFloat> PlacementGrowthCurve;
+    UPROPERTY(Transient) TObjectPtr<UCurveFloat> PlacementBounceCurve;
+    TArray<FBotanicusPendingPlacement> PendingPlacements;
+    uint32 LastPlacementSequence=0;
+    int32 PlacementsStarted=0,PlacementsFinished=0,PlacementComponentsCreated=0,PlacementComponentsDestroyed=0;
     void UpdateNoctiflores();
     void ClearNoctifloreSpores();
     UPROPERTY(Transient) TObjectPtr<UBotanicusPlantMotionCatalog> NoctifloreCatalog;

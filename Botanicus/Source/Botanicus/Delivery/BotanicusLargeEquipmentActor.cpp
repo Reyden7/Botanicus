@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Delivery/BotanicusLargeEquipmentActor.h"
+#include "Visuals/BotanicusJuiceWorldSubsystem.h"
 
 #include "BotanicusCharacter.h"
 #include "Catalog/BotanicusItemCatalogSubsystem.h"
@@ -376,15 +377,18 @@ void ABotanicusLargeEquipmentActor::ApplyCarryState()
 	}
 
 	UMaterialInterface* PreviewMaterial = nullptr;
+    bool bNewHologram=false;
 	if (bPlacementMode)
 	{
+        if(auto* Juice=GetWorld()->GetSubsystem<UBotanicusJuiceWorldSubsystem>()) bNewHologram=Juice->SetPlacementHologram(this,bPlacementValid);
 		PreviewMaterial = bPlacementValid
 			? ValidPlacementMaterial
 			: InvalidPlacementMaterial;
-		ApplyPlacementMaterial(PreviewMaterial);
+		if(!bNewHologram) ApplyPlacementMaterial(PreviewMaterial);
 	}
 	else
 	{
+        if(auto* Juice=GetWorld()->GetSubsystem<UBotanicusJuiceWorldSubsystem>()) Juice->ClearPlacementHologram(this);
 		RestorePlacementMaterials();
 	}
 	TInlineComponentArray<UMeshComponent*> MeshComponents(this);
@@ -393,7 +397,7 @@ void ABotanicusLargeEquipmentActor::ApplyCarryState()
 		if (MeshComponent)
 		{
 			MeshComponent->SetOverlayMaterial(nullptr);
-			MeshComponent->SetRenderCustomDepth(bPlacementMode);
+			MeshComponent->SetRenderCustomDepth(bPlacementMode && !bNewHologram);
 			MeshComponent->SetCustomDepthStencilValue(
 				bPlacementValid ? 1 : 2);
 		}

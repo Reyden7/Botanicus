@@ -33,6 +33,8 @@ public:
 	static FName GrowthEvent(float Before,float After);
 	void ReceiveFeedback(uint32 Sequence,FName Id,const FVector& Position);
 	void PlayPrivate(FName Id);
+	/** Called by an already deduplicated cosmetic event, without sending another RPC. */
+	void PlayPlacementContact(FName Id,const FVector& Position);
 	void RefreshWaterLoops(ABotanicusAudioRelay* InRelay);
 	UFUNCTION(BlueprintPure, Category="Botanicus|Audio|Diagnostics") int32 GetEventPlayCount(FName Id) const;
 	UFUNCTION(BlueprintPure, Category="Botanicus|Audio|Diagnostics") int32 GetWaterStartCount() const {return WaterStarts;}

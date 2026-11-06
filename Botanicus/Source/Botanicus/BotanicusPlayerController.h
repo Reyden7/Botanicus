@@ -92,6 +92,9 @@ class BOTANICUS_API ABotanicusPlayerController : public APlayerController
 public:
 	friend class UBotanicusJuiceValidation;
 	friend class UBotanicusEquipmentValidation;
+	friend class UBotanicusPlacementValidation;
+	FVector GetPlacementCosmeticHandPosition(FName ExpectedItem) const;
+    bool UsesPlacementCosmeticActorPivot(const AActor* Item) const;
 
 	/** Private transaction confirmation; world events use the shared audio relay. */
 	UFUNCTION(Client, Reliable)
