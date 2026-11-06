@@ -36,7 +36,7 @@ class BOTANICUS_API ABotanicusVisitorCharacter : public ACharacter
 	GENERATED_BODY()
 
 public:
-	ABotanicusVisitorCharacter();
+	ABotanicusVisitorCharacter(const FObjectInitializer& ObjectInitializer=FObjectInitializer::Get());
 
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
@@ -118,6 +118,8 @@ public:
 
 private:
     friend class UBotanicusCashRegisterValidation;
+    friend class UBotanicusVisitorMeshComponent;
+    UPROPERTY(Replicated) FVector_NetQuantize10 PresentationFocus=FVector::ZeroVector;
     void RefreshCheckoutScanTarget();
     UPROPERTY(VisibleAnywhere) TObjectPtr<UBoxComponent> CheckoutScanTarget;
     UPROPERTY(Replicated) FGuid CheckoutCustomerId;

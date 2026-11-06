@@ -7,6 +7,8 @@ class UBotanicusCashRegisterValidation : public UBlueprintFunctionLibrary
 {
     GENERATED_BODY()
 public:
+    UFUNCTION(BlueprintCallable,meta=(WorldContext="Context",DevelopmentOnly)) static bool PrepareVisitorVisit(UObject* Context);
+    UFUNCTION(BlueprintPure,meta=(WorldContext="Context")) static FString VisitorSnapshot(UObject* Context);
     UFUNCTION(BlueprintCallable,meta=(WorldContext="Context",DevelopmentOnly)) static bool Prepare(UObject* Context,int32 Price);
     UFUNCTION(BlueprintCallable,meta=(WorldContext="Context",DevelopmentOnly)) static bool Aim(UObject* Context,FName Target);
     UFUNCTION(BlueprintCallable,meta=(WorldContext="Context",DevelopmentOnly)) static bool Step(UObject* Context,FName Action);

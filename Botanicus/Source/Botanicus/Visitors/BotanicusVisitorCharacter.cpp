@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Visitors/BotanicusVisitorCharacter.h"
+#include "Visitors/BotanicusVisitorMeshComponent.h"
 #include "Components/BoxComponent.h"
 #include "Sales/Checkout/BotanicusCheckoutTypes.h"
 
@@ -80,7 +81,8 @@ FLinearColor VisitorPlantVisualColor(FName ColorTag)
 }
 }
 
-ABotanicusVisitorCharacter::ABotanicusVisitorCharacter()
+ABotanicusVisitorCharacter::ABotanicusVisitorCharacter(const FObjectInitializer& ObjectInitializer)
+    : Super(ObjectInitializer.SetDefaultSubobjectClass<UBotanicusVisitorMeshComponent>(ACharacter::MeshComponentName))
 {
 	PrimaryActorTick.bCanEverTick = true;
 	bReplicates = true;
@@ -390,6 +392,7 @@ void ABotanicusVisitorCharacter::GetLifetimeReplicatedProps(
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME(ABotanicusVisitorCharacter,CheckoutCustomerId);
+    DOREPLIFETIME(ABotanicusVisitorCharacter,PresentationFocus);
 	DOREPLIFETIME(
 		ABotanicusVisitorCharacter,
 		VisitorState);
@@ -767,6 +770,7 @@ bool ABotanicusVisitorCharacter::TryFindAvailableDisplay()
 			RouteResumeLocation = GetActorLocation();
 			bReturningToRoute = true;
 			TargetDisplay = Candidate;
+            PresentationFocus=Candidate->GetActorLocation()+FVector(0,0,105);
 			VisitorState = EBotanicusVisitorState::Approaching;
 			RefreshStatusText();
 			ForceNetUpdate();

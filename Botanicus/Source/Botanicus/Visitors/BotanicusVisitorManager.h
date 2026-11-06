@@ -18,6 +18,7 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 
 private:
+    friend class UBotanicusCashRegisterValidation;
 	bool BuildVisitorCircuit(
 		TArray<FVector>& OutCircuit,
 		int32& OutCheckoutWaypointIndex,

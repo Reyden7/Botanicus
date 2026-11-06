@@ -11,6 +11,10 @@
 #include "Sales/Checkout/BotanicusPaymentCoins.h"
 #include "Sales/Checkout/BotanicusCheckoutSettings.h"
 #include "Visitors/BotanicusVisitorCharacter.h"
+#include "Visitors/BotanicusVisitorManager.h"
+#include "Visitors/BotanicusVisitorZoneActor.h"
+#include "Visitors/BotanicusVisitorMeshComponent.h"
+#include "Animation/AnimInstance.h"
 #include "Catalog/BotanicusItemCatalogSubsystem.h"
 #include "Audio/BotanicusAudioWorldSubsystem.h"
 #include "Visuals/BotanicusJuiceWorldSubsystem.h"
@@ -182,5 +186,61 @@ bool UBotanicusCashRegisterValidation::Capture(UObject* Context,const FString& P
     return FFileHelper::SaveArrayToFile(Bytes,*Full);
 #else
     return false;
+#endif
+}
+
+bool UBotanicusCashRegisterValidation::PrepareVisitorVisit(UObject* Context)
+{
+#if WITH_EDITOR
+    UWorld* W=CashValidationWorld(Context);if(!W || W->GetNetMode()==NM_Client) return false;
+    if(!bCashValidationExecuting) {TWeakObjectPtr<UWorld> Weak=W;W->GetTimerManager().SetTimerForNextTick([Weak](){if(Weak.IsValid()){TGuardValue<bool> Guard(bCashValidationExecuting,true);PrepareVisitorVisit(Weak.Get());}});return true;}
+    ABotanicusVisitorManager* Manager=nullptr;for(TActorIterator<ABotanicusVisitorManager> It(W);It;++It) {Manager=*It;break;}
+    auto* GS=W->GetGameState<ABotanicusGameState>();auto* PC=Cast<ABotanicusPlayerController>(W->GetFirstPlayerController());
+    if(!Manager || !GS || !PC) return false;
+    GS->SetMainShopOpen(true);GS->SetActorTickEnabled(false);
+    Manager->SpawnRemaining=3600;Manager->WaitingVisitors.Reset();Manager->AdmissionRemaining=0;
+    for(TActorIterator<ABotanicusVisitorCharacter> It(W);It;++It) It->Destroy();
+    TArray<FVector> Circuit,Arrival,Direct;int32 Checkout=INDEX_NONE;
+    if(!Manager->BuildVisitorCircuit(Circuit,Checkout,Arrival,Direct)) return false;
+    ABotanicusVisitorZoneActor* Sales=nullptr;for(TActorIterator<ABotanicusVisitorZoneActor> It(W);It;++It) if(It->GetZoneType()==EBotanicusVisitorZoneType::SalesArea) Sales=*It;
+    ABotanicusSalesDisplayActor* Display=nullptr;
+    for(TActorIterator<ABotanicusSalesDisplayActor> It(W);It;++It) if(Sales && Sales->ContainsPoint2D(It->GetActorLocation()) && !It->ActorHasTag(TEXT("BotanicusPlacementPreview"))) {Display=*It;break;}
+    if(!Display) return false; // Require the existing shop layout, including a real display.
+    if(Display->IsEmpty())
+    {
+        auto* Catalog=W->GetGameInstance()->GetSubsystem<UBotanicusItemCatalogSubsystem>();const auto Definitions=Catalog->GetAllItems();
+        const auto* Choice=Definitions.FindByPredicate([](const auto& D){return D.bWholePlant && D.SalePrice>0;});
+        if(!Choice || !Display->TryMountSalePotState(TEXT("PottingSoil"),Choice->ItemKey,PC)) return false;
+    }
+    Manager->SpawnQueuedVisitor(Circuit,Checkout,Arrival,Direct);
+    if(Manager->WaitingVisitors.IsEmpty() || !Manager->WaitingVisitors.Last().IsValid()) return false;
+    auto* Visitor=Manager->WaitingVisitors.Last().Get();CashTestCustomer=Visitor->GetCheckoutCustomerId();CashTestPlant=Display->GetDisplayedPlantItemKey();
+    // Isolated fixture only: make this single shopper deterministic, without changing native prices or transactions.
+    Visitor->ShoppingBudget=10000;Visitor->MinimumAcceptableScore=-1000;Visitor->DesiredInspectionCount=1;
+    return true;
+#else
+    return false;
+#endif
+}
+
+FString UBotanicusCashRegisterValidation::VisitorSnapshot(UObject* Context)
+{
+#if WITH_EDITOR
+    UWorld* W=CashValidationWorld(Context);if(!W) return TEXT("{}");auto Root=MakeShared<FJsonObject>();
+    TArray<TSharedPtr<FJsonValue>> Zones;for(TActorIterator<ABotanicusVisitorZoneActor> It(W);It;++It) {auto Z=MakeShared<FJsonObject>();Z->SetNumberField(TEXT("type"),static_cast<int32>(It->GetZoneType()));Z->SetStringField(TEXT("location"),It->GetActorLocation().ToString());Zones.Add(MakeShared<FJsonValueObject>(Z));}Root->SetArrayField(TEXT("zones"),Zones);
+    for(TActorIterator<ABotanicusVisitorManager> It(W);It;++It) {TArray<FVector> Circuit,Arrival,Direct;int32 Checkout;Root->SetBoolField(TEXT("realCircuit"),It->BuildVisitorCircuit(Circuit,Checkout,Arrival,Direct));Root->SetNumberField(TEXT("checkoutIndex"),Checkout);TArray<TSharedPtr<FJsonValue>> Points;for(const FVector& P:Circuit) Points.Add(MakeShared<FJsonValueString>(P.ToString()));Root->SetArrayField(TEXT("circuit"),Points);Root->SetNumberField(TEXT("arrivalPoints"),Arrival.Num());break;}
+    TArray<TSharedPtr<FJsonValue>> Visitors;
+    for(TActorIterator<ABotanicusVisitorCharacter> It(W);It;++It)
+    {
+        auto C=MakeShared<FJsonObject>();C->SetStringField(TEXT("id"),It->GetCheckoutCustomerId().ToString());C->SetNumberField(TEXT("state"),static_cast<int32>(It->VisitorState));C->SetNumberField(TEXT("stage"),It->CheckoutStage);
+        C->SetStringField(TEXT("position"),It->GetActorLocation().ToString());C->SetNumberField(TEXT("speed"),It->GetVelocity().Size2D());C->SetNumberField(TEXT("routeIndex"),It->RouteWaypointIndex);C->SetNumberField(TEXT("routeSize"),It->RoutePoints.Num());C->SetNumberField(TEXT("stuck"),It->StuckDuration);
+        if(It->RoutePoints.Num()) C->SetNumberField(TEXT("distanceToExit"),FVector::Dist2D(It->GetActorLocation(),It->RoutePoints.Last()));
+        C->SetStringField(TEXT("focus"),FVector(It->PresentationFocus).ToString());C->SetBoolField(TEXT("carrying"),It->bCarryingPlant);
+        if(auto* Mesh=Cast<UBotanicusVisitorMeshComponent>(It->GetMesh())) {C->SetStringField(TEXT("gaze"),Mesh->GetAppliedGaze().ToString());C->SetStringField(TEXT("spinePose"),Mesh->GetSocketTransform(TEXT("spine_03"),RTS_Component).ToString());C->SetNumberField(TEXT("scanReactions"),Mesh->GetScanReactionCount());C->SetNumberField(TEXT("paymentReactions"),Mesh->GetPaymentReactionCount());C->SetStringField(TEXT("animation"),Mesh->GetAnimInstance() ? Mesh->GetAnimInstance()->GetClass()->GetName() : TEXT(""));}
+        Visitors.Add(MakeShared<FJsonValueObject>(C));
+    }
+    Root->SetArrayField(TEXT("visitors"),Visitors);FString Out;auto Writer=TJsonWriterFactory<>::Create(&Out);FJsonSerializer::Serialize(Root,Writer);return Out;
+#else
+    return TEXT("{}");
 #endif
 }
