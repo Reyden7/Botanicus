@@ -161,3 +161,38 @@ bool UBotanicusJuiceAssetTools::BuildSpriteSystems()
 	return false;
 #endif
 }
+
+bool UBotanicusJuiceAssetTools::BuildNoctifloreSpores(bool bResetPreviewDefaults)
+{
+#if WITH_EDITOR
+    const FString Path=TEXT("/Game/Botanicus/VFX/Noctiflore/NS_NoctifloreSpores");
+    auto* Existing=LoadObject<UNiagaraSystem>(nullptr,*(Path+TEXT(".NS_NoctifloreSpores")));
+    if(Existing && !bResetPreviewDefaults) return true;
+    auto* Original=LoadObject<UNiagaraSystem>(nullptr,TEXT("/Game/Botanicus/VFX/Juice/NS_BotanicusJuiceBurst.NS_BotanicusJuiceBurst"));
+    auto* Material=LoadObject<UMaterialInterface>(nullptr,TEXT("/Game/Botanicus/Materials/Juice/Noctiflore/M_NoctifloreSpore.M_NoctifloreSpore"));
+    if(!Original || !Material) return false;
+    auto* Package=CreatePackage(*Path);
+    auto* System=Existing ? Existing : DuplicateObject<UNiagaraSystem>(Original,Package,TEXT("NS_NoctifloreSpores"));
+    System->SetFlags(RF_Public|RF_Standalone);System->ClearFlags(RF_Transient);
+    for(auto& Handle:System->GetEmitterHandles()) if(auto* Data=Handle.GetInstance().GetEmitterData())
+        for(auto* Renderer:Data->GetRenderers()) if(auto* Sprite=Cast<UNiagaraSpriteRendererProperties>(Renderer)) Sprite->Material=Material;
+    // Match the calm in-game defaults when previewing this new asset in Niagara Editor.
+    // Existing artist settings are preserved unless reset was explicitly requested.
+    auto& Store=System->GetExposedParameters();
+    Store.SetParameterValue(3,FNiagaraVariable(FNiagaraTypeDefinition::GetIntDef(),TEXT("User.BurstCount")),true);
+    Store.SetParameterValue(3.2f,FNiagaraVariable(FNiagaraTypeDefinition::GetFloatDef(),TEXT("User.Lifetime")),true);
+    Store.SetParameterValue(1.f,FNiagaraVariable(FNiagaraTypeDefinition::GetFloatDef(),TEXT("User.Size")),true);
+    Store.SetParameterValue(12.f,FNiagaraVariable(FNiagaraTypeDefinition::GetFloatDef(),TEXT("User.Radius")),true);
+    Store.SetParameterValue(FLinearColor(.40f,.34f,.68f,.40f),FNiagaraVariable(FNiagaraTypeDefinition::GetColorDef(),TEXT("User.Tint")),true);
+    Store.SetParameterValue(FVector3f(0,0,4),FNiagaraVariable(FNiagaraTypeDefinition::GetVec3Def(),TEXT("User.Velocity")),true);
+    Store.SetParameterValue(FVector3f::ZeroVector,FNiagaraVariable(FNiagaraTypeDefinition::GetVec3Def(),TEXT("User.Gravity")),true);
+    System->SetFixedBounds(FBox(FVector(-150),FVector(150)));System->SetWarmupTime(0);
+    System->RequestCompile(true);System->WaitForCompilationComplete(false,false);
+    if(!System->IsReadyToRun()) return false;
+    if(!Existing) FAssetRegistryModule::AssetCreated(System);Package->MarkPackageDirty();
+    FSavePackageArgs Args;Args.TopLevelFlags=RF_Public|RF_Standalone;
+    return UPackage::SavePackage(Package,System,*FPackageName::LongPackageNameToFilename(Path,FPackageName::GetAssetPackageExtension()),Args);
+#else
+    return false;
+#endif
+}

@@ -1,6 +1,7 @@
 #include "Environment/BotanicusAmbienceDirector.h"
 
 #include "Botanicus.h"
+#include "Visuals/BotanicusNoctifloreSettings.h"
 #include "BotanicusGameState.h"
 #include "Environment/BotanicusDayNightMath.h"
 #include "Environment/BotanicusSeasonSettings.h"
@@ -123,7 +124,14 @@ void ABotanicusAmbienceDirector::RefreshFromGameState(float DeltaSeconds)
 	VisualMinutes = bFirstSample ? Target : BotanicusDayNight::SmoothMinutes(
 		VisualMinutes, Target, DeltaSeconds, VisualResponseSeconds, SnapThresholdMinutes);
 	bHasTimeSample = true;
-	ApplyPresentation(VisualMinutes, State->GetCurrentDayNumber(), State->IsIllegalTradeActive(), bFirstSample || bJump);
+    const auto* Noct=GetDefault<UBotanicusNoctifloreSettings>();
+    const float TargetWeight=State->IsIllegalTradeActive() ? 1.f : 0.f;
+    // First sample / late join is correct immediately; subsequent activation fades.
+    const float Response=FMath::Clamp(Noct->LightTransitionSeconds,0.f,5.f);
+    ClandestineWeight=!bClandestineSample || !Noct->bEnabled || Response<=0.f ? TargetWeight :
+        FMath::Lerp(ClandestineWeight,TargetWeight,1.f-FMath::Exp(-3.f*FMath::Max(0.f,DeltaSeconds)/Response));
+    bClandestineSample=true;
+    ApplyPresentation(VisualMinutes, State->GetCurrentDayNumber(), State->IsIllegalTradeActive(), bFirstSample || bJump);
 }
 
 void ABotanicusAmbienceDirector::PreviewAtHour(float Hour, int32 DayNumber, bool bClandestine)
@@ -133,6 +141,7 @@ void ABotanicusAmbienceDirector::PreviewAtHour(float Hour, int32 DayNumber, bool
 	{
 		InitializeBindings();
 		ApplyExposureSettings();
+		ClandestineWeight=bClandestine ? 1.f : 0.f;
 		ApplyPresentation(BotanicusDayNight::WrapMinutes(Hour * 60.0f), DayNumber, bClandestine, true);
 	}
 #endif
@@ -179,8 +188,12 @@ void ABotanicusAmbienceDirector::ApplyPresentation(float Minutes, int32 DayNumbe
 	for (ALight* Actor : ClandestineLights)
 	{
 		if (!IsValid(Actor)) continue;
-		Actor->GetLightComponent()->SetIntensity(bClandestine ? ClandestineIntensity * (1.0f - Phase.SkyBlend) : 0.0f);
-		Actor->GetLightComponent()->SetLightColor(ClandestineTint);
+		const auto* Noct=GetDefault<UBotanicusNoctifloreSettings>();
+        const float Variation=1.f+FMath::Clamp(Noct->LightVariation,0.f,.05f)*FMath::Sin(GetWorld()->GetTimeSeconds()*.45f);
+        const float Weight=Noct->bEnabled ? ClandestineWeight : (bClandestine ? 1.f : 0.f);
+        Actor->GetLightComponent()->SetIntensity(ClandestineIntensity * (1.f-Phase.SkyBlend) * Weight *
+            (Noct->bEnabled ? FMath::Clamp(Noct->LightIntensityMultiplier,.5f,1.5f)*Variation : 1.f));
+        Actor->GetLightComponent()->SetLightColor(Noct->bEnabled ? Noct->LightTint : ClandestineTint);
 	}
 	const double Now = FPlatformTime::Seconds();
 	if (IsValid(LegacySkySphere) && SkyUpdateFunction.IsValid() &&

@@ -1,0 +1,433 @@
+{
+  "tests": {
+    "3C": {
+      "passed": true,
+      "assertions": 125,
+      "errors": [],
+      "file": "C:\\Users\\quent\\.codex\\visualizations\\2026\\11\\05\\01a1ab22-a1c2-7da2-a0d3-9414cc2eafdb\\noctiflore\\validation_noctiflores.json"
+    },
+    "3A": {
+      "passed": true,
+      "assertions": 247,
+      "errors": [],
+      "file": "C:\\Users\\quent\\.codex\\visualizations\\2026\\11\\05\\01a1ab22-a1c2-7da2-a0d3-9414cc2eafdb\\noctiflore\\regression_3a.json"
+    },
+    "3B": {
+      "passed": true,
+      "assertions": 153,
+      "errors": [],
+      "file": "C:\\Users\\quent\\.codex\\visualizations\\2026\\11\\05\\01a1ab22-a1c2-7da2-a0d3-9414cc2eafdb\\noctiflore\\regression_3b.json"
+    },
+    "Equipment": {
+      "passed": true,
+      "assertions": 184,
+      "errors": [],
+      "file": "C:\\Users\\quent\\.codex\\visualizations\\2026\\11\\05\\01a1ab22-a1c2-7da2-a0d3-9414cc2eafdb\\noctiflore\\regression_equipment.json"
+    },
+    "Visibility": {
+      "passed": true,
+      "assertions": 9,
+      "errors": [],
+      "file": "C:\\Users\\quent\\.codex\\visualizations\\2026\\11\\05\\01a1ab22-a1c2-7da2-a0d3-9414cc2eafdb\\noctiflore\\visibility.json"
+    },
+    "Lighting": {
+      "passed": true,
+      "tests": 3,
+      "warnings": 1,
+      "file": "C:\\Users\\quent\\.codex\\visualizations\\2026\\11\\05\\01a1ab22-a1c2-7da2-a0d3-9414cc2eafdb\\noctiflore\\automation_lighting\\index.json"
+    }
+  },
+  "performance": {
+    "passed": true,
+    "blocks": [
+      {
+        "block": 0,
+        "enabled": false,
+        "seconds": 25.016000000061467,
+        "n": 223,
+        "median": [
+          18.3407039642334,
+          18.185699462890625,
+          9.999999747378752e-05,
+          14.314499855041504
+        ],
+        "p95": [
+          25.641300201416016,
+          23.41200065612793,
+          0.0006000000284984708,
+          16.529399871826172
+        ],
+        "components": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "particles": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "plants": [
+          16,
+          16,
+          16,
+          16
+        ]
+      },
+      {
+        "block": 1,
+        "enabled": true,
+        "seconds": 25.015999999945052,
+        "n": 223,
+        "median": [
+          18.552501678466797,
+          18.128299713134766,
+          9.999999747378752e-05,
+          14.348400115966797
+        ],
+        "p95": [
+          26.255998611450195,
+          24.90399932861328,
+          0.0005000000237487257,
+          15.742600440979004
+        ],
+        "components": [
+          2,
+          2,
+          2,
+          2
+        ],
+        "particles": [
+          6,
+          6,
+          6,
+          6
+        ],
+        "plants": [
+          16,
+          16,
+          16,
+          16
+        ]
+      },
+      {
+        "block": 2,
+        "enabled": true,
+        "seconds": 25.016000000061467,
+        "n": 224,
+        "median": [
+          18.163002014160156,
+          18.12410068511963,
+          9.999999747378752e-05,
+          14.399450302124023
+        ],
+        "p95": [
+          25.635601043701172,
+          23.750699996948242,
+          0.0005000000237487257,
+          16.76919937133789
+        ],
+        "components": [
+          2,
+          1,
+          1,
+          2
+        ],
+        "particles": [
+          6,
+          3,
+          3,
+          6
+        ],
+        "plants": [
+          16,
+          16,
+          16,
+          16
+        ]
+      },
+      {
+        "block": 3,
+        "enabled": false,
+        "seconds": 25.01500000001397,
+        "n": 223,
+        "median": [
+          17.797399520874023,
+          17.69379997253418,
+          9.999999747378752e-05,
+          14.310099601745605
+        ],
+        "p95": [
+          22.798601150512695,
+          22.626399993896484,
+          0.0006000000284984708,
+          15.639699935913086
+        ],
+        "components": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "particles": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "plants": [
+          16,
+          16,
+          16,
+          16
+        ]
+      },
+      {
+        "block": 4,
+        "enabled": true,
+        "seconds": 25.015999999945052,
+        "n": 224,
+        "median": [
+          18.327099800109863,
+          18.194799423217773,
+          9.999999747378752e-05,
+          14.445199966430664
+        ],
+        "p95": [
+          24.43109893798828,
+          24.859899520874023,
+          0.0006000000284984708,
+          17.290199279785156
+        ],
+        "components": [
+          2,
+          1,
+          1,
+          2
+        ],
+        "particles": [
+          6,
+          3,
+          3,
+          6
+        ],
+        "plants": [
+          16,
+          16,
+          16,
+          16
+        ]
+      },
+      {
+        "block": 5,
+        "enabled": false,
+        "seconds": 25.031000000075437,
+        "n": 222,
+        "median": [
+          18.421751022338867,
+          18.072800636291504,
+          9.999999747378752e-05,
+          14.665149688720703
+        ],
+        "p95": [
+          24.400402069091797,
+          24.443500518798828,
+          0.0006000000284984708,
+          16.21660041809082
+        ],
+        "components": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "particles": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "plants": [
+          16,
+          16,
+          16,
+          16
+        ]
+      },
+      {
+        "block": 6,
+        "enabled": false,
+        "seconds": 25.031000000075437,
+        "n": 222,
+        "median": [
+          18.502700805664062,
+          18.394749641418457,
+          9.999999747378752e-05,
+          15.009050369262695
+        ],
+        "p95": [
+          26.224401473999023,
+          25.586599349975586,
+          0.0005000000237487257,
+          16.756399154663086
+        ],
+        "components": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "particles": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "plants": [
+          16,
+          16,
+          16,
+          16
+        ]
+      },
+      {
+        "block": 7,
+        "enabled": true,
+        "seconds": 25.01500000001397,
+        "n": 224,
+        "median": [
+          18.17710018157959,
+          17.958450317382812,
+          9.999999747378752e-05,
+          14.405900001525879
+        ],
+        "p95": [
+          26.645801544189453,
+          25.262800216674805,
+          0.0006000000284984708,
+          16.42530059814453
+        ],
+        "components": [
+          2,
+          2,
+          2,
+          2
+        ],
+        "particles": [
+          3,
+          6,
+          6,
+          6
+        ],
+        "plants": [
+          16,
+          16,
+          16,
+          16
+        ]
+      }
+    ],
+    "groups": [
+      {
+        "enabled": false,
+        "n": 890,
+        "mean_block_medians": [
+          18.265638828277588,
+          18.08676242828369,
+          9.999999747378752e-05,
+          14.574699878692627
+        ],
+        "pooled_p95": [
+          25.017398834228516,
+          24.64590072631836,
+          0.0006000000284984708,
+          16.44930076599121
+        ]
+      },
+      {
+        "enabled": true,
+        "n": 895,
+        "mean_block_medians": [
+          18.3049259185791,
+          18.101412534713745,
+          9.999999747378752e-05,
+          14.39973759651184
+        ],
+        "pooled_p95": [
+          26.255998611450195,
+          24.998199462890625,
+          0.0006000000284984708,
+          16.679100036621094
+        ]
+      }
+    ],
+    "viewport_sizes": [
+      [
+        1049,
+        519
+      ],
+      [
+        960,
+        542
+      ],
+      [
+        960,
+        542
+      ],
+      [
+        960,
+        542
+      ]
+    ],
+    "quality": {
+      "sg.EffectsQuality": 3,
+      "sg.GlobalIlluminationQuality": 3,
+      "sg.ReflectionQuality": 3,
+      "sg.ShadingQuality": 3,
+      "sg.ShadowQuality": 3,
+      "sg.PostProcessQuality": 3,
+      "r.DynamicGlobalIlluminationMethod": 1,
+      "r.ReflectionMethod": 1
+    }
+  },
+  "preservation": {
+    "total": 1339,
+    "unchanged": 1331,
+    "modified": [
+      "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\Source\\Botanicus\\Editor\\BotanicusJuiceAssetTools.cpp",
+      "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\Source\\Botanicus\\Editor\\BotanicusJuiceAssetTools.h",
+      "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\Source\\Botanicus\\Environment\\BotanicusAmbienceDirector.cpp",
+      "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\Source\\Botanicus\\Environment\\BotanicusAmbienceDirector.h",
+      "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\Source\\Botanicus\\IllegalTrade\\BotanicusIllegalPlanterActor.cpp",
+      "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\Source\\Botanicus\\Visuals\\BotanicusJuiceWorldSubsystem.cpp",
+      "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\Source\\Botanicus\\Visuals\\BotanicusJuiceWorldSubsystem.h",
+      "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\Config\\DefaultGame.ini"
+    ],
+    "missing": [],
+    "protected_modified": []
+  },
+  "assets": {
+    "variants": {
+      "/Game/Botanicus/Items/itemsMesh/Trafic/plantes/1/Material_002.Material_002": "/Game/Botanicus/Materials/Juice/Noctiflore/MI_NoctGlow_949d12d9d7.MI_NoctGlow_949d12d9d7",
+      "/Game/Botanicus/Items/itemsMesh/Trafic/plantes/2/Material_003.Material_003": "/Game/Botanicus/Materials/Juice/Noctiflore/MI_NoctGlow_a49d9930f3.MI_NoctGlow_a49d9930f3",
+      "/Game/Botanicus/Items/itemsMesh/Trafic/plantes/3/Material_004.Material_004": "/Game/Botanicus/Materials/Juice/Noctiflore/MI_NoctGlow_aeaff932e8.MI_NoctGlow_aeaff932e8"
+    },
+    "created": [
+      "/Game/Botanicus/Materials/Juice/Noctiflore/MPC_Noctiflore.MPC_Noctiflore",
+      "/Game/Botanicus/Materials/Juice/Noctiflore/M_NoctGlow_2c94337266.M_NoctGlow_2c94337266",
+      "/Game/Botanicus/Materials/Juice/Noctiflore/MI_NoctGlow_949d12d9d7.MI_NoctGlow_949d12d9d7",
+      "/Game/Botanicus/Materials/Juice/Noctiflore/MI_NoctGlow_a49d9930f3.MI_NoctGlow_a49d9930f3",
+      "/Game/Botanicus/Materials/Juice/Noctiflore/MI_NoctGlow_aeaff932e8.MI_NoctGlow_aeaff932e8",
+      "/Game/Botanicus/Materials/Juice/Noctiflore/DA_NoctifloreGlow.DA_NoctifloreGlow",
+      "/Game/Botanicus/Materials/Juice/Noctiflore/M_NoctifloreSpore.M_NoctifloreSpore",
+      "/Game/Botanicus/VFX/Noctiflore/NS_NoctifloreSpores.NS_NoctifloreSpores"
+    ],
+    "errors": [],
+    "niagara": "USER NiagaraInt32 User.BurstCount\nUSER Vector3f User.Gravity\nUSER NiagaraFloat User.Lifetime\nUSER NiagaraFloat User.Radius\nUSER NiagaraFloat User.Size\nUSER NiagaraFloat User.SpawnRate\nUSER LinearColor User.Tint\nUSER Vector3f User.Velocity\nEMITTER SimpleSpriteBurst Sim=0 Local=0\nRENDERER NiagaraSpriteRendererProperties\nFUNCTION SolveForcesAndVelocity /Niagara/Modules/Solvers/SolveForcesAndVelocity.SolveForcesAndVelocity\n PIN InputMap = \n PIN Clamp Velocity = false\n PIN Limit Acceleration = false\n PIN Rotational Solver Is Enabled = true\n PIN Write to Presolve Properties = true\n PIN OutputMap = \nFUNCTION SpawnBurst_Instantaneous /Niagara/Modules/Emitter/SpawnBurst_Instantaneous.SpawnBurst_Instantaneous\n PIN InputMap = \n PIN Use Spawn Probability = false\n PIN UseLoopCountLimit = false\n PIN OutputMap = \nFUNCTION ScaleColor /Niagara/Modules/Update/Color/ScaleColor.ScaleColor\n PIN InputMap = \n PIN ColorCurve = \n PIN Scale Mode = NewEnumerator0\n PIN ScaleA = true\n PIN ScaleRGB = false\n PIN ScaleRGBA = true\n PIN OutputMap = \nFUNCTION FloatFromCurve001 /Niagara/DynamicInputs/ValueFromCurve/FloatFromCurve.FloatFromCurve\n PIN InputMap = \n PIN DefaultCurve = \n PIN Value = \nFUNCTION ParticleState /Niagara/Modules/Update/Lifetime/ParticleState.ParticleState\n PIN InputMap = \n PIN Kill Particles When Lifetime Has Elapsed = true\n PIN OutputMap = \nFUNCTION EmitterState /Niagara/Modules/Emitter/EmitterState.EmitterState\n PIN InputMap = \n PIN ScaleSpawnCountCurve = \n PIN Enable Distance Culling = false\n PIN Enable Visibility Culling = false\n PIN Inactive Response = NewEnumerator0\n PIN Life Cycle Mode = NewEnumerator1\n PIN Loop Behavior = NewEnumerator1\n PIN Loop Duration Mode = NewEnumerator0\n PIN Scalability Mode = NewEnumerator0\n PIN Scale Spawn Count = false\n PIN UseLoopDelay = false\n PIN OutputMap = \nFUNCTION InitializeParticle /Niagara/Modules/Spawn/Initialization/V2/InitializeParticle.InitializeParticle\n PIN InputMap = \n PIN AdjustAlpha = false\n PIN AdjustHue = true\n PIN AdjustSaturation = false\n PIN AdjustValue = false\n PIN Color Channel Mode = NewEnumerator1\n PIN Color Mode = NewEnumerator1\n PIN Color Randomness Mode = NewEnumerator0\n PIN Lifetime Mode = NewEnumerator0\n PIN Lifetime Randomness Mode = NewEnumerator0\n PIN Mass Mode = NewEnumerator0\n PIN Mass Randomness Mode = NewEnumerator0\n PIN Mesh Renderer Array Visibility Mode = NewEnumerator0\n PIN Mesh Scale Mode = NewEnumerator0\n PIN Mesh Scale Randomness Mode = NewEnumerator0\n PIN Position Mode = NewEnumerator2\n PIN Ribbon Facing Mode = NewEnumerator0\n PIN Ribbon Twist Mode = NewEnumerator0\n PIN Ribbon Width Mode = NewEnumerator0\n PIN Sprite Rotation Mode = NewEnumerator3\n PIN Sprite Rotation Randomness Mode = NewEnumerator0\n PIN Sprite Size Mode = NewEnumerator3\n PIN Sprite Size Randomness Mode = NewEnumerator0\n PIN Sprite UV Mode = NewEnumerator0\n PIN Sprite UV Randomness Mode = NewEnumerator0\n PIN UsePositionOffset = false\n PIN Wrap Index By Mesh Count = true\n PIN Write Material Random = true\n PIN OutputMap = \nFUNCTION SetVariables_7970DC07465C3ED1B39A4FB6482F8A9A /Game/Botanicus/VFX/Noctiflore/NS_NoctifloreSpores.NS_NoctifloreSpores:SimpleSpriteBurst.NiagaraScriptSource_0.NiagaraGraph_0.NiagaraNodeAssignment_0.SetVariables_7970DC07465C3ED1B39A4FB6482F8A9A\n PIN InputMap = \n PIN OutputMap = \nFUNCTION GravityForce /Niagara/Modules/Update/Forces/GravityForce.GravityForce\n PIN InputMap = \n PIN Coordinate Space = World\n PIN OutputMap = \nFUNCTION ShapeLocation /Niagara/Modules/Spawn/Location/V2/ShapeLocation.ShapeLocation\n PIN InputMap = \n PIN LatheCurve = \n PIN Additional Quaternion Rotation = false\n PIN Apply To Particle Position = NewEnumerator0\n PIN Box / Plane Mode = NewEnumerator0\n PIN Cone Angle Type = NewEnumerator0\n PIN Cone Mode = NewEnumerator0\n PIN Cylinder Distribution = NewEnumerator0\n PIN Enable Lathe Profile = false\n PIN Enable Torus Knot Radius = false\n PIN Evaluation Type = NewEnumerator0\n PIN Fixed Random Seed = false\n PIN Flatten Endcaps = false\n PIN Hemicircle Internal Cap = true\n PIN Hemicircle X = false\n PIN Hemicircle Y = false\n PIN Hemisphere Angle Type = NewEnumerator1\n PIN MaskSpawnGroup = false\n PIN Offset Mode = NewEnumerator1\n PIN Override Seed = false\n PIN Randomness Mode = NewEnumerator0\n PIN Ring / Disc Distribution Mode = NewEnumerator0\n PIN Ring / Disc Mode = NewEnumerator0\n PIN Rotation Angle Type = NewEnumerator1\n PIN Rotation Mode = NewEnumerator0\n PIN Scale Mode = NewEnumerator0\n PIN Shape Primitive = NewEnumerator0\n PIN Sphere Distribution = NewEnumerator0\n PIN Surface Only = false\n PIN Torus Distribution Mode = NewEnumerator0\n PIN Torus Mode = NewEnumerator0\n PIN Transform Method = NewEnumerator0\n PIN Transform Order = NewEnumerator0\n PIN Use Endcaps In Surface Only Mode = true\n PIN UseOwnerScale = true\n PIN OutputMap = \nSCRIPT EmitterSpawnScript\nSCRIPT EmitterUpdateScript\n RI NiagaraFloat Constants.SimpleSpriteBurst.EmitterState.Loop Delay = 0.0,\n RI NiagaraFloat Constants.SimpleSpriteBurst.EmitterState.Loop Duration = 2.0,\n RI NiagaraFloat Constants.SimpleSpriteBurst.EmitterState.MaxDistance = 5000.0,\n RI NiagaraFloat Constants.SimpleSpriteBurst.EmitterState.MinDistance = 0.0,\n RI NiagaraFloat Constants.SimpleSpriteBurst.SpawnBurst_Instantaneous.Age = 0.0,\n RI NiagaraInt32 Constants.SimpleSpriteBurst.SpawnBurst_Instantaneous.Loop Count Limit = 0.0,\n RI NiagaraInt32 Constants.SimpleSpriteBurst.SpawnBurst_Instantaneous.Spawn Count = 0.0,\n RI NiagaraInt32 Constants.SimpleSpriteBurst.SpawnBurst_Instantaneous.Spawn Group = 0.0,\n RI NiagaraFloat Constants.SimpleSpriteBurst.SpawnBurst_Instantaneous.Spawn Probability = 1.0,\n RI NiagaraFloat Constants.SimpleSpriteBurst.SpawnBurst_Instantaneous.Spawn Time = 0.0,\nSCRIPT SpawnScript\n RI NiagaraFloat Constants.SimpleSpriteBurst.FloatFromCurve001.Scale Curve = 1.0,\n RI LinearColor Constants.SimpleSpriteBurst.InitializeParticle.Color = 1.0,1.0,1.0,1.0,\n RI NiagaraFloat Constants.SimpleSpriteBurst.InitializeParticle.Lifetime = 2.0,\n RI Vector3f Constants.SimpleSpriteBurst.InitializeParticle.Position Offset = 0.0,0.0,0.0,\n RI NiagaraFloat Constants.SimpleSpriteBurst.InitializeParticle.Uniform Sprite Size = 50.0,\n RI Vector3f Constants.SimpleSpriteBurst.ScaleColor.Scale RGB = 1.0,1.0,1.0,\n RI Vector4f Constants.SimpleSpriteBurst.ScaleColor.Scale RGBA = 1.0,1.0,1.0,1.0,\n RI Vector3f Constants.SimpleSpriteBurst.ShapeLocation.Additional Yaw / Pitch / Roll = 0.0,0.0,0.0,\n RI Vector3f Constants.SimpleSpriteBurst.ShapeLocation.Apply Owner Scale = 0.0,0.0,0.0,\n RI Vector2f Constants.SimpleSpriteBurst.ShapeLocation.Hemisphere Distribution = 1.0,1.0,\n RI Vector3f Constants.SimpleSpriteBurst.ShapeLocation.Non Uniform Scale = 1.0,1.0,1.0,\n RI NiagaraInt32 Constants.SimpleSpriteBurst.ShapeLocation.Random Seed = 0.0,\n RI NiagaraFloat Constants.SimpleSpriteBurst.ShapeLocation.Rotation Angle = 0.0,\n RI Vector3f Constants.SimpleSpriteBurst.ShapeLocation.Rotation Axis = 1.0,0.0,0.0,\n RI NiagaraMatrix Constants.SimpleSpriteBurst.ShapeLocation.Rotation Matrix = 1.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0,\n RI Quat4f Constants.SimpleSpriteBurst.ShapeLocation.Rotation Quaternion = 0.0,0.0,0.0,1.0,\n RI NiagaraInt32 Constants.SimpleSpriteBurst.ShapeLocation.Spawn Group Mask = 0.0,\n RI NiagaraFloat Constants.SimpleSpriteBurst.ShapeLocation.Sphere Surface Distribution = 0.0,\n RI Vector3f Constants.SimpleSpriteBurst.ShapeLocation.Yaw / Pitch / Roll = 0.0,0.0,0.0,\n RI NiagaraFloat Constants.SimpleSpriteBurst.SolveForcesAndVelocity.Acceleration Limit = 9999.0,\n RI NiagaraBool Constants.SimpleSpriteBurst.SolveForcesAndVelocity.Manually Enable Rotational Solver = 0.0,\n RI Quat4f Constants.SimpleSpriteBurst.SolveForcesAndVelocity.Mesh Orientation = 0.0,0.0,0.0,1.0,\n RI Vector3f Constants.SimpleSpriteBurst.SolveForcesAndVelocity.Rotational Force = 0.0,0.0,0.0,\n RI Vector3f Constants.SimpleSpriteBurst.SolveForcesAndVelocity.Rotational Velocity = 0.0,0.0,0.0,\n RI NiagaraFloat Constants.SimpleSpriteBurst.SolveForcesAndVelocity.Speed Limit = 1000.0,\nSCRIPT UpdateScript\n RI NiagaraFloat Constants.SimpleSpriteBurst.FloatFromCurve001.Scale Curve = 1.0,\n RI Vector3f Constants.SimpleSpriteBurst.ScaleColor.Scale RGB = 1.0,1.0,1.0,\n RI Vector4f Constants.SimpleSpriteBurst.ScaleColor.Scale RGBA = 1.0,1.0,1.0,1.0,\n RI NiagaraFloat Constants.SimpleSpriteBurst.SolveForcesAndVelocity.Acceleration Limit = 9999.0,\n RI NiagaraBool Constants.SimpleSpriteBurst.SolveForcesAndVelocity.Manually Enable Rotational Solver = 0.0,\n RI Quat4f Constants.SimpleSpriteBurst.SolveForcesAndVelocity.Mesh Orientation = 0.0,0.0,0.0,1.0,\n RI Vector3f Constants.SimpleSpriteBurst.SolveForcesAndVelocity.Rotational Force = 0.0,0.0,0.0,\n RI Vector3f Constants.SimpleSpriteBurst.SolveForcesAndVelocity.Rotational Velocity = 0.0,0.0,0.0,\n RI NiagaraFloat Constants.SimpleSpriteBurst.SolveForcesAndVelocity.Speed Limit = 1000.0,\n",
+    "passed": true
+  },
+  "peak_particles": 12,
+  "peak_components": 2
+}

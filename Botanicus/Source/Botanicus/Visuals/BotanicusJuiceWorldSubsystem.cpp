@@ -22,6 +22,7 @@
 #include "Audio/BotanicusAudioWorldSubsystem.h"
 #include "Materials/MaterialParameterCollectionInstance.h"
 #include "Scalability.h"
+#include "Visuals/BotanicusNoctifloreSettings.h"
 
 bool UBotanicusJuiceWorldSubsystem::DoesSupportWorldType(EWorldType::Type Type) const
 {
@@ -34,6 +35,9 @@ void UBotanicusJuiceWorldSubsystem::OnWorldBeginPlay(UWorld& World)
 	if(World.GetNetMode()==NM_DedicatedServer) return;
 	const auto* Settings=GetDefault<UBotanicusJuiceSettings>();
 	MotionCatalog=Settings->MotionCatalog.LoadSynchronous();
+	NoctifloreCatalog=GetDefault<UBotanicusNoctifloreSettings>()->GlowCatalog.LoadSynchronous();
+	SporeSystem=GetDefault<UBotanicusNoctifloreSettings>()->SporeSystem.LoadSynchronous();
+	UpdateNoctiflores(); // Apply disabled/custom settings before the first rendered frame.
 	UpdateMotionParameters();
 	WaterSystem=Settings->WaterSystem.LoadSynchronous();BurstSystem=Settings->BurstSystem.LoadSynchronous();
 	World.GetTimerManager().SetTimer(ReconcileTimer,this,&UBotanicusJuiceWorldSubsystem::ReconcileWater,.1f,true);
@@ -112,6 +116,7 @@ bool UBotanicusJuiceWorldSubsystem::IsTickable() const
 void UBotanicusJuiceWorldSubsystem::ReconcileWater()
 {
 	UpdateMotionParameters();
+	UpdateNoctiflores();
 	const auto* S=GetDefault<UBotanicusJuiceSettings>();
 	for(auto& Pair:Water) Pair.Value.bDesired=false;
 	if(!AudioRelay.IsValid()) for(TActorIterator<ABotanicusAudioRelay> It(GetWorld());It;++It) {AudioRelay=*It;break;}
@@ -223,6 +228,7 @@ void UBotanicusJuiceWorldSubsystem::Deinitialize()
 	GetWorld()->GetTimerManager().ClearTimer(ReconcileTimer);
 	for(auto& Pair:Water) {if(Pair.Value.Drops) {Pair.Value.Drops->DeactivateImmediate();Pair.Value.Drops->DestroyComponent();}if(IsValid(Pair.Value.RemoteCan)) Pair.Value.RemoteCan->Destroy();}
 	for(auto& Burst:Bursts) if(Burst.Component) {Burst.Component->DeactivateImmediate();Burst.Component->DestroyComponent();}
+	ClearNoctifloreSpores();NoctifloreCandidates.Reset();
 	Water.Reset();Bursts.Reset();WetnessTransitions.Reset();Super::Deinitialize();
 }
 
@@ -274,17 +280,21 @@ void UBotanicusJuiceWorldSubsystem::UpdateMotionParameters()
 		CachedMotionParameters=Values;
 	}
 }
-void UBotanicusJuiceWorldSubsystem::BindFoliage(UStaticMeshComponent* Foliage,bool bAlive)
+void UBotanicusJuiceWorldSubsystem::BindFoliage(UStaticMeshComponent* Foliage,bool bAlive,bool bNoctiflore,float Growth)
 {
 	if(!IsValid(Foliage) || !Foliage->GetWorld() || Foliage->GetWorld()->GetNetMode()==NM_DedicatedServer || !Foliage->GetStaticMesh()) return;
 	auto* Juice=Foliage->GetWorld()->GetSubsystem<UBotanicusJuiceWorldSubsystem>();
 	if(!Juice || !Juice->MotionCatalog) return;
+	if(bNoctiflore && bAlive) Juice->NoctifloreCandidates.FindOrAdd(Foliage);
+	else Juice->NoctifloreCandidates.Remove(Foliage);
+	const auto* Catalog=bNoctiflore && Juice->NoctifloreCatalog ? Juice->NoctifloreCatalog.Get() : Juice->MotionCatalog.Get();
 	for(int32 Index=0;Index<Foliage->GetNumMaterials();++Index)
 	{
 		UMaterialInterface* Original=Foliage->GetStaticMesh()->GetMaterial(Index);
-		const auto* Variant=Juice->MotionCatalog->Variants.Find(Original);if(!Variant || !*Variant) continue;
+		const auto* Variant=Catalog->Variants.Find(Original);if(!Variant || !*Variant) continue;
 		auto* MID=Cast<UMaterialInstanceDynamic>(Foliage->GetMaterial(Index));
 		if(!MID || MID->Parent!=*Variant) {MID=UMaterialInstanceDynamic::Create(*Variant,Foliage);Foliage->SetMaterial(Index,MID);}
+		if(bNoctiflore) MID->SetScalarParameterValue(TEXT("NoctGrowthStrength"),FMath::Lerp(.65f,1.f,FMath::Clamp(Growth,0.f,1.f)));
 		const float Alive=bAlive ? 1.f : 0.f;
 		if(MID->K2_GetScalarParameterValue(TEXT("BotanicusMotionAlive"))!=Alive) MID->SetScalarParameterValue(TEXT("BotanicusMotionAlive"),Alive);
 	}

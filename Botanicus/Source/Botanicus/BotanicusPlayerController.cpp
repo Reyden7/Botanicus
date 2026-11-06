@@ -1,9 +1,14 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "BotanicusPlayerController.h"
+#if WITH_EDITOR
+#include "Editor/BotanicusEquipmentValidation.h"
+#endif
 #include "Audio/BotanicusAudioWorldSubsystem.h"
 #include "BotanicusCharacter.h"
 #include "QuickBar/BotanicusQuickBarComponent.h"
+#include "ItemDataAsset.h"
+#include "ItemDataSubsystem.h"
 #include "Sales/BotanicusSalesDisplayActor.h"
 #include "Sales/BotanicusSalePotActor.h"
 #include "Sales/BotanicusCashRegisterActor.h"
@@ -4939,6 +4944,9 @@ void ABotanicusPlayerController::CopyWorldItemStateToPreview(
 
 void ABotanicusPlayerController::HandleEquippedQuickBarChanged()
 {
+#if WITH_EDITOR
+	UBotanicusEquipmentValidation::Record(GetWorld(),TEXT("InventoryNotify"));
+#endif
 	bLocalEquippedQuickBarDirty = true;
 }
 
@@ -4946,6 +4954,9 @@ void ABotanicusPlayerController::DestroyEquippedQuickBarItem()
 {
 	if (IsValid(LocalEquippedQuickBarItem))
 	{
+#if WITH_EDITOR
+		UBotanicusEquipmentValidation::Record(GetWorld(),TEXT("LocalDestroyRequested"),LocalEquippedQuickBarItem);
+#endif
 		LocalEquippedQuickBarItem->Destroy();
 	}
 	LocalEquippedQuickBarItem = nullptr;
@@ -4958,13 +4969,18 @@ void ABotanicusPlayerController::UpdateEquippedQuickBarItem()
 		return;
 	}
 
+#if WITH_EDITOR
+	FBotanicusEquipmentUpdateTimer EquipmentTimer(GetWorld());
+#endif
+
 	ABotanicusCharacter* BotanicusCharacter =
 		Cast<ABotanicusCharacter>(GetPawn());
 	UBotanicusQuickBarComponent* QuickBar =
 		BotanicusCharacter
 			? BotanicusCharacter->GetQuickBarComponent()
 			: nullptr;
-	if (LocalEquippedQuickBarSource.Get() != QuickBar)
+	const bool bSourceChanged = LocalEquippedQuickBarSource.Get() != QuickBar;
+	if (bSourceChanged)
 	{
 		if (LocalEquippedQuickBarSource.IsValid())
 		{
@@ -5004,13 +5020,9 @@ void ABotanicusPlayerController::UpdateEquippedQuickBarItem()
 		!CarriedTransplantItemKey.IsNone()
 			? CarriedTransplantItemKey
 			: SelectedSlot.ItemKey;
-	const bool bSelectionChanged =
-		bLocalEquippedQuickBarDirty ||
-		LocalEquippedQuickBarSlotIndex != SelectedSlotIndex ||
-		LocalEquippedQuickBarInstanceId != SelectedSlot.InstanceId ||
-		LocalEquippedQuickBarItemKey != DisplayItemKey ||
-		LocalEquippedQuickBarQuantity != SelectedSlot.Quantity;
-	if (bSelectionChanged)
+
+	// Empty selection and presentation modes still remove the held actor immediately.
+	if (SelectedSlot.IsEmpty())
 	{
 		DestroyEquippedQuickBarItem();
 		LocalEquippedQuickBarSlotIndex = SelectedSlotIndex;
@@ -5018,12 +5030,137 @@ void ABotanicusPlayerController::UpdateEquippedQuickBarItem()
 		LocalEquippedQuickBarItemKey = DisplayItemKey;
 		LocalEquippedQuickBarQuantity = SelectedSlot.Quantity;
 		bLocalEquippedQuickBarDirty = false;
+		return;
 	}
 
-	if (SelectedSlot.IsEmpty())
+	const bool bIdentityChanged =
+		LocalEquippedQuickBarSlotIndex != SelectedSlotIndex ||
+		LocalEquippedQuickBarInstanceId != SelectedSlot.InstanceId ||
+		LocalEquippedQuickBarItemKey != DisplayItemKey ||
+		LocalEquippedQuickBarQuantity != SelectedSlot.Quantity;
+#if WITH_EDITOR
+	if (UBotanicusEquipmentValidation::UseLegacy(GetWorld()))
 	{
-		DestroyEquippedQuickBarItem();
-		return;
+		// Historical branch skips the new descriptor/state checks entirely.
+		if (bLocalEquippedQuickBarDirty || bIdentityChanged)
+		{
+			UBotanicusEquipmentValidation::Record(GetWorld(),TEXT("Rebuild"));
+			DestroyEquippedQuickBarItem();
+			LocalEquippedQuickBarSlotIndex = SelectedSlotIndex;
+			LocalEquippedQuickBarInstanceId = SelectedSlot.InstanceId;
+			LocalEquippedQuickBarItemKey = DisplayItemKey;
+			LocalEquippedQuickBarQuantity = SelectedSlot.Quantity;
+			bLocalEquippedQuickBarDirty = false;
+		}
+	}
+	else
+#endif
+	{
+		const bool bRepresentationInvalid = !IsValid(LocalEquippedQuickBarItem) ||
+			!IsValid(LocalEquippedQuickBarItem->GetRootComponent()) || !IsValid(LocalEquippedQuickBarItem->Mesh);
+		if (bLocalEquippedQuickBarDirty || bIdentityChanged || bRepresentationInvalid)
+		{
+			const FBotanicusItemDefinition* Definition = FindItemDefinition(this, DisplayItemKey);
+			if (!Definition)
+			{
+				DestroyEquippedQuickBarItem();
+				return;
+			}
+			const UItemDataAsset* ItemData = UItemDataSubsystem::Get(this).GetItemDataAsset(DisplayItemKey);
+			const FSoftObjectPath ItemDataMeshPath = ItemData ? ItemData->GetItemStaticMesh().ToSoftObjectPath() : FSoftObjectPath();
+			const bool bDefinitionChanged =
+				LocalEquippedClassPath != Definition->WorldActorClass.ToSoftObjectPath() ||
+				LocalEquippedCatalogMeshPath != Definition->WorldMesh.ToSoftObjectPath() ||
+				LocalEquippedItemDataMeshPath != ItemDataMeshPath ||
+				LocalEquippedCatalogScale != Definition->WorldScale;
+			// Use exact reflected state comparison: do not introduce a cooldown or a
+			// tolerance that could swallow a legitimate material/plant state update.
+			const UScriptStruct* StateType = FBotanicusCarriedItemState::StaticStruct();
+			const bool bStateChanged = !StateType->CompareScriptStruct(
+				&LocalEquippedQuickBarCarriedState, &SelectedSlot.CarriedState, 0);
+			bool bOnlyWaterChanged = false;
+			if (bStateChanged && Cast<ABotanicusWateringCanActor>(LocalEquippedQuickBarItem))
+			{
+				FBotanicusCarriedItemState NonWaterState = SelectedSlot.CarriedState;
+				NonWaterState.bHasWateringCanState = LocalEquippedQuickBarCarriedState.bHasWateringCanState;
+				NonWaterState.WateringCanWaterLevel = LocalEquippedQuickBarCarriedState.WateringCanWaterLevel;
+				bOnlyWaterChanged = StateType->CompareScriptStruct(
+					&LocalEquippedQuickBarCarriedState, &NonWaterState, 0);
+			}
+			// These previews retain their existing native simulation. If their state
+			// has moved since it was copied from inventory, the actor is no longer an
+			// exact representation of that snapshot. Preserve the old refresh path.
+			bool bRepresentedStateDrifted = false;
+			const auto& State = SelectedSlot.CarriedState;
+			if (State.bHasPlantPotState && !State.bHasMultiPlanterState)
+			{
+				if (const auto* Pot = Cast<ABotanicusPlantPotActor>(LocalEquippedQuickBarItem))
+					bRepresentedStateDrifted = Pot->HasSoil() != State.bPlantPotHasSoil ||
+						Pot->GetPlantKey() != State.PlantKey || Pot->GetWaterLevel() != State.WaterLevel ||
+						Pot->GetGrowthProgress() != State.GrowthProgress || Pot->GetCareScore() != State.CareScore ||
+						Pot->GetWateringCount() != State.WateringCount;
+			}
+			else if (State.bHasMultiPlanterState)
+			{
+				if (const auto* Pot = Cast<ABotanicusMultiPlantPotActor>(LocalEquippedQuickBarItem))
+				{
+					bRepresentedStateDrifted = Pot->GetSoilUnits() != State.MultiPlanterSoilUnits;
+					const auto& Slots = Pot->GetPlantSlots();
+					for (int32 Index = 0; Index < Slots.Num(); ++Index)
+					{
+						const auto& Slot = Slots[Index];
+						bRepresentedStateDrifted |= Slot.PlantKey != (State.MultiPlanterPlantKeys.IsValidIndex(Index) ? State.MultiPlanterPlantKeys[Index] : NAME_None) ||
+							Slot.WaterLevel != (State.MultiPlanterWaterLevels.IsValidIndex(Index) ? State.MultiPlanterWaterLevels[Index] : 0.f) ||
+							Slot.GrowthProgress != (State.MultiPlanterGrowthProgress.IsValidIndex(Index) ? State.MultiPlanterGrowthProgress[Index] : 0.f) ||
+							Slot.CareScore != (State.MultiPlanterCareScores.IsValidIndex(Index) ? State.MultiPlanterCareScores[Index] : 0.f) ||
+							Slot.WateringCount != (State.MultiPlanterWateringCounts.IsValidIndex(Index) ? State.MultiPlanterWateringCounts[Index] : 0);
+					}
+				}
+			}
+			else if (State.bHasSalePotState)
+			{
+				if (const auto* Pot = Cast<ABotanicusSalePotActor>(LocalEquippedQuickBarItem))
+					bRepresentedStateDrifted = Pot->GetSoilItemKey() != State.SaleSoilItemKey || Pot->GetPlantItemKey() != State.SalePlantItemKey;
+			}
+			bool bRebuild = bRepresentationInvalid || bSourceChanged || bDefinitionChanged ||
+				LocalEquippedQuickBarItem->Mesh->GetStaticMesh() != LocalEquippedRenderedMesh.Get() ||
+				LocalEquippedQuickBarItemKey != DisplayItemKey ||
+				bLocalEquippedTransplantDirty || bRepresentedStateDrifted || (bStateChanged && !bOnlyWaterChanged);
+			if (bRebuild)
+			{
+#if WITH_EDITOR
+				UBotanicusEquipmentValidation::Record(GetWorld(),TEXT("Rebuild"));
+#endif
+				DestroyEquippedQuickBarItem();
+			}
+			else if (bOnlyWaterChanged && !HasCarriedTransplant())
+			{
+				// Same representation: synchronize reservoir data on the existing actor.
+				// Missing state in an old save still means a full watering can.
+				CastChecked<ABotanicusWateringCanActor>(LocalEquippedQuickBarItem)->RestoreWaterLevel(
+					SelectedSlot.CarriedState.bHasWateringCanState
+						? SelectedSlot.CarriedState.WateringCanWaterLevel : 1.0f);
+#if WITH_EDITOR
+				UBotanicusEquipmentValidation::Record(GetWorld(),TEXT("ReservoirUpdatedInPlace"));
+#endif
+			}
+#if WITH_EDITOR
+			if (!bRebuild && IsValid(LocalEquippedQuickBarItem))
+				UBotanicusEquipmentValidation::Record(GetWorld(),TEXT("RepresentationReused"));
+#endif
+			LocalEquippedQuickBarSlotIndex = SelectedSlotIndex;
+			LocalEquippedQuickBarInstanceId = SelectedSlot.InstanceId;
+			LocalEquippedQuickBarItemKey = DisplayItemKey;
+			LocalEquippedQuickBarQuantity = SelectedSlot.Quantity;
+			LocalEquippedQuickBarCarriedState = SelectedSlot.CarriedState;
+			LocalEquippedClassPath = Definition->WorldActorClass.ToSoftObjectPath();
+			LocalEquippedCatalogMeshPath = Definition->WorldMesh.ToSoftObjectPath();
+			LocalEquippedItemDataMeshPath = ItemDataMeshPath;
+			LocalEquippedCatalogScale = Definition->WorldScale;
+			bLocalEquippedQuickBarDirty = false;
+			bLocalEquippedTransplantDirty = false;
+		}
+
 	}
 
 	if (!IsValid(LocalEquippedQuickBarItem))
@@ -5154,6 +5291,10 @@ void ABotanicusPlayerController::UpdateEquippedQuickBarItem()
 			LocalEquippedQuickBarItem->SetActorScale3D(
 				LocalEquippedQuickBarItem->GetActorScale3D() * 0.25f);
 		}
+#if WITH_EDITOR
+		UBotanicusEquipmentValidation::Record(GetWorld(),TEXT("LocalCreated"),LocalEquippedQuickBarItem);
+#endif
+		LocalEquippedRenderedMesh = LocalEquippedQuickBarItem->Mesh->GetStaticMesh();
 	}
 
 	FVector ViewLocation;
@@ -8109,6 +8250,7 @@ void ABotanicusPlayerController::RestoreCarriedTransplantState(
 
 void ABotanicusPlayerController::OnRep_CarriedTransplantState()
 {
+	bLocalEquippedTransplantDirty = true;
 	bLocalEquippedQuickBarDirty = true;
 }
 

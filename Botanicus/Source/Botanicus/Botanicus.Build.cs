@@ -36,6 +36,9 @@ public class Botanicus : ModuleRules
 		{
 			PrivateDependencyModuleNames.AddRange(new string[] {
 				"AssetTools",
+				// Isolated equipment diagnostics: snapshots and native connection-close reasons.
+				"Json",
+				"NetCore",
                 "NiagaraEditor",
 				"Kismet",
 				"UnrealEd",

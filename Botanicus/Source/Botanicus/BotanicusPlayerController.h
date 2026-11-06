@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
 #include "Path/BotanicusPathActor.h"
+#include "QuickBar/BotanicusQuickBarComponent.h"
 #include "BotanicusPlayerController.generated.h"
 
 class UInputMappingContext;
@@ -49,6 +50,7 @@ class ABotanicusComputerActor;
 class ABotanicusStorageShelfActor;
 class ABotanicusPreparationWorkbenchActor;
 class UMaterialInterface;
+class UStaticMesh;
 class UMaterialInstanceDynamic;
 class UPrimitiveComponent;
 struct FInputKeyEventArgs;
@@ -89,6 +91,7 @@ class BOTANICUS_API ABotanicusPlayerController : public APlayerController
 	
 public:
 	friend class UBotanicusJuiceValidation;
+	friend class UBotanicusEquipmentValidation;
 
 	/** Private transaction confirmation; world events use the shared audio relay. */
 	UFUNCTION(Client, Reliable)
@@ -1018,6 +1021,16 @@ protected:
 	int32 LocalEquippedQuickBarSlotIndex = INDEX_NONE;
 	int32 LocalEquippedQuickBarQuantity = 0;
 	bool bLocalEquippedQuickBarDirty = true;
+	/** Inventory notifications request a state check, not an actor replacement. */
+	FBotanicusCarriedItemState LocalEquippedQuickBarCarriedState;
+	FSoftObjectPath LocalEquippedClassPath;
+	FSoftObjectPath LocalEquippedCatalogMeshPath;
+	FSoftObjectPath LocalEquippedItemDataMeshPath;
+	FVector LocalEquippedCatalogScale = FVector::OneVector;
+	TWeakObjectPtr<UStaticMesh> LocalEquippedRenderedMesh;
+	/** Explicit transplant OnRep must retain the specialized reconstruction path. */
+	bool bLocalEquippedTransplantDirty = true;
+
 
 	/** A growing plant is carried directly by the player until it is repotted. */
 	UPROPERTY(ReplicatedUsing=OnRep_CarriedTransplantState)

@@ -31,6 +31,16 @@ struct FBotanicusJuiceBurst
 	TWeakObjectPtr<AActor> Source;
 	double ExpireAt=0;
 };
+USTRUCT()
+struct FBotanicusNoctifloreSpore
+{
+    GENERATED_BODY()
+    UPROPERTY() TObjectPtr<UNiagaraComponent> Component;
+    TWeakObjectPtr<UStaticMeshComponent> Foliage;
+    TWeakObjectPtr<UObject> Mesh;
+    double ExpireAt=0;
+    int32 ReservedParticles=0;
+};
 struct FBotanicusWetnessJuice
 {
 	TWeakObjectPtr<UObject> Owner;
@@ -54,7 +64,7 @@ public:
 	/** Called only by the authoritative simulation / successful inventory branch. */
 	static void Growth(AActor* Pot,float Before,float After,UStaticMeshComponent* Foliage);
 	static void HarvestSucceeded(AActor* Pot,UStaticMeshComponent* Foliage);
-	static void BindFoliage(UStaticMeshComponent* Foliage,bool bAlive=true);
+	static void BindFoliage(UStaticMeshComponent* Foliage,bool bAlive=true,bool bNoctiflore=false,float Growth=0.f);
 	void ReceiveLifecycle(uint32 Sequence,AActor* Pot,uint8 Event,const FVector& Position);
 	UFUNCTION(BlueprintPure,Category="Botanicus|Juice|Diagnostics") int32 GetLifecycleBurstCount() const {return LifecycleBursts;}
 	UFUNCTION(BlueprintPure,Category="Botanicus|Juice|Diagnostics") int32 GetLastLifecycleEvent() const {return LastLifecycleEvent;}
@@ -69,8 +79,19 @@ public:
 	UFUNCTION(BlueprintPure,Category="Botanicus|Juice|Diagnostics") int32 GetActiveBurstCount() const {return Bursts.Num();}
 	UFUNCTION(BlueprintPure,Category="Botanicus|Juice|Diagnostics") int32 GetParticleCount() const;
 	UFUNCTION(BlueprintPure,Category="Botanicus|Juice|Diagnostics") int32 GetWetnessTransitionCount() const {return WetnessTransitions.Num();}
+    UFUNCTION(BlueprintPure,Category="Botanicus|Noctiflore|Diagnostics") int32 GetSporeComponentCount() const {return NoctifloreSpores.Num();}
+    UFUNCTION(BlueprintPure,Category="Botanicus|Noctiflore|Diagnostics") int32 GetSporeReservedParticles() const;
+    UFUNCTION(BlueprintPure,Category="Botanicus|Noctiflore|Diagnostics") int32 GetSporeParticleCount() const;
+    UFUNCTION(BlueprintPure,Category="Botanicus|Noctiflore|Diagnostics") int32 GetNoctifloreCandidateCount() const {return NoctifloreCandidates.Num();}
 private:
-	void UpdateMotionParameters();
+    void UpdateNoctiflores();
+    void ClearNoctifloreSpores();
+    UPROPERTY(Transient) TObjectPtr<UBotanicusPlantMotionCatalog> NoctifloreCatalog;
+    UPROPERTY(Transient) TObjectPtr<UNiagaraSystem> SporeSystem;
+    UPROPERTY(Transient) TArray<FBotanicusNoctifloreSpore> NoctifloreSpores;
+    TMap<TWeakObjectPtr<UStaticMeshComponent>,double> NoctifloreCandidates;
+    double NextSporeAt=0;
+    void UpdateMotionParameters();
 	void ReconcileWater();
 	UPROPERTY(Transient) TObjectPtr<UBotanicusPlantMotionCatalog> MotionCatalog;
 	FVector CachedMotionParameters=FVector(-1,-1,-1);

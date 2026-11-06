@@ -1,0 +1,328 @@
+{
+  "head_before": "a3a71a9",
+  "tests": {
+    "equipment": {
+      "passed": true,
+      "assertions": 179,
+      "errors": []
+    },
+    "3A": {
+      "passed": true,
+      "assertions": 247,
+      "errors": []
+    },
+    "3B": {
+      "passed": true,
+      "assertions": 153,
+      "errors": []
+    },
+    "return": {
+      "passed": true,
+      "assertions": 11,
+      "errors": []
+    }
+  },
+  "performance": {
+    "passed": true,
+    "errors": [],
+    "blocks": [
+      {
+        "block": 0,
+        "legacy": true,
+        "seconds": 25.01500000001397,
+        "n": 220,
+        "median": [
+          20.65939998626709,
+          21.19505023956299,
+          9.999999747378752e-05,
+          15.59280014038086
+        ],
+        "p95": [
+          30.360698699951172,
+          29.32069969177246,
+          0.0006000000284984708,
+          17.428600311279297
+        ],
+        "counts": {
+          "EquipmentUpdateCalls": 4524,
+          "EquipmentUpdateNanoseconds": 1161697472,
+          "InventoryNotify": 969,
+          "Rebuild": 968,
+          "LocalDestroyRequested": 968,
+          "CanActorDestroyed": 968,
+          "LocalCanDestroyed": 968,
+          "CanActorSpawned": 968,
+          "LocalCreated": 968
+        },
+        "update_mean_microseconds": 256.7854712643678,
+        "update_cpu_ms_per_wall_second": 46.44003485905861
+      },
+      {
+        "block": 1,
+        "legacy": false,
+        "seconds": 25.015999999945052,
+        "n": 219,
+        "median": [
+          20.564599990844727,
+          20.1919002532959,
+          9.999999747378752e-05,
+          14.551400184631348
+        ],
+        "p95": [
+          26.476301193237305,
+          27.79439926147461,
+          0.0005000000237487257,
+          15.47439956665039
+        ],
+        "counts": {
+          "ReservoirUpdatedInPlace": 956,
+          "RepresentationReused": 956,
+          "EquipmentUpdateCalls": 4740,
+          "EquipmentUpdateNanoseconds": 32821317,
+          "InventoryNotify": 960
+        },
+        "update_mean_microseconds": 6.924328481012658,
+        "update_cpu_ms_per_wall_second": 1.3120129916882033
+      },
+      {
+        "block": 2,
+        "legacy": false,
+        "seconds": 25.015999999945052,
+        "n": 220,
+        "median": [
+          20.958749771118164,
+          19.234950065612793,
+          9.999999747378752e-05,
+          14.730799674987793
+        ],
+        "p95": [
+          26.554201126098633,
+          25.442399978637695,
+          0.000699999975040555,
+          15.423100471496582
+        ],
+        "counts": {
+          "ReservoirUpdatedInPlace": 952,
+          "RepresentationReused": 952,
+          "EquipmentUpdateCalls": 4668,
+          "EquipmentUpdateNanoseconds": 33369553,
+          "InventoryNotify": 954
+        },
+        "update_mean_microseconds": 7.148576049700085,
+        "update_cpu_ms_per_wall_second": 1.333928405823205
+      },
+      {
+        "block": 3,
+        "legacy": true,
+        "seconds": 25.015999999945052,
+        "n": 220,
+        "median": [
+          20.99489974975586,
+          20.73449993133545,
+          9.999999747378752e-05,
+          15.664000034332275
+        ],
+        "p95": [
+          30.39630126953125,
+          31.293100357055664,
+          0.0005000000237487257,
+          17.37649917602539
+        ],
+        "counts": {
+          "EquipmentUpdateCalls": 4512,
+          "EquipmentUpdateNanoseconds": 1144735235,
+          "InventoryNotify": 952,
+          "Rebuild": 948,
+          "LocalDestroyRequested": 948,
+          "CanActorDestroyed": 948,
+          "LocalCanDestroyed": 948,
+          "CanActorSpawned": 948,
+          "LocalCreated": 948
+        },
+        "update_mean_microseconds": 253.7090503102837,
+        "update_cpu_ms_per_wall_second": 45.76012292143086
+      },
+      {
+        "block": 4,
+        "legacy": false,
+        "seconds": 25.015999999945052,
+        "n": 223,
+        "median": [
+          21.08009910583496,
+          19.709699630737305,
+          9.999999747378752e-05,
+          14.700699806213379
+        ],
+        "p95": [
+          29.234800338745117,
+          27.29669952392578,
+          0.0006000000284984708,
+          15.424699783325195
+        ],
+        "counts": {
+          "ReservoirUpdatedInPlace": 960,
+          "RepresentationReused": 960,
+          "EquipmentUpdateCalls": 4692,
+          "EquipmentUpdateNanoseconds": 34099203,
+          "InventoryNotify": 962
+        },
+        "update_mean_microseconds": 7.267519820971867,
+        "update_cpu_ms_per_wall_second": 1.3630957387302087
+      },
+      {
+        "block": 5,
+        "legacy": true,
+        "seconds": 25.01500000001397,
+        "n": 220,
+        "median": [
+          20.985599517822266,
+          22.17710018157959,
+          9.999999747378752e-05,
+          15.6385498046875
+        ],
+        "p95": [
+          28.589401245117188,
+          29.19659996032715,
+          0.0005000000237487257,
+          17.409299850463867
+        ],
+        "counts": {
+          "Rebuild": 956,
+          "LocalDestroyRequested": 956,
+          "CanActorDestroyed": 956,
+          "LocalCanDestroyed": 956,
+          "CanActorSpawned": 956,
+          "LocalCreated": 956,
+          "EquipmentUpdateCalls": 4488,
+          "EquipmentUpdateNanoseconds": 1132172670,
+          "InventoryNotify": 958
+        },
+        "update_mean_microseconds": 252.26663770053474,
+        "update_cpu_ms_per_wall_second": 45.25975094940506
+      },
+      {
+        "block": 6,
+        "legacy": true,
+        "seconds": 25.015999999945052,
+        "n": 219,
+        "median": [
+          21.17620086669922,
+          20.778400421142578,
+          9.999999747378752e-05,
+          15.516200065612793
+        ],
+        "p95": [
+          27.7023983001709,
+          29.34600067138672,
+          0.0005000000237487257,
+          16.946300506591797
+        ],
+        "counts": {
+          "EquipmentUpdateCalls": 4516,
+          "EquipmentUpdateNanoseconds": 1152101660,
+          "InventoryNotify": 970,
+          "Rebuild": 968,
+          "LocalDestroyRequested": 968,
+          "CanActorDestroyed": 968,
+          "LocalCanDestroyed": 968,
+          "CanActorSpawned": 968,
+          "LocalCreated": 968
+        },
+        "update_mean_microseconds": 255.11551372896366,
+        "update_cpu_ms_per_wall_second": 46.05459146156582
+      },
+      {
+        "block": 7,
+        "legacy": false,
+        "seconds": 25.015999999945052,
+        "n": 222,
+        "median": [
+          20.537549018859863,
+          19.409500122070312,
+          9.999999747378752e-05,
+          14.669549942016602
+        ],
+        "p95": [
+          25.525699615478516,
+          25.90169906616211,
+          0.0006000000284984708,
+          15.52400016784668
+        ],
+        "counts": {
+          "EquipmentUpdateCalls": 4756,
+          "EquipmentUpdateNanoseconds": 32819280,
+          "InventoryNotify": 965,
+          "ReservoirUpdatedInPlace": 964,
+          "RepresentationReused": 964
+        },
+        "update_mean_microseconds": 6.900605550883095,
+        "update_cpu_ms_per_wall_second": 1.3119315638020501
+      }
+    ],
+    "groups": [
+      {
+        "legacy": true,
+        "samples": 879,
+        "mean_block_medians": [
+          20.95402503013611,
+          21.22126269340515,
+          9.999999747378752e-05,
+          15.602887511253357
+        ],
+        "pooled_median": [
+          21.004301071166992,
+          21.199199676513672,
+          9.999999747378752e-05,
+          15.60789966583252
+        ],
+        "pooled_p95": [
+          29.68619728088379,
+          29.560800552368164,
+          0.0005000000237487257,
+          17.354400634765625
+        ],
+        "local_created": 3840,
+        "local_destroyed": 3840,
+        "notifications": 3849,
+        "self_time_microseconds": 254.46916825103747
+      },
+      {
+        "legacy": false,
+        "samples": 884,
+        "mean_block_medians": [
+          20.78524947166443,
+          19.636512517929077,
+          9.999999747378752e-05,
+          14.66311240196228
+        ],
+        "pooled_median": [
+          20.816349983215332,
+          19.701400756835938,
+          9.999999747378752e-05,
+          14.664049625396729
+        ],
+        "pooled_p95": [
+          26.76850128173828,
+          26.6742000579834,
+          0.0006000000284984708,
+          15.451299667358398
+        ],
+        "local_created": 0,
+        "local_destroyed": 0,
+        "notifications": 3841,
+        "self_time_microseconds": 7.060257475641927
+      }
+    ]
+  },
+  "preservation": {
+    "total": 1317,
+    "unchanged": 1314,
+    "modified": [
+      "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\Source\\Botanicus\\Botanicus.Build.cs",
+      "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\Source\\Botanicus\\BotanicusPlayerController.cpp",
+      "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\Source\\Botanicus\\BotanicusPlayerController.h"
+    ],
+    "missing": [],
+    "protected_modified": []
+  }
+}

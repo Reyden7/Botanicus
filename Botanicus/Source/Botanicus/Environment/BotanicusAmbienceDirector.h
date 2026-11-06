@@ -117,6 +117,8 @@ public:
 private:
 	void InitializeBindings();
 	void ApplyPresentation(float Minutes, int32 DayNumber, bool bClandestine, bool bForceSky);
+	float ClandestineWeight = 0.f;
+	bool bClandestineSample = false;
 	bool bBindingsInitialized = false;
 	bool bHasTimeSample = false;
 	float VisualMinutes = 0.0f;

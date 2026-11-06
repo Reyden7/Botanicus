@@ -771,7 +771,7 @@ void ABotanicusIllegalPlanterActor::RefreshVisuals()
 		}
 	}
 	for (int32 Index=0;Index<PlantVisuals.Num();++Index)
-		if(PlantSlots.IsValidIndex(Index) && !PlantSlots[Index].PlantId.IsNone()) UBotanicusJuiceWorldSubsystem::BindFoliage(PlantVisuals[Index]);
+		if(PlantSlots.IsValidIndex(Index) && !PlantSlots[Index].PlantId.IsNone()) UBotanicusJuiceWorldSubsystem::BindFoliage(PlantVisuals[Index],true,PlantSlots[Index].PlantId==TEXT("Noctiflore"),PlantSlots[Index].GrowthProgress);
 	const int32 WaterPercent = FMath::RoundToInt(100.0f * AverageWaterRatio);
 	StatusText->SetText(FText::Format(
 		NSLOCTEXT("BotanicusIllegalTrade", "PlanterStatus", "NOCTIFLORE  |  Eau moy. {0}%  |  Mûres {1}/{2}"),
