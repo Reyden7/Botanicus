@@ -10,6 +10,7 @@ class AExponentialHeightFog;
 class APostProcessVolume;
 class ALight;
 class UCurveFloat;
+class ABotanicusClandestineDoor;
 
 /** One placed, non-replicated presentation controller per level, on every peer. */
 UCLASS(Blueprintable)
@@ -106,6 +107,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Ambience|Clandestine")
 	FLinearColor ClandestineTint = FLinearColor(0.35f, 0.58f, 1.0f);
 
+    /** Optional sectional door supplies synchronized public/neon presentation phases. */
+    UPROPERTY(EditInstanceOnly,BlueprintReadWrite,Category="Ambience|Night reveal") TObjectPtr<ABotanicusClandestineDoor> ClandestineDoor;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Ambience|Night reveal",meta=(ClampMin="0")) float StandbyIntensity=200.f;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Ambience|Night reveal",meta=(ClampMin=".1")) float ShopLightTransitionSeconds=3.f;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Ambience|Night reveal") FLinearColor StandbyTint=FLinearColor(1.f,.64f,.32f);
 	/** Refresh from replicated GameState; also used by integration automation. */
 	void RefreshFromGameState(float DeltaSeconds);
 	float GetVisualMinutes() const { return VisualMinutes; }

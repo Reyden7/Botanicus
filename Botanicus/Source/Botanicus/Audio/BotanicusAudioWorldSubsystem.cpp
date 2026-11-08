@@ -218,3 +218,19 @@ void UBotanicusAudioWorldSubsystem::Deinitialize()
 	for(auto& Pair:WaterVoices) if(Pair.Value.Component){Pair.Value.Component->Stop();Pair.Value.Component->DestroyComponent();}
 	WaterVoices.Reset();Super::Deinitialize();
 }
+
+UAudioComponent* UBotanicusAudioWorldSubsystem::PlaySpatialTransition(AActor* Owner,USoundBase* Asset,const FVector& Position,float Volume,float StartAt)
+{
+    if(!Owner || !Asset || GetWorld()->GetNetMode()==NM_DedicatedServer || FVector::DistSquared(ListenerPosition(),Position)>FMath::Square(1800.f))return nullptr;
+    LoadCatalog();
+    if(!TransitionConcurrency)
+    {
+        TransitionConcurrency=NewObject<USoundConcurrency>(this);TransitionConcurrency->Concurrency.MaxCount=2;
+        TransitionConcurrency->Concurrency.bLimitToOwner=true;TransitionConcurrency->Concurrency.ResolutionRule=EMaxConcurrentResolutionRule::StopQuietest;
+    }
+    auto* Voice=NewObject<UAudioComponent>(Owner);Voice->bAutoActivate=false;Voice->bAutoDestroy=true;Voice->bStopWhenOwnerDestroyed=true;
+    Voice->SetSound(Asset);Voice->bAllowSpatialization=true;if(Catalog)Voice->AttenuationSettings=Catalog->InteractionAttenuation;
+    Voice->ConcurrencySet.Add(TransitionConcurrency);Voice->SetVolumeMultiplier(FMath::Clamp(Volume,0.f,1.f));
+    Voice->RegisterComponentWithWorld(GetWorld());Voice->SetWorldLocation(Position);Voice->Play(FMath::Max(0.f,StartAt));
+    if(Voice->IsPlaying())++PlayCounts.FindOrAdd(Asset->GetFName());return Voice;
+}

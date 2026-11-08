@@ -6,6 +6,7 @@
 #include "BotanicusGameState.h"
 #include "BotanicusPlayerController.h"
 #include "Components/CanvasPanel.h"
+#include "Components/Border.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/Image.h"
 #include "Components/Overlay.h"
@@ -44,6 +45,7 @@ void UBotanicusClockWidget::NativeOnInitialized()
 	{
 		BuildLayout();
 	}
+    EnsureScheduleBackdrop();
 	SetVisibility(ESlateVisibility::HitTestInvisible);
 	RefreshClock();
 }
@@ -53,7 +55,7 @@ void UBotanicusClockWidget::NativeTick(
 	float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
-	RefreshClock();
+	RefreshClock(InDeltaTime);
 }
 
 void UBotanicusClockWidget::BuildLayout()
@@ -117,7 +119,18 @@ void UBotanicusClockWidget::BuildLayout()
 	FurnitureSlot->SetAutoSize(true);
 }
 
-void UBotanicusClockWidget::RefreshClock()
+void UBotanicusClockWidget::EnsureScheduleBackdrop()
+{
+    if(!ScheduleLabel || ScheduleBackdrop || !WidgetTree)return;
+    auto* Canvas=Cast<UCanvasPanel>(ScheduleLabel->GetParent());auto* OldSlot=Cast<UCanvasPanelSlot>(ScheduleLabel->Slot);
+    if(!Canvas || !OldSlot)return;
+    const FAnchorData Layout=OldSlot->GetLayout();const bool bAutoSize=OldSlot->GetAutoSize();const int32 Z=OldSlot->GetZOrder();
+    ScheduleLabel->RemoveFromParent();ScheduleBackdrop=WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(),TEXT("RuntimeScheduleBackdrop"));
+    ScheduleBackdrop->SetPadding(FMargin(0));ScheduleBackdrop->SetHorizontalAlignment(HAlign_Fill);ScheduleBackdrop->SetVerticalAlignment(VAlign_Center);
+    ScheduleBackdrop->SetContent(ScheduleLabel);auto* NewSlot=Canvas->AddChildToCanvas(ScheduleBackdrop);NewSlot->SetLayout(Layout);NewSlot->SetAutoSize(bAutoSize);NewSlot->SetZOrder(Z);
+    ScheduleBackdrop->SetBrushColor(FLinearColor::Transparent);
+}
+void UBotanicusClockWidget::RefreshClock(float DeltaSeconds)
 {
 	const UWorld* World = GetWorld();
 	const ABotanicusGameState* GameState =
@@ -141,16 +154,18 @@ void UBotanicusClockWidget::RefreshClock()
 		TimeLabel->SetText(FText::FromString(FString::Printf(
 			TEXT("%02d:%02d"), Hour, Minute)));
 	}
-	if (ScheduleLabel)
-	{
-		ScheduleLabel->SetText(FText::FromString(FString::Printf(
-			TEXT("BOUTIQUE %s   08:00 - 19:00"),
-			GameState->IsMainShopOpen() ? TEXT("OUVERTE") : TEXT("FERMEE"))));
-		ScheduleLabel->SetColorAndOpacity(FSlateColor(
-			GameState->IsMainShopOpen()
-				? FLinearColor(0.75f, 0.91f, 0.54f, 1.0f)
-				: FLinearColor(1.0f, 0.55f, 0.35f, 1.0f)));
-	}
+    const int32 Status=GameState->IsIllegalTradeActive() ? 2:GameState->IsMainShopOpen() ? 1:0;
+    if(ScheduleLabel && Status!=LastStatus)
+    {
+        ScheduleLabel->SetText(FText::FromString(Status==2 ? TEXT("BOUTIQUE CLANDESTINE OUVERTE") : Status==1 ? TEXT("BOUTIQUE OUVERTE") : TEXT("BOUTIQUE FERMÉE")));
+        ScheduleLabel->SetColorAndOpacity(FSlateColor(FLinearColor(.96f,.94f,.85f,1)));
+        StatusFrom=StatusTint;StatusTarget=Status==2 ? FLinearColor(.24f,.018f,.05f,.96f) : Status==1 ? FLinearColor::Transparent : FLinearColor(.025f,.032f,.035f,.96f);
+        StatusBlend=LastStatus<0 ? 1.f:0.f;LastStatus=Status;
+    }
+    StatusBlend=FMath::Clamp(StatusBlend+FMath::Max(0.f,DeltaSeconds)/.25f,0.f,1.f);StatusTint=FMath::Lerp(StatusFrom,StatusTarget,StatusBlend);
+    if(ScheduleBackdrop)ScheduleBackdrop->SetBrushColor(StatusTint);
+    if(ScheduleLabel)ScheduleLabel->SetRenderOpacity(1.f-.10f*FMath::Sin(PI*StatusBlend));
+
 	if (FurnitureModeLabel)
 	{
 		const ABotanicusPlayerController* Controller =

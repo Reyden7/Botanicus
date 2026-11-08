@@ -1,4 +1,5 @@
 #include "Environment/BotanicusAmbienceDirector.h"
+#include "Environment/BotanicusClandestineDoor.h"
 
 #include "Botanicus.h"
 #include "Visuals/BotanicusNoctifloreSettings.h"
@@ -182,8 +183,14 @@ void ABotanicusAmbienceDirector::ApplyPresentation(float Minutes, int32 DayNumbe
 	for (ALight* Actor : InteriorLights)
 	{
 		if (!IsValid(Actor)) continue;
-		Actor->GetLightComponent()->SetIntensity(FMath::Lerp(InteriorNightIntensity, InteriorDayIntensity, Phase.SkyBlend));
-		Actor->GetLightComponent()->SetLightColor(InteriorTint);
+        float PublicWeight=1.f;
+        if(IsValid(ClandestineDoor))
+        {
+            const auto* GS=GetWorld()->GetGameState<ABotanicusGameState>();
+            PublicWeight=ClandestineDoor->IsPresentationReady() ? ClandestineDoor->GetPublicLightWeight() : GS && GS->IsMainShopOpen() ? 1.f:0.f;
+        }
+        Actor->GetLightComponent()->SetIntensity(FMath::Lerp(StandbyIntensity,FMath::Lerp(InteriorNightIntensity,InteriorDayIntensity,Phase.SkyBlend),PublicWeight));
+        Actor->GetLightComponent()->SetLightColor(FMath::Lerp(StandbyTint,InteriorTint,PublicWeight));
 	}
 	for (ALight* Actor : ClandestineLights)
 	{
@@ -191,9 +198,10 @@ void ABotanicusAmbienceDirector::ApplyPresentation(float Minutes, int32 DayNumbe
 		const auto* Noct=GetDefault<UBotanicusNoctifloreSettings>();
         const float Variation=1.f+FMath::Clamp(Noct->LightVariation,0.f,.05f)*FMath::Sin(GetWorld()->GetTimeSeconds()*.45f);
         const float Weight=Noct->bEnabled ? ClandestineWeight : (bClandestine ? 1.f : 0.f);
-        Actor->GetLightComponent()->SetIntensity(ClandestineIntensity * (1.f-Phase.SkyBlend) * Weight *
+        const float NeonWeight=IsValid(ClandestineDoor) ? ClandestineDoor->GetNeonWeight() : (1.f-Phase.SkyBlend)*Weight;
+        Actor->GetLightComponent()->SetIntensity(ClandestineIntensity * NeonWeight *
             (Noct->bEnabled ? FMath::Clamp(Noct->LightIntensityMultiplier,.5f,1.5f)*Variation : 1.f));
-        Actor->GetLightComponent()->SetLightColor(Noct->bEnabled ? Noct->LightTint : ClandestineTint);
+        Actor->GetLightComponent()->SetLightColor(IsValid(ClandestineDoor) ? ClandestineDoor->NeonColor : Noct->bEnabled ? Noct->LightTint : ClandestineTint);
 	}
 	const double Now = FPlatformTime::Seconds();
 	if (IsValid(LegacySkySphere) && SkyUpdateFunction.IsValid() &&
