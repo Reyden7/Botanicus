@@ -142,10 +142,10 @@ int32 UBotanicusPlantGrowthWidget::NativePaint(
 	const float Radius = 40.0f * FMath::Min(ScaleX, ScaleY);
 	DrawRing(OutDrawElements, AllottedGeometry, LayerId,
 		FVector2D(126.0f * ScaleX, 81.0f * ScaleY), Radius,
-		WaterPercent, FLinearColor(0.02f, 0.55f, 1.0f, 1.0f));
+		WaterPercent, FLinearColor(0.02f, 0.55f, 1.0f, 1.0f) * InWidgetStyle.GetColorAndOpacityTint());
 	DrawRing(OutDrawElements, AllottedGeometry, LayerId,
 		FVector2D(234.0f * ScaleX, 81.0f * ScaleY), Radius,
-		GrowthPercent, FLinearColor(0.35f, 0.86f, 0.12f, 1.0f));
+		GrowthPercent, FLinearColor(0.35f, 0.86f, 0.12f, 1.0f) * InWidgetStyle.GetColorAndOpacityTint());
 	return Super::NativePaint(Args, AllottedGeometry, MyCullingRect,
 		OutDrawElements, LayerId + 2, InWidgetStyle, bParentEnabled);
 }

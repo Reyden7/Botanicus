@@ -112,6 +112,18 @@ bool UBotanicusCashRegisterValidation::Step(UObject* Context,FName Action)
     if(!bCashValidationExecuting) {TWeakObjectPtr<UWorld> Weak=W;W->GetTimerManager().SetTimerForNextTick([Weak,Action](){if(Weak.IsValid()){TGuardValue<bool> Guard(bCashValidationExecuting,true);Step(Weak.Get(),Action);}});return true;}
     auto* Cash=CashValidationRegister(W);auto* PC=Cast<ABotanicusPlayerController>(W->GetFirstPlayerController());if(!Cash || !PC) return false;
     auto* Scanner=Cash->GetDockScanner();auto* Customer=CashValidationCustomer(W);
+    if(Action==TEXT("DeskSupport"))
+    {
+        if(W->GetNetMode()==NM_Client) return false;
+        UClass* Class=LoadClass<AActor>(nullptr,TEXT("/Game/Botanicus/blueprints/BP_Item_WorkSurfaceMedium.BP_Item_WorkSurfaceMedium_C"));
+        FActorSpawnParameters Params;Params.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+        auto* Desk=W->SpawnActor<AActor>(Class,Cash->GetActorLocation(),FRotator::ZeroRotator,Params);if(!Desk) return false;
+        Desk->Tags.Add(TEXT("CashCounterSupportTest"));float Top=-FLT_MAX;
+        TInlineComponentArray<UStaticMeshComponent*> Parts;Desk->GetComponents(Parts);
+        for(auto* Part:Parts) if(Part->IsVisible() && Part->GetStaticMesh()) Top=FMath::Max(Top,static_cast<float>(Part->Bounds.Origin.Z+Part->Bounds.BoxExtent.Z));
+        if(Top==-FLT_MAX) return false;
+        FVector Position=Cash->GetActorLocation();Position.Z=Top+Cash->GetPlacementPivotToBottomOffset();Cash->SetActorLocation(Position);Cash->ForceNetUpdate();return true;
+    }
     if(Action==TEXT("PrepareIllegal"))
     {
         if(W->GetNetMode()==NM_Client || !PC->GetPawn()) return false;auto* GS=W->GetGameState<ABotanicusGameState>();const auto* Settings=GetDefault<UBotanicusIllegalTradeSettings>();if(!GS || Settings->Plants.IsEmpty()) return false;

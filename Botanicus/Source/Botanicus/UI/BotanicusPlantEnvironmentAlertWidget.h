@@ -8,6 +8,7 @@
 #include "BotanicusPlantEnvironmentAlertWidget.generated.h"
 
 class UImage;
+class UTexture2D;
 
 /** World-space row of climate warnings displayed above a growing plant. */
 UCLASS()
@@ -17,6 +18,7 @@ class BOTANICUS_API UBotanicusPlantEnvironmentAlertWidget
 	GENERATED_BODY()
 
 public:
+    void SetContextAlert(UTexture2D* Texture,const FLinearColor& Tint);
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Plant UI")
 	void SetEnvironmentState(
 		const FBotanicusPlantEnvironmentState& EnvironmentState);

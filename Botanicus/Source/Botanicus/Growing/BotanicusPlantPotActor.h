@@ -110,6 +110,7 @@ protected:
 	void RefreshSeedInteractionPreview();
 
 private:
+    friend class UBotanicusPlantContextSubsystem;
 	FName GetSelectedItemKey(AActor* Interactor) const;
 	const FBotanicusPlantDefinition* GetPlantDefinition() const;
 	float GetCareRating() const;

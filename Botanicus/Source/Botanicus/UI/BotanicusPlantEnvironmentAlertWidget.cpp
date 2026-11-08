@@ -121,3 +121,15 @@ bool UBotanicusPlantEnvironmentAlertWidget::ApplyConditionIcon(
 	Image->SetVisibility(ESlateVisibility::HitTestInvisible);
 	return true;
 }
+
+void UBotanicusPlantEnvironmentAlertWidget::SetContextAlert(UTexture2D* Texture,const FLinearColor& Tint)
+{
+    bHasAnyAlert=Texture!=nullptr;
+    if(AirHumidityImage) AirHumidityImage->SetVisibility(ESlateVisibility::Collapsed);
+    if(LuminosityImage) LuminosityImage->SetVisibility(ESlateVisibility::Collapsed);
+    if(!TemperatureImage) return;
+    if(auto* CanvasSlot=Cast<UCanvasPanelSlot>(TemperatureImage->Slot)) CanvasSlot->SetPosition(FVector2D(84,0));
+    if(TemperatureImage->GetBrush().GetResourceObject()!=Texture) TemperatureImage->SetBrushFromTexture(Texture,true);
+    TemperatureImage->SetColorAndOpacity(Tint);
+    TemperatureImage->SetVisibility(Texture ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+}

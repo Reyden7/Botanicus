@@ -73,6 +73,7 @@ protected:
 	virtual void ApplyItemDefinition() override;
 
 private:
+    friend class UBotanicusPlantContextSubsystem;
 	enum class EPrimaryUseMode : uint8
 	{
 		None,

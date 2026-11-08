@@ -1,6 +1,8 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "BotanicusPlayerController.h"
+#include "UI/BotanicusPlantContextSubsystem.h"
+#include "UI/BotanicusPlantContextSettings.h"
 #if WITH_EDITOR
 #include "Editor/BotanicusEquipmentValidation.h"
 #endif
@@ -889,6 +891,8 @@ void ABotanicusPlayerController::PlayerTick(float DeltaTime)
 			InteractionHighlightRefreshAccumulator = 0.0f;
 			RefreshInteractionTargetHighlight();
 		}
+
+		if (auto* Context=GetWorld()->GetSubsystem<UBotanicusPlantContextSubsystem>()) Context->Update(*this,DeltaTime);
 
 		const float AzertyForward =
 			(bAzertyForwardPressed ? 1.0f : 0.0f) -
@@ -1849,6 +1853,8 @@ void ABotanicusPlayerController::RefreshInteractionTargetHighlight()
 		 ClimateDeviceControlWidget->IsInViewport());
 
     bCheckoutContextBlocked=bInteractionViewBlocked;
+    auto* PlantContext=GetWorld() ? GetWorld()->GetSubsystem<UBotanicusPlantContextSubsystem>() : nullptr;
+    if (PlantContext && (bInteractionViewBlocked || !GetPawn())) PlantContext->ObserveAim(*this,FHitResult());
 	if (!bInteractionViewBlocked && GetWorld() && GetPawn())
 	{
 		FVector ViewLocation;
@@ -1865,14 +1871,16 @@ void ABotanicusPlayerController::RefreshInteractionTargetHighlight()
 		}
 
 		FHitResult Hit;
-		if (GetWorld()->LineTraceSingleByChannel(
+		const bool bAimHit=GetWorld()->LineTraceSingleByChannel(
 				Hit,
 				ViewLocation,
 				ViewLocation +
 					ViewRotation.Vector() *
-						(MaximumWorldInteractionDistance + 200.0f),
+						FMath::Max(MaximumWorldInteractionDistance + 200.0f, GetDefault<UBotanicusPlantContextSettings>()->PanelDistance),
 				ECC_Visibility,
-				QueryParams) &&
+				QueryParams);
+        if (PlantContext) PlantContext->ObserveAim(*this,bAimHit ? Hit : FHitResult());
+        if (bAimHit &&
 			FVector::DistSquared2D(
 				GetPawn()->GetActorLocation(),
 				Hit.ImpactPoint) <=
@@ -5825,13 +5833,19 @@ bool ABotanicusPlayerController::TryPlaceHeldSalePotOnWorkbench()
 
 void ABotanicusPlayerController::UpdateHeldWorldItemPreview()
 {
-	if (!IsLocalPlayerController() || !GetPawn() ||
-
-		!IsValid(LocalMovedPlaceableItem) ||
-		!IsValid(LocalInspectedQuickBarItem))
-	{
-		return;
-	}
+    if (!IsLocalPlayerController()) return;
+    const bool bMovingWorldItem = IsValid(LocalMovedPlaceableItem);
+    const bool bPlacingQuickBarItem = IsValid(LocalQuickBarItemPreview);
+    // A also creates an inspection actor for a quickbar item, with no moved
+    // physical item. Both supported contexts must update the held pose.
+    if (!IsValid(GetPawn()) || (!bMovingWorldItem && !bPlacingQuickBarItem))
+    {
+        if (IsValid(LocalInspectedQuickBarItem) || bMovingWorldItem ||
+            bPlacingQuickBarItem || LocalQuickBarItemSlotIndex != INDEX_NONE)
+            CancelQuickBarItemPlacement();
+        return;
+    }
+    if (!IsValid(LocalInspectedQuickBarItem)) return;
 
 	FVector ViewLocation;
 	FRotator ViewRotation;
@@ -5899,14 +5913,23 @@ void ABotanicusPlayerController::UpdateQuickBarItemPlacement(
 
 	if (!IsValid(LocalMovedPlaceableItem))
 	{
+
+        const FBotanicusQuickBarSlot SelectedSlot = QuickBar
+            ? QuickBar->GetSlot(LocalQuickBarItemSlotIndex) : FBotanicusQuickBarSlot();
+        if (!QuickBar || SelectedSlot.IsEmpty() ||
+            QuickBar->GetSelectedSlotIndex() != LocalQuickBarItemSlotIndex ||
+            SelectedSlot.ItemKey != LocalQuickBarItemKey ||
+            SelectedSlot.InstanceId != LocalQuickBarItemInstanceId)
+        {
+            CancelQuickBarItemPlacement();
+            return;
+        }
 		const bool bSupportsGroundQuantity =
 			LocalQuickBarItemKey == TEXT("PottingSoil") ||
 			IsSeedPacketItemKey(LocalQuickBarItemKey);
 		if (bSupportsGroundQuantity &&
 			QuickBar)
 		{
-			const FBotanicusQuickBarSlot SelectedSlot =
-				QuickBar->GetSlot(LocalQuickBarItemSlotIndex);
 			const FBotanicusItemDefinition* Definition =
 				FindItemDefinition(this, LocalQuickBarItemKey);
 			const int32 ItemGroundLimit =
@@ -8043,13 +8066,7 @@ bool ABotanicusPlayerController::TryTogglePlantInspection()
 		return false;
 	}
 
-	const bool bOpen = !PlantPot->IsInspectionVisible();
-	if (LocalInspectedPlant.IsValid() && LocalInspectedPlant.Get() != PlantPot)
-	{
-		LocalInspectedPlant->SetInspectionVisible(false);
-	}
-	PlantPot->SetInspectionVisible(bOpen);
-	LocalInspectedPlant = bOpen ? PlantPot : nullptr;
+	// Details now follow local aim automatically; right click no longer pins a stale panel.
 	return true;
 }
 

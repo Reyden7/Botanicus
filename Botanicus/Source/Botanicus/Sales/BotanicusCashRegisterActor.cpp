@@ -25,14 +25,14 @@ ABotanicusCashRegisterActor::ABotanicusCashRegisterActor()
 	UStaticMesh* Cube =
 		CubeFinder.Succeeded() ? CubeFinder.Object : nullptr;
 
-	Mesh->SetStaticMesh(Cube);
+	Mesh->SetStaticMesh(nullptr);
 	Mesh->SetRelativeLocation(FVector(0.0f, 0.0f, 48.0f));
 	Mesh->SetRelativeScale3D(FVector(0.75f, 0.42f, 0.48f));
 
 	CounterVisual = CreateDefaultSubobject<UStaticMeshComponent>(
 		TEXT("Checkout Counter"));
 	CounterVisual->SetupAttachment(SceneRoot);
-	CounterVisual->SetStaticMesh(Cube);
+	CounterVisual->SetStaticMesh(nullptr);
 	CounterVisual->SetRelativeLocation(FVector(0.0f, 0.0f, 48.0f));
 	CounterVisual->SetRelativeScale3D(FVector(0.75f, 0.42f, 0.48f));
 	CounterVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -40,7 +40,7 @@ ABotanicusCashRegisterActor::ABotanicusCashRegisterActor()
 	RegisterVisual = CreateDefaultSubobject<UStaticMeshComponent>(
 		TEXT("Cash Register"));
 	RegisterVisual->SetupAttachment(SceneRoot);
-	RegisterVisual->SetStaticMesh(Cube);
+	RegisterVisual->SetStaticMesh(nullptr);
 	RegisterVisual->SetRelativeLocation(FVector(-8.0f, 0.0f, 105.0f));
 	RegisterVisual->SetRelativeScale3D(FVector(0.28f, 0.24f, 0.14f));
 	RegisterVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -48,7 +48,7 @@ ABotanicusCashRegisterActor::ABotanicusCashRegisterActor()
 	ScreenVisual = CreateDefaultSubobject<UStaticMeshComponent>(
 		TEXT("Register Screen"));
 	ScreenVisual->SetupAttachment(SceneRoot);
-	ScreenVisual->SetStaticMesh(Cube);
+	ScreenVisual->SetStaticMesh(nullptr);
 	ScreenVisual->SetRelativeLocation(FVector(20.0f, 0.0f, 119.0f));
 	ScreenVisual->SetRelativeScale3D(FVector(0.20f, 0.08f, 0.16f));
 	ScreenVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -116,6 +116,7 @@ ABotanicusCashRegisterActor::ABotanicusCashRegisterActor()
 	SelfCheckoutZoneLabel->SetVisibility(false);
 
 	InitializeCheckoutComponents();
+    ConfigureRegisterRepresentation();
 	RefreshVisuals();
 }
 
@@ -135,7 +136,7 @@ void ABotanicusCashRegisterActor::InitializeVisualMaterials()
 	// Dynamic material instances are runtime objects. Creating them in the
 	// native constructor makes child Blueprint defaults reference transient
 	// objects and prevents those Blueprints from being saved.
-	if (ScreenVisual)
+	if (ScreenVisual && ScreenVisual->GetStaticMesh())
 	{
 		if (UMaterialInstanceDynamic* ScreenMaterial =
 				ScreenVisual->CreateAndSetMaterialInstanceDynamic(0))
@@ -447,4 +448,16 @@ void ABotanicusCashRegisterActor::RefreshVisuals()
 
     // A single contextual HUD card replaces the two overlapping manual labels.
     StatusText->SetVisibility(false);ContextActionText->SetVisibility(false);
+}
+
+void ABotanicusCashRegisterActor::OnConstruction(const FTransform& Transform)
+{
+    Super::OnConstruction(Transform);
+    ConfigureRegisterRepresentation();
+}
+
+void ABotanicusCashRegisterActor::ApplyItemDefinition()
+{
+    // This specialized two-mesh appearance must not be replaced by the legacy catalogue cube.
+    ConfigureRegisterRepresentation();
 }

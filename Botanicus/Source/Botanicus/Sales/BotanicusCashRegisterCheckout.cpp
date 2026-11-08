@@ -37,12 +37,7 @@ void ABotanicusCashRegisterActor::BeginCheckout()
 {
     if(ActorHasTag(TEXT("BotanicusPlacementPreview")) || ActorHasTag(TEXT("BotanicusEquippedPreview")) || !GetIsReplicated()) return;
     const auto* S=GetDefault<UBotanicusCheckoutSettings>();
-    const FTransform VisualPose(S->RegisterVisualRotation,S->RegisterVisualOffset,FVector(FMath::Clamp(S->RegisterVisualScale,.01f,2.f)));
-    ScannerDock->SetRelativeLocationAndRotation(S->ScannerDockOffset,S->ScannerDockRotation);
-    DrawerClosedTarget->SetRelativeLocation(VisualPose.GetLocation());
-    DrawerOpenTarget->SetRelativeLocation(VisualPose.TransformPosition(S->DrawerOpenOffset));
-    DrawerVisualRoot->SetRelativeTransform(VisualPose);
-    DrawerTarget->SetRelativeLocation(S->DrawerInteriorTarget);
+    ConfigureRegisterRepresentation();
     if(HasAuthority())
     {
         if(!RegisterId.IsValid()) RegisterId=FGuid::NewGuid();
@@ -52,16 +47,6 @@ void ABotanicusCashRegisterActor::BeginCheckout()
         if(!PaymentCoins)
         {UClass* Class=S->PaymentCoinsClass.LoadSynchronous();PaymentCoins=GetWorld()->SpawnActor<ABotanicusPaymentCoins>(Class ? Class : ABotanicusPaymentCoins::StaticClass(),Params);if(PaymentCoins) PaymentCoins->InitializeRegister(this);}
         ForceNetUpdate();
-    }
-    if(GetNetMode()!=NM_DedicatedServer)
-    {
-        auto* Body=S->RegisterBodyMesh.LoadSynchronous();auto* Tray=S->RegisterDrawerMesh.LoadSynchronous();
-        RegisterVisual->SetStaticMesh(Body);RegisterVisual->SetRelativeTransform(VisualPose);RegisterVisual->EmptyOverrideMaterials();
-        DrawerMesh->SetStaticMesh(Tray);DrawerMesh->SetRelativeTransform(FTransform::Identity);DrawerMesh->EmptyOverrideMaterials();
-        ScreenVisual->SetVisibility(false);DrawerLip->SetVisibility(false);
-        auto* Cube=LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Cube.Cube"));ScannerDockMesh->SetStaticMesh(Cube);
-        if(auto* Base=S->BodyMaterial.LoadSynchronous())
-        {auto* MID=UMaterialInstanceDynamic::Create(Base,this);MID->SetVectorParameterValue(TEXT("Color"),FLinearColor(.06f,.17f,.14f));ScannerDockMesh->SetMaterial(0,MID);}
     }
     OnRep_Checkout();
 }
@@ -181,4 +166,31 @@ void ABotanicusCashRegisterActor::UpdatePaymentAnchor(ABotanicusVisitorCharacter
     }
     Floor.Z+=FMath::Clamp(GetDefault<UBotanicusCheckoutSettings>()->CoinFloatHeight,30.f,160.f);
     Receipt.PaymentAnchor=FTransform(GetActorQuat(),Floor);Receipt.bHasPaymentAnchor=true;
+}
+
+void ABotanicusCashRegisterActor::ConfigureRegisterRepresentation()
+{
+    const auto* S=GetDefault<UBotanicusCheckoutSettings>();
+    const FTransform Pose(S->RegisterVisualRotation,S->RegisterVisualOffset,FVector(FMath::Clamp(S->RegisterVisualScale,.01f,2.f)));
+    Mesh->SetStaticMesh(S->RegisterBodyMesh.LoadSynchronous());
+    Mesh->SetRelativeTransform(Pose);
+    Mesh->EmptyOverrideMaterials();
+    // Keep the inherited main mesh as the correctly sized placement/collision body.
+    // Retain obsolete component names for Blueprint compatibility, but no geometry or ghost collision.
+    for(UStaticMeshComponent* Obsolete : {CounterVisual.Get(),RegisterVisual.Get(),ScreenVisual.Get(),DrawerLip.Get(),ScannerDockMesh.Get()})
+    {
+        if(!Obsolete) continue;
+        Obsolete->SetStaticMesh(nullptr);Obsolete->EmptyOverrideMaterials();
+        Obsolete->SetRelativeTransform(FTransform::Identity);
+        Obsolete->SetVisibility(false);Obsolete->SetHiddenInGame(true);
+        Obsolete->SetCollisionEnabled(ECollisionEnabled::NoCollision);Obsolete->SetCanEverAffectNavigation(false);
+    }
+    DrawerMesh->SetStaticMesh(S->RegisterDrawerMesh.LoadSynchronous());
+    DrawerMesh->SetRelativeTransform(FTransform::Identity);DrawerMesh->EmptyOverrideMaterials();
+    DrawerVisualRoot->SetRelativeTransform(Pose);
+    DrawerClosedTarget->SetRelativeLocation(Pose.GetLocation());
+    DrawerOpenTarget->SetRelativeLocation(Pose.TransformPosition(S->DrawerOpenOffset));
+    DrawerTarget->SetRelativeLocation(S->DrawerInteriorTarget);
+    ScannerDock->SetRelativeLocationAndRotation(S->ScannerDockOffset,S->ScannerDockRotation);
+    CoinDropPoint->SetRelativeLocation(FVector(-18,-12,5));
 }

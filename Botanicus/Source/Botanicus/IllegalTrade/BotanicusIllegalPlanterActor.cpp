@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "IllegalTrade/BotanicusIllegalPlanterActor.h"
+#include "UI/BotanicusPlantContextSubsystem.h"
 #include "Visuals/BotanicusJuiceWorldSubsystem.h"
 #include "Audio/BotanicusAudioWorldSubsystem.h"
 
@@ -159,6 +160,8 @@ void ABotanicusIllegalPlanterActor::BeginPlay()
 		GrowthWidget->InitWidget();
 	}
 	RefreshVisuals();
+
+    if(auto* Context=GetWorld()->GetSubsystem<UBotanicusPlantContextSubsystem>()) Context->RegisterPlant(this);
 }
 
 void ABotanicusIllegalPlanterActor::ApplyItemDefinition()
@@ -815,9 +818,7 @@ void ABotanicusIllegalPlanterActor::RefreshGrowthWidgets()
 			!PlantSlots[Index].PlantId.IsNone();
 		GrowthComponent->SetRelativeScale3D(
 			FVector(PlantGrowthWidgetScale));
-		GrowthComponent->SetVisibility(
-			bOccupied &&
-			!ActorHasTag(TEXT("BotanicusPlacementPreview")));
+		if (!bOccupied || ActorHasTag(TEXT("BotanicusPlacementPreview"))) GrowthComponent->SetVisibility(false);
 		if (!bOccupied)
 		{
 			continue;
@@ -837,7 +838,7 @@ void ABotanicusIllegalPlanterActor::RefreshGrowthWidgets()
 			FMath::Max(PlantTopHeight, PlanterRimHeight) +
 			PlantGrowthWidgetClearance + WidgetBelowPivot));
 
-		if (CameraManager)
+		if (CameraManager && GrowthComponent->IsVisible())
 		{
 			GrowthComponent->SetWorldRotation(
 				(CameraManager->GetCameraLocation() -

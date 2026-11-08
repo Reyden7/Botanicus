@@ -94,6 +94,7 @@ class BOTANICUS_API ABotanicusPlayerController : public APlayerController
 	
 public:
     friend class UBotanicusCashRegisterValidation;
+    friend class UBotanicusPlantContextValidation;
     ABotanicusCheckoutScanner* GetCheckoutScanner() const;
     void SetCheckoutScannerReference(ABotanicusCheckoutScanner* Scanner);
     bool CanTakeCheckoutScanner() const;

@@ -22,7 +22,7 @@ public:
     UPROPERTY(EditAnywhere,Config,Category="Hologram",meta=(ClampMin="0",ClampMax="2")) float FresnelIntensity=.65f;
     UPROPERTY(EditAnywhere,Config,Category="Hologram",meta=(ClampMin="0",ClampMax="3")) float EmissiveIntensity=1.1f;
     UPROPERTY(EditAnywhere,Config,Category="Hologram",meta=(ClampMin="0",ClampMax="0.25")) float ColorTransitionSeconds=.10f;
-    UPROPERTY(EditAnywhere,Config,Category="Animation") bool bFlyFromHand=true;
+    UPROPERTY(EditAnywhere,Config,Category="Animation") bool bFlyFromHand=false;
     UPROPERTY(EditAnywhere,Config,Category="Animation",meta=(ClampMin="0.03",ClampMax="0.3")) float FlyDuration=.10f;
     UPROPERTY(EditAnywhere,Config,Category="Animation",meta=(ClampMin="0.06",ClampMax="0.3")) float GrowDuration=.15f;
     UPROPERTY(EditAnywhere,Config,Category="Animation",meta=(ClampMin="0.04",ClampMax="0.3")) float BounceDuration=.12f;

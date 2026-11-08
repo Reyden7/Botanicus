@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Growing/BotanicusPlantPotActor.h"
+#include "UI/BotanicusPlantContextSubsystem.h"
 #include "Visuals/BotanicusJuiceWorldSubsystem.h"
 #include "Audio/BotanicusAudioWorldSubsystem.h"
 
@@ -447,6 +448,8 @@ void ABotanicusPlantPotActor::BeginPlay()
 		EnvironmentDebugWidget->InitWidget();
 		RefreshVisuals();
 	}
+
+    if(auto* Context=GetWorld()->GetSubsystem<UBotanicusPlantContextSubsystem>()) Context->RegisterPlant(this);
 }
 
 void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
@@ -475,19 +478,19 @@ void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 					(CameraLocation -
 					 ContextActionText->GetComponentLocation()).Rotation());
 			}
-			if (PlantGrowthWidget)
+			if (PlantGrowthWidget && PlantGrowthWidget->IsVisible())
 			{
 				PlantGrowthWidget->SetWorldRotation(
 					(CameraLocation -
 					 PlantGrowthWidget->GetComponentLocation()).Rotation());
 			}
-			if (EnvironmentAlertWidget)
+			if (EnvironmentAlertWidget && EnvironmentAlertWidget->IsVisible())
 			{
 				EnvironmentAlertWidget->SetWorldRotation(
 					(CameraLocation -
 					 EnvironmentAlertWidget->GetComponentLocation()).Rotation());
 			}
-			if (EnvironmentDebugWidget)
+			if (EnvironmentDebugWidget && EnvironmentDebugWidget->IsVisible())
 			{
 				FVector CameraRight = CameraManager->GetCameraRotation().
 					RotateVector(FVector::RightVector);
@@ -501,7 +504,7 @@ void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 					(CameraLocation -
 					 EnvironmentDebugWidget->GetComponentLocation()).Rotation());
 			}
-			if (PlantInspectionWidget)
+			if (PlantInspectionWidget && PlantInspectionWidget->IsVisible())
 			{
 				FVector TowardCamera = CameraLocation - GetActorLocation();
 				TowardCamera.Z = 0.0f;
@@ -527,22 +530,8 @@ void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 				PlantInspectionWidget->SetWorldRotation(InspectionRotation);
 			}
 		}
-		if (PlantGrowthWidget)
-		{
-			PlantGrowthWidget->SetVisibility(
-				!PlantKey.IsNone() &&
-				!ActorHasTag(TEXT("BotanicusPlacementPreview")));
-		}
-		if (PlantInspectionWidget)
-		{
-			PlantInspectionWidget->SetVisibility(
-				bInspectionVisible && !PlantKey.IsNone() &&
-				!ActorHasTag(TEXT("BotanicusPlacementPreview")));
-			if (bInspectionVisible)
-			{
-				RefreshInspectionWidget();
-			}
-		}
+
+
 	}
 	RefreshLocalContextAction();
 	if (!HasAuthority())
@@ -2174,40 +2163,7 @@ void ABotanicusPlantPotActor::RefreshVisuals()
 			HighestVisiblePoint + PlantGrowthWidgetClearance +
 			WidgetBelowPivot));
 	}
-	if (EnvironmentAlertWidget)
-	{
-		const float AlertBelowPivot =
-			EnvironmentAlertWidget->GetDrawSize().Y *
-			EnvironmentAlertWidgetScale *
-			EnvironmentAlertWidget->GetPivot().Y;
-		float AlertHeight = HighestVisiblePoint +
-			PlantGrowthWidgetClearance + AlertBelowPivot;
-		if (PlantGrowthWidget)
-		{
-			const float GrowthAbovePivot =
-				PlantGrowthWidget->GetDrawSize().Y *
-				PlantGrowthWidgetScale *
-				(1.0f - PlantGrowthWidget->GetPivot().Y);
-			AlertHeight = FMath::Max(
-				AlertHeight,
-				PlantGrowthWidget->GetRelativeLocation().Z +
-					GrowthAbovePivot + AlertBelowPivot + 6.0f);
-		}
-		EnvironmentAlertWidget->SetRelativeLocation(FVector(
-			0.0f,
-			0.0f,
-			AlertHeight));
-		UBotanicusPlantEnvironmentAlertWidget* AlertWidget =
-			Cast<UBotanicusPlantEnvironmentAlertWidget>(
-				EnvironmentAlertWidget->GetWidget());
-		if (AlertWidget)
-		{
-			AlertWidget->SetEnvironmentState(EnvironmentState);
-		}
-		EnvironmentAlertWidget->SetVisibility(
-			bHasPlant && AlertWidget && AlertWidget->HasAnyAlert() &&
-			!ActorHasTag(TEXT("BotanicusPlacementPreview")));
-	}
+
 	if (EnvironmentDebugWidget)
 	{
 		UBotanicusPlantEnvironmentDebugWidget* DebugWidget =
@@ -2217,9 +2173,7 @@ void ABotanicusPlantPotActor::RefreshVisuals()
 		{
 			DebugWidget->SetEnvironmentState(EnvironmentState);
 		}
-		EnvironmentDebugWidget->SetVisibility(
-			bHasPlant && DebugWidget &&
-			!ActorHasTag(TEXT("BotanicusPlacementPreview")));
+		if (!bHasPlant || ActorHasTag(TEXT("BotanicusPlacementPreview"))) EnvironmentDebugWidget->SetVisibility(false);
 	}
 	if (StatusText)
 	{

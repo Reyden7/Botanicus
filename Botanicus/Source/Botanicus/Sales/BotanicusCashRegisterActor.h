@@ -25,6 +25,7 @@ class BOTANICUS_API ABotanicusCashRegisterActor
 
 public:
 	ABotanicusCashRegisterActor();
+    virtual void OnConstruction(const FTransform& Transform) override;
 
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out) const override;
     virtual void EndPlay(const EEndPlayReason::Type Reason) override;
@@ -65,12 +66,14 @@ public:
 	static constexpr int32 SelfCheckoutSlotCount = 6;
 
 protected:
+    virtual void ApplyItemDefinition() override;
 	virtual void BeginPlay() override;
 
 private:
 
     friend class UBotanicusCashRegisterValidation;
     void InitializeCheckoutComponents();
+    void ConfigureRegisterRepresentation();
     void BeginCheckout();
     void UpdatePaymentAnchor(ABotanicusVisitorCharacter* Customer);
     void TickCheckout(float DeltaSeconds);

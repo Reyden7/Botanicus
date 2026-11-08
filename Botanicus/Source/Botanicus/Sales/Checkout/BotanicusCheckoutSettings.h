@@ -34,12 +34,12 @@ public:
     UPROPERTY(EditAnywhere,Config,Category="Register") TSoftObjectPtr<UStaticMesh> RegisterBodyMesh=TSoftObjectPtr<UStaticMesh>(FSoftObjectPath(TEXT("/Game/Botanicus/Items/itemsMesh/caisse/caisse.caisse")));
     UPROPERTY(EditAnywhere,Config,Category="Register") TSoftObjectPtr<UStaticMesh> RegisterDrawerMesh=TSoftObjectPtr<UStaticMesh>(FSoftObjectPath(TEXT("/Game/Botanicus/Items/itemsMesh/caisse/tiroir.tiroir")));
     // Common, fixed authoring calibration for the two 2m Blender exports.
-    UPROPERTY(EditAnywhere,Config,Category="Register") FVector RegisterVisualOffset=FVector(-8,0,75.755725);
+    UPROPERTY(EditAnywhere,Config,Category="Register") FVector RegisterVisualOffset=FVector(-8,0,3.755725);
     UPROPERTY(EditAnywhere,Config,Category="Register") FRotator RegisterVisualRotation=FRotator(0,90,0);
     UPROPERTY(EditAnywhere,Config,Category="Register",meta=(ClampMin="0.01",ClampMax="2")) float RegisterVisualScale=.2f;
     UPROPERTY(EditAnywhere,Config,Category="Register") FVector DrawerOpenOffset=FVector(0,140,0);
     UPROPERTY(EditAnywhere,Config,Category="Register") FVector DrawerInteriorTarget=FVector(55,55,-8);
-    UPROPERTY(EditAnywhere,Config,Category="Register") FVector ScannerDockOffset=FVector(-5,26.5,77);
+    UPROPERTY(EditAnywhere,Config,Category="Register") FVector ScannerDockOffset=FVector(-5,26.5,5);
     UPROPERTY(EditAnywhere,Config,Category="Register") FRotator ScannerDockRotation=FRotator::ZeroRotator;
     UPROPERTY(EditAnywhere,Config,Category="Budget",meta=(ClampMin="10",ClampMax="256")) int32 MaximumVisibleGoldCoins=96;
     UPROPERTY(EditAnywhere,Config,Category="Budget",meta=(ClampMin="1",ClampMax="5")) float MaximumCollectionSeconds=2.6f;

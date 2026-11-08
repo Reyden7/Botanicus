@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Growing/BotanicusMultiPlantPotActor.h"
+#include "UI/BotanicusPlantContextSubsystem.h"
 #include "Visuals/BotanicusJuiceWorldSubsystem.h"
 #include "Audio/BotanicusAudioWorldSubsystem.h"
 
@@ -234,6 +235,8 @@ void ABotanicusMultiPlantPotActor::BeginPlay()
 		DebugWidget->InitWidget();
 	}
 	RefreshVisuals();
+
+    if(auto* Context=GetWorld()->GetSubsystem<UBotanicusPlantContextSubsystem>()) Context->RegisterPlant(this);
 }
 
 int32 ABotanicusMultiPlantPotActor::GetPlantCapacity() const
@@ -272,7 +275,7 @@ void ABotanicusMultiPlantPotActor::Tick(float DeltaSeconds)
 							Rotation());
 					for (UWidgetComponent* AlertWidget : EnvironmentAlertWidgets)
 					{
-						if (AlertWidget)
+						if (AlertWidget && AlertWidget->IsVisible())
 						{
 							AlertWidget->SetWorldRotation(
 								(CameraLocation -
@@ -281,7 +284,7 @@ void ABotanicusMultiPlantPotActor::Tick(float DeltaSeconds)
 					}
 					for (UWidgetComponent* GrowthWidget : SlotGrowthWidgets)
 					{
-						if (GrowthWidget)
+						if (GrowthWidget && GrowthWidget->IsVisible())
 						{
 							GrowthWidget->SetWorldRotation(
 								(CameraLocation -
@@ -299,7 +302,7 @@ void ABotanicusMultiPlantPotActor::Tick(float DeltaSeconds)
 					{
 						UWidgetComponent* DebugWidget =
 							EnvironmentDebugWidgets[Index];
-						if (!DebugWidget)
+						if (!DebugWidget || !DebugWidget->IsVisible())
 						{
 							continue;
 						}
@@ -1186,46 +1189,9 @@ void ABotanicusMultiPlantPotActor::RefreshVisuals()
 				GrowthWidget->SetPlantState(
 					PlantName, Slot.WaterLevel, Slot.GrowthProgress);
 			}
-			GrowthComponent->SetVisibility(
-				bPlanted &&
-				!ActorHasTag(TEXT("BotanicusPlacementPreview")));
+			if (!bPlanted || ActorHasTag(TEXT("BotanicusPlacementPreview"))) GrowthComponent->SetVisibility(false);
 		}
-		if (EnvironmentAlertWidgets.IsValidIndex(Index) &&
-			EnvironmentAlertWidgets[Index])
-		{
-			UWidgetComponent* AlertComponent =
-				EnvironmentAlertWidgets[Index];
-			const UWidgetComponent* GrowthComponent =
-				SlotGrowthWidgets.IsValidIndex(Index)
-					? SlotGrowthWidgets[Index].Get()
-					: nullptr;
-			const float GrowthTop = GrowthComponent
-				? GrowthComponent->GetRelativeLocation().Z +
-					GrowthComponent->GetDrawSize().Y *
-					SlotGrowthWidgetScale *
-					(1.0f - GrowthComponent->GetPivot().Y)
-				: BaseLocation.Z;
-			const float AlertBelowPivot =
-				AlertComponent->GetDrawSize().Y * 0.16f *
-				AlertComponent->GetPivot().Y;
-			AlertComponent->SetRelativeLocation(FVector(
-				BaseLocation.X, BaseLocation.Y,
-				GrowthTop + AlertBelowPivot + 6.0f));
-			if (!AlertComponent->GetWidget())
-			{
-				AlertComponent->InitWidget();
-			}
-			UBotanicusPlantEnvironmentAlertWidget* AlertWidget =
-				Cast<UBotanicusPlantEnvironmentAlertWidget>(
-					AlertComponent->GetWidget());
-			if (AlertWidget)
-			{
-				AlertWidget->SetEnvironmentState(Slot.EnvironmentState);
-			}
-			AlertComponent->SetVisibility(
-				bPlanted && AlertWidget && AlertWidget->HasAnyAlert() &&
-				!ActorHasTag(TEXT("BotanicusPlacementPreview")));
-		}
+
 		if (EnvironmentDebugWidgets.IsValidIndex(Index) &&
 			EnvironmentDebugWidgets[Index])
 		{
@@ -1242,9 +1208,7 @@ void ABotanicusMultiPlantPotActor::RefreshVisuals()
 			{
 				DebugWidget->SetEnvironmentState(Slot.EnvironmentState);
 			}
-			DebugComponent->SetVisibility(
-				bPlanted && DebugWidget &&
-				!ActorHasTag(TEXT("BotanicusPlacementPreview")));
+			if (!bPlanted || ActorHasTag(TEXT("BotanicusPlacementPreview"))) DebugComponent->SetVisibility(false);
 		}
 	}
 	if (MultiSoilDynamicMaterial)

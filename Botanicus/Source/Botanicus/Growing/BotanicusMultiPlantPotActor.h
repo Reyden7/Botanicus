@@ -85,6 +85,7 @@ protected:
 	virtual bool CanPreviewSeedInteractionZone(AActor* Interactor) const override;
 
 private:
+    friend class UBotanicusPlantContextSubsystem;
 	enum class EUseMode : uint8
 	{
 		None,

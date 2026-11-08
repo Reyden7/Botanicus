@@ -1018,8 +1018,8 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	CashRegister.CatalogTabs =
 		static_cast<int32>(EBotanicusCatalogTab::Sales);
 	CashRegister.WorldMesh = TSoftObjectPtr<UStaticMesh>(
-		FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube.Cube")));
-	CashRegister.WorldScale = FVector(0.75f, 0.42f, 0.55f);
+		FSoftObjectPath(TEXT("/Game/Botanicus/Items/itemsMesh/caisse/caisse.caisse")));
+	CashRegister.WorldScale = FVector(0.2f);
 	CashRegister.WorldActorClass =
 		ABotanicusCashRegisterActor::StaticClass();
 	CashRegister.MaximumStack = 1;
@@ -1029,8 +1029,7 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	CashRegister.bPurchasable = false;
 	CashRegister.DeliveryQuantity = 1;
 	CashRegister.DeliveryDelaySeconds = 3.0f;
-	CashRegister.CollisionHalfExtentOverride =
-		FVector(75.0f, 45.0f, 60.0f);
+	CashRegister.CollisionHalfExtentOverride = FVector::ZeroVector;
 
 	FBotanicusItemDefinition& SelfCheckout =
 		NativeFallbackItems.AddDefaulted_GetRef();
