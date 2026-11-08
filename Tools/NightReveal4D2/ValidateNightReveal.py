@@ -74,7 +74,7 @@ def tick(dt):
         if label=='standby':check('19h30 warm standby, closed portal and dark HUD',all(not r['shop'] and not r['trade'] and r['blocked'] and max(abs(v-200) for v in r['interiorIntensities'])<3 and r.get('hud')=='BOUTIQUE FERMÃƒâ€°E' for r in rr))
         if label=='opening':check('21h starts an actual sectional motion before neon',all(r['trade'] and r['motionDuration']>0 and 0<r['open']<.3 and r['neon']<.001 for r in rr))
         if label=='neon_wait':
-            check('Sections retract horizontally and neon stabilizes after opening',all(r['open']>.999 and not r['blocked'] and r['neon']>.99 and abs(r['firstPanelPitch']+90)<.1 and r['lastPanelX']>300 for r in rr))
+            check('Sections retract horizontally and neon stabilizes after opening',all(r['open']>.999 and not r['blocked'] and r['neon']>.99 and abs(r['firstPanelPitch']+90)<.1 and r['lastPanelX']>200 for r in rr))
             check('One opening and one delayed electrical sound per peer',all(r['openAudio']==1 and r['neonAudio']==1 for r in rr))
         if label=='night02':check('02h clandestine HUD and lavender accent',all(r.get('hud')=='BOUTIQUE CLANDESTINE OUVERTE' and r['neon']>.99 and r['accentIntensity']>300 for r in rr))
         if label=='open_player':check('Player traverses open passage',not rr[0]['playerSweepBlocked'])

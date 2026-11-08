@@ -6,11 +6,11 @@ Aucune modification des transactions, PNJ, cultures, exposition ou format de sau
 
 - Blueprint : `/Game/Botanicus/blueprints/BP_BotanicusClandestineDoor`, parent `ABotanicusClandestineDoor`.
 - Passage mesuré : largeur 665,38 cm, sol Z 147,356, sous-plafond arrière Z 470,346.
-- Porte : origine (-7569,207 ; -7670,8235 ; 147,406), yaw 180°, largeur 663,379, hauteur 320,99, épaisseur 6 cm.
-- Huit sections sur trajet paramétrique vertical/courbe 90°/horizontal, rayon 55 cm. Rétraction vers le côté public au plafond plus haut : environ 154 cm de dégagement au-dessus des panneaux ouverts.
+- Porte : origine (-7569,207 ; -7670,8235 ; 147,406), yaw 0° (rotation corrigée de 180°), largeur 663,379, hauteur 320,99, épaisseur 6 cm.
+- Huit sections sur trajet paramétrique vertical/courbe 90°/horizontal, rayon 55 cm. Rétraction côté clandestin. Le plafond bas impose une partie haute fixe de 63 cm intégrée à la porte : hauteur libre 257,99 cm, implantation et hauteur fermée conservées. Le bâtiment reste inchangé.
 - Panneaux remplaçables, primitives Cube existantes ; matériaux `Materials/NightReveal/M_SectionalDoor` et `M_ClandestineNeon`.
-- Collision physique autoritaire distincte de l’obstacle NavMesh, suffisamment large pour la grille Recast. NavMesh dynamique existant réutilisé. Aucune réplication des transforms de panneaux.
-- Fermeture différée si un Pawn occupe le passage ou un joueur se trouve dans les trois volumes arrière configurés. Une approche côté public ne déclenche pas l’ouverture diurne. Extinction avant fermeture.
+- Collision physique autoritaire distincte de l’obstacle NavMesh, suffisamment large pour la grille Recast. Blocage Pawn réaffirmé, maintenu jusqu’à la fin effective de l’ouverture. NavMesh dynamique existant réutilisé. Aucune réplication des transforms de panneaux.
+- Fermeture différée si un Pawn occupe le passage ou un joueur se trouve dans les trois volumes arrière configurés. La détection utilise la capsule du Character ; la sortie de secours exige que son centre soit réellement dans une zone arrière. Les chevauchements de corps/mains et la proximité depuis le public ne déclenchent pas d’ouverture diurne. Extinction avant fermeture.
 
 ## Réglages artistiques
 
@@ -36,3 +36,5 @@ Les compteurs confirment un déclenchement moteur et un crépitement par pair po
 Rejeu optionnel : `Tools/NightReveal4D2/ValidateNightReveal.py`, via Python Unreal avec `-BotanicusNightValidation -BotanicusCashValidation` et un `-UserDir` dont le SavedDir contient `/isolated_user/`. Le script refuse un profil normal, manipule l’heure et sauvegarde seulement dans ce profil de test, puis quitte l’éditeur.
 Vidéo : `Botanicus/Saved/Diagnostics/Night4D2/NightReveal.mp4` (captures PIE, 8 images/s rééchantillonnées à 30).
 Git non commité ; verrous LFS antérieurs conservés. Catalogue audio, personnage/footsteps, sauvegardes normales et MP3 contrôlés par empreintes : inchangés.
+
+Correction orientation/collision : PIE listen-server + client avec déplacements réels via CharacterMovement à 14 h, 20 h, pendant l’ouverture de 21 h, à 22 h, 02 h, 05 h et 08 h validés ; contrôle PNJ/NavMesh, passage et arrière occupés, connexion tardive et sauvegarde/restauration dans un profil isolé. Enveloppes des panneaux relevées pendant l’ouverture sans intersection avec les enveloppes des murs/plafonds existants. Aucun autre chantier testé ou modifié.

@@ -51,6 +51,8 @@ public:
     UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Door|Dimensions",meta=(ClampMin="220")) float Height=300.f;
     UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Door|Dimensions",meta=(ClampMin="3",ClampMax="12")) int32 SectionCount=8;
     UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Door|Dimensions",meta=(ClampMin="2",ClampMax="15")) float Thickness=6.f;
+    /** Fixed upper infill provides headroom for the curved track under low ceilings. */
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Door|Track",meta=(ClampMin="0")) float TopInfillHeight=0.f;
     UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Door|Track",meta=(ClampMin="25",ClampMax="150")) float BendRadius=55.f;
     /** Local +X is the side used for overhead retraction. Keep the actor upright. */
     UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Door|Track") TObjectPtr<UCurveFloat> MotionCurve;
@@ -105,8 +107,10 @@ private:
     FVector TrackPoint(float Distance,float& Pitch) const;
     float MinimumSectionHeight() const;
     float OpenTravel() const;
+    float MovingHeight() const;
     UAudioComponent* Sound(USoundBase* Asset,float Volume,float StartAt=0.f);
     UPROPERTY(VisibleAnywhere) TObjectPtr<UBoxComponent> PassageBlocker;
+    UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> TopInfill;
     UPROPERTY(VisibleAnywhere) TObjectPtr<UBoxComponent> NavigationObstacle;
     UPROPERTY(VisibleAnywhere) TArray<TObjectPtr<UStaticMeshComponent>> Sections;
     UPROPERTY(VisibleAnywhere) TArray<TObjectPtr<UStaticMeshComponent>> Rails;

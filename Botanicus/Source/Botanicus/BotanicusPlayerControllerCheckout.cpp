@@ -40,7 +40,7 @@ void ABotanicusPlayerController::UpdateCheckoutEquipmentPresentation()
 bool ABotanicusPlayerController::TraceCheckoutAim(FHitResult& Hit) const
 {
     if(!GetWorld() || !GetPawn()) return false;FVector Eye;FRotator Rotation;GetPlayerViewPoint(Eye,Rotation);
-    FCollisionQueryParams Q(SCENE_QUERY_STAT(BotanicusCheckoutAim),false,GetPawn());
+    FCollisionQueryParams Q(SCENE_QUERY_STAT(BotanicusCheckoutAim),true,GetPawn());
     if(auto* Tool=GetCheckoutScanner()) Q.AddIgnoredActor(Tool);
     return GetWorld()->LineTraceSingleByChannel(Hit,Eye,Eye+Rotation.Vector()*(MaximumWorldInteractionDistance+200),ECC_Visibility,Q) &&
         FVector::DistSquared2D(GetPawn()->GetActorLocation(),Hit.ImpactPoint)<=FMath::Square(MaximumWorldInteractionDistance);
@@ -55,7 +55,12 @@ bool ABotanicusPlayerController::TryCheckoutInput(const FInputKeyEventArgs& Para
     if(Params.Key==EKeys::E && bHit)
     {
         if(auto* Scanner=Cast<ABotanicusCheckoutScanner>(Hit.GetActor());Scanner && !Scanner->GetCarrier()) {if(CanTakeCheckoutScanner()) ServerTakeCheckoutScanner(Scanner);return true;}
-        if(auto* Register=Cast<ABotanicusCashRegisterActor>(Hit.GetActor());Register && Register->IsScannerDockHit(Hit.GetComponent()) && Held && Held->GetRegister()==Register) {ServerReturnCheckoutScanner(Held);return true;}
+        if(auto* Register=Cast<ABotanicusCashRegisterActor>(Hit.GetActor());Register && Register->IsScannerDockHit(Hit.GetComponent()))
+        {
+            if(Held && Held->GetRegister()==Register){ServerReturnCheckoutScanner(Held);return true;}
+            auto* Scanner=Register->GetDockScanner();
+            if(!Held && Scanner && !Scanner->GetCarrier()){if(CanTakeCheckoutScanner())ServerTakeCheckoutScanner(Scanner);return true;}
+        }
     }
     if(Params.Key==EKeys::LeftMouseButton)
     {
@@ -71,7 +76,10 @@ bool ABotanicusPlayerController::TryCheckoutInput(const FInputKeyEventArgs& Para
 }
 void ABotanicusPlayerController::ServerTakeCheckoutScanner_Implementation(ABotanicusCheckoutScanner* Scanner)
 {
-    FHitResult Hit;if(!IsValid(Scanner) || !CanTakeCheckoutScanner() || !TraceCheckoutAim(Hit) || Hit.GetActor()!=Scanner) return;
+    FHitResult Hit;if(!IsValid(Scanner) || !CanTakeCheckoutScanner() || !TraceCheckoutAim(Hit)) return;
+    auto* Register=Scanner->GetRegister();
+    const bool bDock=Register && Register->GetDockScanner()==Scanner && Hit.GetActor()==Register && Register->IsScannerDockHit(Hit.GetComponent());
+    if(Hit.GetActor()!=Scanner && !bDock)return;
     if(Scanner->TryTake(this)) SetCheckoutScannerReference(Scanner);
 }
 void ABotanicusPlayerController::ServerReturnCheckoutScanner_Implementation(ABotanicusCheckoutScanner* Scanner)
@@ -109,11 +117,17 @@ bool ABotanicusPlayerController::TryRefreshCheckoutContext()
         Register=Cash;
         if(Cash->IsScannerDockHit(Hit.GetComponent()) && Held && Held->GetRegister()==Cash)
         {InteractionTargetWidget->SetKeyboardPrompt(FText::FromString(TEXT("Reposer la scanette")),FText::FromString(TEXT("Support")));return true;}
+        if(Cash->IsScannerDockHit(Hit.GetComponent()) && !Held && Cash->GetDockScanner() && !Cash->GetDockScanner()->GetCarrier())
+        {InteractionTargetWidget->SetKeyboardPrompt(FText::FromString(TEXT("Prendre la scanette")),FText::FromString(TEXT("Support")));return true;}
     }
     if(auto* Customer=Cast<ABotanicusVisitorCharacter>(Hit.GetActor());Customer && Customer->CanUsePlayerCheckout())
     {
-        if(Held && Held->GetRegister() && Held->GetRegister()->GetCheckoutCustomer()==Customer) Register=Held->GetRegister();
-        else {InteractionTargetWidget->SetContextStatus(FText::FromString(TEXT("Prenez la scanette à côté de la caisse")));return true;}
+        if(!Held) {InteractionTargetWidget->SetContextStatus(FText::FromString(TEXT("Prenez la scanette à côté de la caisse")));return true;}
+        Register=Held->GetRegister();
+        if(!Register || !Register->IsOperational())
+        {InteractionTargetWidget->SetContextStatus(FText::FromString(TEXT("Caisse hors zone de paiement")));return true;}
+        if(Register->GetCheckoutCustomer()!=Customer)
+        {InteractionTargetWidget->SetContextStatus(FText::FromString(TEXT("Ce client n'attend pas cette caisse")));return true;}
     }
     if(!Register) return false;const auto& R=Register->GetReceipt();
     if(R.Phase==EBotanicusCheckoutPhase::AwaitingCollection)
@@ -124,6 +138,7 @@ bool ABotanicusPlayerController::TryRefreshCheckoutContext()
     }
     else if(R.Phase==EBotanicusCheckoutPhase::Opening) InteractionTargetWidget->SetContextStatus(FText::FromString(TEXT("Paiement en cours...")));
     else if(R.Phase==EBotanicusCheckoutPhase::Collecting || R.Phase==EBotanicusCheckoutPhase::Closing) InteractionTargetWidget->SetContextStatus(FText::FromString(FString::Printf(TEXT("+%d crédits"),R.Amount)));
+    else if(!Register->IsOperational()) InteractionTargetWidget->SetContextStatus(FText::FromString(TEXT("Caisse hors zone de paiement")));
     else if(Held && Register->GetCheckoutCustomer()) InteractionTargetWidget->SetLeftMousePrompt(FText::FromString(TEXT("Scanner la plante")),FText::FromString(TEXT("Visez la plante du client")),false);
     else InteractionTargetWidget->SetContextStatus(FText::FromString(Register->GetCheckoutCustomer() ? TEXT("Prenez la scanette à côté de la caisse") : TEXT("Caisse - en attente d'un client")));
     return true;

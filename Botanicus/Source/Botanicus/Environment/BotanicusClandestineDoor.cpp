@@ -4,6 +4,7 @@
 #include "BotanicusCharacter.h"
 #include "BotanicusGameState.h"
 #include "Components/BoxComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/AudioComponent.h"
 #include "Curves/CurveFloat.h"
@@ -35,15 +36,17 @@ ABotanicusClandestineDoor::ABotanicusClandestineDoor()
         auto* C=CreateDefaultSubobject<UStaticMeshComponent>(Name);C->SetupAttachment(RootComponent);C->SetStaticMesh(Cube.Object);
         C->SetCollisionEnabled(ECollisionEnabled::NoCollision);C->SetCanEverAffectNavigation(false);C->SetCastShadow(bShadow);return C;
     };
+    TopInfill=Make(TEXT("FixedTopInfill"),true);
     for(int32 I=0;I<12;++I)Sections.Add(Make(*FString::Printf(TEXT("Section_%02d"),I),true));
     for(int32 I=0;I<13;++I)Rails.Add(Make(*FString::Printf(TEXT("Track_%02d"),I),false));
     for(int32 I=0;I<2;++I)NeonStrips.Add(Make(*FString::Printf(TEXT("LavenderStrip_%02d"),I),false));
 }
-void ABotanicusClandestineDoor::OnConstruction(const FTransform& Transform){Super::OnConstruction(Transform);BuildGeometry();ApplyPanels();}
-float ABotanicusClandestineDoor::OpenTravel() const {return FMath::Max(220.f,Height)+FMath::Max(25.f,BendRadius)*HALF_PI;}
+void ABotanicusClandestineDoor::OnConstruction(const FTransform& Transform){Super::OnConstruction(Transform);BuildGeometry();ApplyPanels();ApplyAccess();}
+float ABotanicusClandestineDoor::MovingHeight() const {return FMath::Clamp(Height-TopInfillHeight,220.f,Height);}
+float ABotanicusClandestineDoor::OpenTravel() const {return MovingHeight()+FMath::Max(25.f,BendRadius)*HALF_PI;}
 FVector ABotanicusClandestineDoor::TrackPoint(float Distance,float& Pitch) const
 {
-    const float H=FMath::Max(220.f,Height),R=FMath::Max(25.f,BendRadius);Pitch=0;
+    const float H=MovingHeight(),R=FMath::Max(25.f,BendRadius);Pitch=0;
     if(Distance<=H)return FVector(0,0,Distance);
     if(Distance<H+R*HALF_PI)
     {
@@ -54,6 +57,14 @@ FVector ABotanicusClandestineDoor::TrackPoint(float Distance,float& Pitch) const
 void ABotanicusClandestineDoor::BuildGeometry()
 {
     Width=FMath::Max(100.f,Width);Height=FMath::Max(220.f,Height);SectionCount=FMath::Clamp(SectionCount,3,12);Thickness=FMath::Clamp(Thickness,2.f,15.f);
+    TopInfillHeight=FMath::Clamp(TopInfillHeight,0.f,Height-220.f);
+    const float H=MovingHeight();
+    TopInfill->SetVisibility(TopInfillHeight>0);
+    TopInfill->SetRelativeLocation(FVector(0,0,H+TopInfillHeight*.5f));
+    TopInfill->SetRelativeScale3D(FVector(Thickness/100,Width/100,TopInfillHeight/100));
+    if(PanelMaterial)TopInfill->SetMaterial(0,PanelMaterial);
+    TopInfill->SetCollisionProfileName(TEXT("BlockAll"));
+    TopInfill->SetCollisionEnabled(TopInfillHeight>0 ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
     PassageBlocker->SetRelativeLocation(FVector(0,0,Height*.5f));PassageBlocker->SetBoxExtent(FVector(Thickness*.5f,Width*.5f,Height*.5f));
     NavigationObstacle->SetRelativeLocation(FVector(0,0,Height*.5f));NavigationObstacle->SetBoxExtent(FVector(50,Width*.5f+5,Height*.5f+60));
     for(int32 I=0;I<Sections.Num();++I)
@@ -68,16 +79,16 @@ void ABotanicusClandestineDoor::BuildGeometry()
     for(int32 Side=0;Side<2;++Side)
     {
         const float Y=(Side ? 1.f:-1.f)*(Width*.5f+3.f);const int32 Base=Side*6;
-        SetBar(Base,FVector(0,Y,0),FVector(0,Y,Height),5);
+        SetBar(Base,FVector(0,Y,0),FVector(0,Y,H),5);
         for(int32 J=0;J<4;++J)
         {
-            float P;FVector A=TrackPoint(Height+BendRadius*HALF_PI*J/4,P),B=TrackPoint(Height+BendRadius*HALF_PI*(J+1)/4,P);A.Y=B.Y=Y;SetBar(Base+1+J,A,B,5);
+            float P;FVector A=TrackPoint(H+BendRadius*HALF_PI*J/4,P),B=TrackPoint(H+BendRadius*HALF_PI*(J+1)/4,P);A.Y=B.Y=Y;SetBar(Base+1+J,A,B,5);
         }
-        SetBar(Base+5,FVector(BendRadius,Y,Height+BendRadius),FVector(BendRadius+Height+10,Y,Height+BendRadius),5);
+        SetBar(Base+5,FVector(BendRadius,Y,H+BendRadius),FVector(BendRadius+H+10,Y,H+BendRadius),5);
         NeonStrips[Side]->SetRelativeLocation(FVector(-15,Y+(Side ? -22:22),Height*.64f));NeonStrips[Side]->SetRelativeScale3D(FVector(.025,.025,.9));
         if(NeonMaterial)NeonStrips[Side]->SetMaterial(0,NeonMaterial);
     }
-    SetBar(12,FVector(0,-Width*.5f-6,Height+5),FVector(0,Width*.5f+6,Height+5),10);
+    SetBar(12,FVector(0,-Width*.5f-6,H+5),FVector(0,Width*.5f+6,H+5),10);
 }
 double ABotanicusClandestineDoor::ServerNow() const
 {
@@ -110,7 +121,7 @@ float ABotanicusClandestineDoor::GetNeonWeight() const
 void ABotanicusClandestineDoor::ApplyPanels()
 {
     if(GetWorld() && GetWorld()->IsGameWorld() && GetNetMode()==NM_DedicatedServer)return;
-    const float PanelHeight=Height/FMath::Clamp(SectionCount,3,12);const float Offset=GetOpenFraction()*OpenTravel();
+    const float PanelHeight=MovingHeight()/FMath::Clamp(SectionCount,3,12);const float Offset=GetOpenFraction()*OpenTravel();
     for(int32 I=0;I<SectionCount;++I)
     {
         float Pitch;const FVector Center=TrackPoint(Offset+(I+.5f)*PanelHeight,Pitch);const FRotator Rotation(Pitch,0,0);
@@ -121,7 +132,7 @@ void ABotanicusClandestineDoor::ApplyPanels()
 }
 float ABotanicusClandestineDoor::MinimumSectionHeight() const
 {
-    float Pitch;const float PH=Height/FMath::Clamp(SectionCount,3,12);const FVector P=TrackPoint(GetOpenFraction()*OpenTravel()+PH*.5f,Pitch);const float A=FMath::DegreesToRadians(Pitch);
+    float Pitch;const float PH=MovingHeight()/FMath::Clamp(SectionCount,3,12);const FVector P=TrackPoint(GetOpenFraction()*OpenTravel()+PH*.5f,Pitch);const float A=FMath::DegreesToRadians(Pitch);
     return P.Z-FMath::Abs(FMath::Cos(A))*PH*.5f-FMath::Abs(FMath::Sin(A))*Thickness*.5f;
 }
 void ABotanicusClandestineDoor::BeginPlay()
@@ -138,13 +149,27 @@ bool ABotanicusClandestineDoor::HasPawnInBox(const FBox& Box,bool bPlayersOnly) 
 {
     TArray<FOverlapResult> Hits;FCollisionObjectQueryParams Objects(ECC_Pawn);FCollisionQueryParams Query(SCENE_QUERY_STAT(DoorSafety),false,this);
     GetWorld()->OverlapMultiByObjectType(Hits,GetActorTransform().TransformPosition(Box.GetCenter()),GetActorQuat(),Objects,FCollisionShape::MakeBox(Box.GetExtent()*GetActorScale3D().GetAbs()),Query);
-    for(const auto& Hit:Hits)if(bPlayersOnly ? Hit.GetActor() && Hit.GetActor()->IsA<ABotanicusCharacter>() : Cast<APawn>(Hit.GetActor())!=nullptr)return true;
+    for(const auto& Hit:Hits)
+    {
+        const APawn* Pawn=Cast<APawn>(Hit.GetActor());
+        if(!Pawn || (bPlayersOnly && !Pawn->IsA<ABotanicusCharacter>()))continue;
+        // Cosmetic body/hand collision must not grant emergency access through a closed door.
+        if(const ACharacter* Character=Cast<ACharacter>(Pawn); Character && Hit.GetComponent()!=Character->GetCapsuleComponent())continue;
+        // The portal overlap protects straddling characters. Rear-room escape is only for a player whose capsule centre is actually inside.
+        if(bPlayersOnly && !Box.IsInsideOrOn(GetActorTransform().InverseTransformPosition(Pawn->GetActorLocation())))continue;
+        return true;
+    }
     return false;
 }
 bool ABotanicusClandestineDoor::PortalOccupied() const{return HasPawnInBox(FBox(FVector(-85,-Width*.5f-35,-10),FVector(85,Width*.5f+35,Height+50)),false);}
 bool ABotanicusClandestineDoor::RearOccupied() const{for(const FBox& B:RearSafetyBoxes)if(B.IsValid && HasPawnInBox(B,true))return true;return false;}
 void ABotanicusClandestineDoor::ApplyAccess()
 {
+    // Reassert the authoritative physical contract even if an inherited Blueprint/instance had different responses.
+    SetActorEnableCollision(true);
+    PassageBlocker->SetCollisionProfileName(TEXT("BlockAll"));
+    PassageBlocker->SetCollisionObjectType(ECC_WorldStatic);
+    PassageBlocker->SetCollisionResponseToChannel(ECC_Pawn,ECR_Block);
     PassageBlocker->SetCollisionEnabled(Presentation.bPassageBlocked ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
     NavigationObstacle->SetCanEverAffectNavigation(HasAuthority() && Presentation.bPassageBlocked);
 }
@@ -159,7 +184,7 @@ void ABotanicusClandestineDoor::BeginMotion(bool bOpen)
     Presentation.From=From;Presentation.bTargetOpen=bOpen;Presentation.MotionStart=ServerNow();
     Presentation.MotionDuration=FMath::Max(.25f,bOpen ? OpenSeconds:CloseSeconds)*FMath::Max(.02f,FMath::Abs((bOpen ? 1.f:0.f)-From));
     if(!bOpen)Presentation.bPassageBlocked=true;
-    else if(HasPawnInBox(FBox(FVector(-Thickness*.5f,-Width*.5f,-5),FVector(Thickness*.5f,Width*.5f,Height+20)),false))Presentation.bPassageBlocked=false;
+    // Opening never disables the blocker early, including an occupied/reversed motion.
     ApplyAccess();Publish();SetActorTickEnabled(true);
 }
 void ABotanicusClandestineDoor::RefreshAuthority()
@@ -255,13 +280,12 @@ void ABotanicusClandestineDoor::Tick(float DeltaSeconds)
     if(HasAuthority() && Presentation.MotionDuration>0)
     {
         if(!Presentation.bTargetOpen && (RearOccupied() || PortalOccupied())){Presentation.bWaitingForExit=true;BeginMotion(true);}
-        if(Presentation.bTargetOpen && Presentation.bPassageBlocked && MinimumSectionHeight()>=FMath::Max(200.f,PawnClearance))SetBlocked(false);
         if(Now>=Presentation.MotionStart+Presentation.MotionDuration)
         {
             const double End=Presentation.MotionStart+Presentation.MotionDuration;Presentation.MotionDuration=0;Presentation.From=Presentation.bTargetOpen ? 1.f:0.f;
             if(Presentation.bTargetOpen)
             {
-                SetBlocked(false);const auto* GS=GetWorld()->GetGameState<ABotanicusGameState>();
+                SetBlocked(MinimumSectionHeight()<FMath::Max(200.f,PawnClearance));const auto* GS=GetWorld()->GetGameState<ABotanicusGameState>();
                 if(GS && GS->IsIllegalTradeActive()){Presentation.NeonStart=End+FMath::Max(0.f,NeonDelay);Presentation.bNeonInitiallyStable=false;Presentation.NeonOff=-1;}
             }
             Publish();if(MotorVoice.IsValid()){MotorVoice->FadeOut(.12f,0);MotorVoice.Reset();}

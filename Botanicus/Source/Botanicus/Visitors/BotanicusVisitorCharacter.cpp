@@ -290,6 +290,8 @@ void ABotanicusVisitorCharacter::AdmitFromQueue()
 	ForceNetUpdate();
 }
 
+namespace { constexpr float CheckoutArrivalRadius=40.f; }
+
 void ABotanicusVisitorCharacter::ConfigureCheckoutQueue(
 	const FVector& InQueueDestination,
 	bool bIsFront)
@@ -304,7 +306,7 @@ void ABotanicusVisitorCharacter::ConfigureCheckoutQueue(
 		GetActorLocation(),
 		CheckoutQueueDestination);
 	if (bIsFront &&
-		DistanceSquared <= FMath::Square(AcceptanceRadius))
+		DistanceSquared <= FMath::Square(FMath::Min(AcceptanceRadius,CheckoutArrivalRadius)))
 	{
 		if (VisitorState != EBotanicusVisitorState::Paying)
 		{
@@ -479,7 +481,7 @@ void ABotanicusVisitorCharacter::Tick(float DeltaSeconds)
 		if (FVector::DistSquared2D(
 				GetActorLocation(),
 				CheckoutQueueDestination) <=
-			FMath::Square(AcceptanceRadius * 0.65f))
+			FMath::Square(FMath::Min(AcceptanceRadius * 0.65f,CheckoutArrivalRadius)))
 		{
 			GetCharacterMovement()->StopMovementImmediately();
 		}

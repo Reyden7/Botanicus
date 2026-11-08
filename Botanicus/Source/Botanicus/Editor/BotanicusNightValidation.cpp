@@ -15,6 +15,7 @@
 #include "Components/TextBlock.h"
 #include "Engine/Light.h"
 #include "Engine/World.h"
+#include "Engine/OverlapResult.h"
 #include "EngineUtils.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -54,18 +55,19 @@ bool UBotanicusNightValidation::Action(UObject* Context,FName Command,float Valu
             const FVector A=D->GetActorTransform().TransformPosition(FVector(250,0,100)),B=D->GetActorTransform().TransformPosition(FVector(-250,0,100));
             NPC->SetActorLocation(A,false,nullptr,ETeleportType::TeleportPhysics);FHitResult Hit;NPC->SetActorLocation(B,true,&Hit);NPCBlocked.Add(World,Hit.bBlockingHit && Hit.GetComponent()==D->GetBlocker());NPC->Destroy();return;
         }
+        const auto& Boxes=D->RearSafetyBoxes;const float PublicSide=!Boxes.IsEmpty() && Boxes[0].GetCenter().X>0 ? -1.f:1.f;
         int32 I=0;
         for(TActorIterator<ABotanicusCharacter> It(World);It;++It)
         {
-            FVector Local(650,I++*180,It->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()+3);
+            FVector Local(650*PublicSide,I++*180,It->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()+3);
             if(Command==TEXT("Portal"))Local=FVector(0,0,Local.Z);
-            if(Command==TEXT("Inside"))Local=FVector(-220,0,Local.Z);
-            if(Command==TEXT("SweepPlayer"))Local=FVector(250,0,Local.Z);
+            if(Command==TEXT("Inside"))Local=FVector(-220*PublicSide,0,Local.Z);
+            if(Command==TEXT("SweepPlayer"))Local=FVector(250*PublicSide,0,Local.Z);
             It->GetCharacterMovement()->StopMovementImmediately();It->SetActorLocation(D->GetActorTransform().TransformPosition(Local),false,nullptr,ETeleportType::TeleportPhysics);
             if(AController* PC=It->GetController())PC->SetControlRotation((D->GetActorTransform().TransformPosition(FVector(0,0,D->Height*.53f))-It->GetPawnViewLocation()).Rotation());
             if(Command==TEXT("SweepPlayer"))
             {
-                FHitResult Hit;It->SetActorLocation(D->GetActorTransform().TransformPosition(FVector(-250,0,Local.Z)),true,&Hit);PlayerBlocked.Add(World,Hit.bBlockingHit && Hit.GetComponent()==D->GetBlocker());break;
+                FHitResult Hit;It->SetActorLocation(D->GetActorTransform().TransformPosition(FVector(-250*PublicSide,0,Local.Z)),true,&Hit);PlayerBlocked.Add(World,Hit.bBlockingHit && Hit.GetComponent()==D->GetBlocker());break;
             }
         }
     });return true;
@@ -81,6 +83,20 @@ FString UBotanicusNightValidation::Snapshot(UObject* Context)
     R->SetNumberField(TEXT("open"),D->GetOpenFraction());R->SetNumberField(TEXT("neon"),D->GetNeonWeight());R->SetNumberField(TEXT("publicWeight"),D->GetPublicLightWeight());R->SetBoolField(TEXT("blocked"),D->IsPassageBlocked());R->SetBoolField(TEXT("safetyHold"),D->IsWaitingForExit());
     R->SetNumberField(TEXT("collision"),int32(D->GetBlocker()->GetCollisionEnabled()));R->SetBoolField(TEXT("playerSweepBlocked"),PlayerBlocked.FindRef(W));R->SetBoolField(TEXT("npcSweepBlocked"),NPCBlocked.FindRef(W));
     R->SetNumberField(TEXT("motionDuration"),D->GetPresentation().MotionDuration);R->SetNumberField(TEXT("neonStart"),D->GetPresentation().NeonStart);R->SetNumberField(TEXT("neonOff"),D->GetPresentation().NeonOff);
+    TArray<TSharedPtr<FJsonValue>> RearHits;
+    for(const FBox& Box:D->RearSafetyBoxes)
+    {
+        TArray<FOverlapResult> Hits;FCollisionQueryParams Query(SCENE_QUERY_STAT(DoorValidation),false,D);
+        W->OverlapMultiByObjectType(Hits,D->GetActorTransform().TransformPosition(Box.GetCenter()),D->GetActorQuat(),FCollisionObjectQueryParams(ECC_Pawn),FCollisionShape::MakeBox(Box.GetExtent()),Query);
+        for(const FOverlapResult& Hit:Hits)if(const auto* C=Cast<ABotanicusCharacter>(Hit.GetActor()))
+        {
+            auto Item=MakeShared<FJsonObject>();Item->SetStringField(TEXT("component"),GetNameSafe(Hit.GetComponent()));
+            Item->SetBoolField(TEXT("capsule"),Hit.GetComponent()==C->GetCapsuleComponent());
+            Item->SetBoolField(TEXT("centreInside"),Box.IsInsideOrOn(D->GetActorTransform().InverseTransformPosition(C->GetActorLocation())));
+            RearHits.Add(MakeShared<FJsonValueObject>(Item));
+        }
+    }
+    R->SetArrayField(TEXT("rearOverlapDiagnostics"),RearHits);
     auto* Audio=W->GetSubsystem<UBotanicusAudioWorldSubsystem>();
     R->SetNumberField(TEXT("openAudio"),Audio && D->OpenSound ? Audio->GetEventPlayCount(D->OpenSound->GetFName()) : 0);R->SetNumberField(TEXT("closeAudio"),Audio && D->CloseSound ? Audio->GetEventPlayCount(D->CloseSound->GetFName()) : 0);R->SetNumberField(TEXT("neonAudio"),Audio && D->NeonSound ? Audio->GetEventPlayCount(D->NeonSound->GetFName()) : 0);
     TArray<TSharedPtr<FJsonValue>> Lights;

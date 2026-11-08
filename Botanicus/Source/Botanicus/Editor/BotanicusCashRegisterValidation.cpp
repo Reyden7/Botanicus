@@ -19,6 +19,8 @@
 #include "Audio/BotanicusAudioWorldSubsystem.h"
 #include "Visuals/BotanicusJuiceWorldSubsystem.h"
 #include "Components/BoxComponent.h"
+#include "Components/CapsuleComponent.h"
+#include "NavigationSystem.h"
 #include "Components/StaticMeshComponent.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Engine/Engine.h"
@@ -95,8 +97,8 @@ bool UBotanicusCashRegisterValidation::Aim(UObject* Context,FName Target)
     auto* Cash=CashValidationRegister(W);auto* PC=Cast<ABotanicusPlayerController>(W->GetFirstPlayerController());if(!Cash || !PC || !PC->GetPawn()) return false;
     FVector Point;
     if(Target==TEXT("Illegal")) {bool Found=false;for(TActorIterator<ABotanicusIllegalCustomerCharacter> It(W);It;++It) if(It->ActorHasTag(TEXT("CashIllegalRegression"))) {Point=It->GetActorLocation()+FVector(0,0,30);Found=true;break;}if(!Found) return false;}
-    else if(Target==TEXT("Scanner")) {if(!Cash->GetDockScanner()) return false;Point=Cash->GetDockScanner()->GetActorLocation()+FVector(0,0,5);}
-    else if(Target==TEXT("Dock")) Point=Cash->ScannerDock->GetComponentLocation();
+    else if(Target==TEXT("Scanner")) {if(!Cash->GetDockScanner()) return false;Point=Cash->GetDockScanner()->GetMuzzleLocation()-Cash->GetDockScanner()->GetActorForwardVector()*6;}
+    else if(Target==TEXT("Dock")) Point=Cash->ScannerDock->GetComponentTransform().TransformPosition(FVector(2,0,11));
     else if(Target==TEXT("Coins")) Point=Cash->GetPaymentCoins() ? Cash->GetPaymentCoins()->GetActorLocation() : Cash->CoinDropPoint->GetComponentLocation();
     else if(auto* Customer=CashValidationCustomer(W)) Point=Target==TEXT("Wrong") ? Customer->GetActorLocation()-FVector(0,0,30) : Customer->GetCheckoutPlantLocation();
     else return false;
@@ -133,6 +135,27 @@ bool UBotanicusCashRegisterValidation::Step(UObject* Context,FName Action)
         auto* C=W->SpawnActor<ABotanicusIllegalCustomerCharacter>(ABotanicusIllegalCustomerCharacter::StaticClass(),Point,FRotator::ZeroRotator,Params);if(!C) return false;C->Tags.Add(TEXT("CashIllegalRegression"));C->InitializeIllegalOrder(Plant.ProductItemKey,Plant.DisplayName,Quantity,Quantity*FMath::Max(1,Plant.UnitSaleValue),Settings->CustomerWaitSeconds,Point,Point-Cash->GetActorForwardVector()*300);return true;
     }
     if(Action==TEXT("IllegalSell")) {for(TActorIterator<ABotanicusIllegalCustomerCharacter> It(W);It;++It) if(It->ActorHasTag(TEXT("CashIllegalRegression"))) {PC->ServerSellIllegalOrder(*It);return true;}return false;}
+    if(Action==TEXT("ApproachCheckout"))
+    {
+        if(W->GetNetMode()==NM_Client || !Customer || !PC->GetPawn())return false;
+        FVector Start=Cash->GetActorLocation()+Cash->GetActorForwardVector()*350;Start.Z=PC->GetPawn()->GetActorLocation().Z;
+        Customer->SetActorLocation(Start);Customer->VisitorState=EBotanicusVisitorState::CheckoutQueue;
+        Customer->CheckoutQueueDestination=Cash->GetCustomerStandLocation();Customer->CheckoutQueueArrivalTime=W->GetTimeSeconds();
+        Customer->GetCharacterMovement()->StopMovementImmediately();Customer->RefreshCheckoutScanTarget();Customer->ForceNetUpdate();return true;
+    }
+    if(Action==TEXT("OperatorHost") || Action==TEXT("OperatorClient"))
+    {
+        if(W->GetNetMode()==NM_Client)return false;
+        for(FConstPlayerControllerIterator It=W->GetPlayerControllerIterator();It;++It)
+        {
+            auto* P=Cast<ABotanicusCharacter>(It->Get()->GetPawn());if(!P)continue;
+            const bool Active=It->Get()->IsLocalController()==(Action==TEXT("OperatorHost"));
+            FVector Point=Cash->GetActorLocation()+Cash->GetActorForwardVector()*(Active ? 30.f:-300.f)+Cash->GetActorRightVector()*(Active ? 120.f:300.f);
+            FNavLocation Floor;if(auto* Nav=FNavigationSystem::GetCurrent<UNavigationSystemV1>(W);Nav && Nav->ProjectPointToNavigation(Point,Floor,FVector(15,15,500)))Point.Z=Floor.Location.Z+P->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()+3;
+            P->SetActorLocation(Point,false,nullptr,ETeleportType::TeleportPhysics);P->GetCharacterMovement()->StopMovementImmediately();P->ForceNetUpdate();
+        }
+        return true;
+    }
     if(Action==TEXT("Position"))
     {if(W->GetNetMode()==NM_Client || !PC->GetPawn()) return false;const FVector Original=PC->GetPawn()->GetActorLocation();FVector Point=Cash->GetActorLocation()-Cash->GetActorForwardVector()*100+Cash->GetActorRightVector()*45;Point.Z=Original.Z;PC->GetPawn()->SetActorLocation(Point);return true;}
     if(Action==TEXT("DisconnectCarrier"))
@@ -174,8 +197,18 @@ FString UBotanicusCashRegisterValidation::Snapshot(UObject* Context)
     if(auto* Coins=Cash->GetPaymentCoins()) {Root->SetNumberField(TEXT("renderedGold"),Coins->GetRenderedCoinCount());Root->SetNumberField(TEXT("arrivals"),Coins->GetArrivalCount());
         TInlineComponentArray<UInstancedStaticMeshComponent*> Instances;Coins->GetComponents(Instances);if(Instances.Num() && Instances[0]->GetInstanceCount()) {FTransform First,Last;Instances[0]->GetInstanceTransform(0,First,true);Instances[0]->GetInstanceTransform(Instances[0]->GetInstanceCount()-1,Last,true);Root->SetStringField(TEXT("firstCoin"),First.GetLocation().ToString());Root->SetStringField(TEXT("lastCoin"),Last.GetLocation().ToString());Root->SetNumberField(TEXT("firstScale"),First.GetScale3D().X);Root->SetNumberField(TEXT("lastScale"),Last.GetScale3D().X);}}
     if(auto* Tool=Cash->GetDockScanner()) {Root->SetStringField(TEXT("scanner"),Tool->GetName());Root->SetStringField(TEXT("carrier"),Tool->GetCarrier() ? Tool->GetCarrier()->GetName() : TEXT(""));Root->SetBoolField(TEXT("owned"),Tool->GetCarrier()==PC->GetPawn());Root->SetNumberField(TEXT("carrierPlayerId"),Tool->GetCarrier() && Tool->GetCarrier()->GetPlayerState() ? Tool->GetCarrier()->GetPlayerState()->GetPlayerId() : -1);}
+    if(auto* C=CashValidationCustomer(W))
+    {
+        Root->SetNumberField(TEXT("distanceToStand"),FVector::Dist2D(C->GetActorLocation(),Cash->GetCustomerStandLocation()));
+        bool Inside=false;for(TActorIterator<ABotanicusVisitorZoneActor> It(W);It;++It)if(It->GetZoneType()==EBotanicusVisitorZoneType::Checkout && It->ContainsPoint2D(C->GetActorLocation()))Inside=true;
+        Root->SetBoolField(TEXT("customerInsideCheckoutArea"),Inside);
+    }
     if(auto* C=CashValidationCustomer(W)) {Root->SetNumberField(TEXT("customerPhase"),static_cast<int32>(C->VisitorState));Root->SetBoolField(TEXT("payable"),C->CanUsePlayerCheckout());Root->SetNumberField(TEXT("nativePrice"),C->GetCheckoutPrice());Root->SetNumberField(TEXT("routePoints"),C->RoutePoints.Num());Root->SetStringField(TEXT("customerLocation"),C->GetActorLocation().ToString());}
     if(auto* Item=PC->LocalEquippedQuickBarItem.Get()) {Root->SetStringField(TEXT("equipped"),Item->GetName());Root->SetBoolField(TEXT("equippedHidden"),Item->IsHidden());}
+    Root->SetBoolField(TEXT("scannerRecognized"),PC->GetCheckoutScanner()!=nullptr);
+    Root->SetBoolField(TEXT("scannerCanTake"),PC->CanTakeCheckoutScanner());
+    Root->SetStringField(TEXT("registerLocation"),Cash->GetActorLocation().ToString());
+    Root->SetBoolField(TEXT("assignedCustomer"),Cash->GetCheckoutCustomer()!=nullptr);
     FHitResult Hit;if(PC->TraceCheckoutAim(Hit)) {Root->SetStringField(TEXT("hit"),Hit.GetActor()->GetName());Root->SetStringField(TEXT("component"),Hit.GetComponent()->GetName());}
     FVector Eye;FRotator View;PC->GetPlayerViewPoint(Eye,View);Root->SetStringField(TEXT("view"),Eye.ToString()+View.ToString());
     if(auto* J=W->GetSubsystem<UBotanicusJuiceWorldSubsystem>()) {Root->SetNumberField(TEXT("beams"),J->GetCheckoutBeamCount());Root->SetNumberField(TEXT("scanVisuals"),J->GetCheckoutScanCount());}

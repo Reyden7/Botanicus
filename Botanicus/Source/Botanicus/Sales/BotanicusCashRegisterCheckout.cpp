@@ -192,5 +192,7 @@ void ABotanicusCashRegisterActor::ConfigureRegisterRepresentation()
     DrawerOpenTarget->SetRelativeLocation(Pose.TransformPosition(S->DrawerOpenOffset));
     DrawerTarget->SetRelativeLocation(S->DrawerInteriorTarget);
     ScannerDock->SetRelativeLocationAndRotation(S->ScannerDockOffset,S->ScannerDockRotation);
+    // Match the visible scanner head; the old support target was buried against the desk surface.
+    ScannerDockHit->SetRelativeLocation(FVector(2,0,11));ScannerDockHit->SetBoxExtent(FVector(7,8,6));
     CoinDropPoint->SetRelativeLocation(FVector(-18,-12,5));
 }

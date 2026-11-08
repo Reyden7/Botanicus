@@ -1,6 +1,9 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Visitors/BotanicusVisitorZoneActor.h"
+#include "Sales/BotanicusCashRegisterActor.h"
+#include "EngineUtils.h"
+#include "TimerManager.h"
 
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -52,6 +55,8 @@ void ABotanicusVisitorZoneActor::BeginPlay()
 	if (HasAuthority())
 	{
 		SnapToUnderlyingGround();
+        if(bFollowCheckoutRegister && ZoneType==EBotanicusVisitorZoneType::Checkout)
+            GetWorldTimerManager().SetTimer(CheckoutAreaTimer,this,&ThisClass::RefreshCheckoutArea,.25f,true,.1f);
 	}
 }
 
@@ -190,4 +195,32 @@ void ABotanicusVisitorZoneActor::SnapToUnderlyingGround()
 			ETeleportType::TeleportPhysics);
 		ForceNetUpdate();
 	}
+}
+
+void ABotanicusVisitorZoneActor::EndPlay(const EEndPlayReason::Type Reason)
+{
+    GetWorldTimerManager().ClearTimer(CheckoutAreaTimer);
+    Super::EndPlay(Reason);
+}
+void ABotanicusVisitorZoneActor::RefreshCheckoutArea()
+{
+    if(!HasAuthority() || !bFollowCheckoutRegister || ZoneType!=EBotanicusVisitorZoneType::Checkout)return;
+    if(!CheckoutRegister.IsValid())
+    {
+        double Best=FMath::Square(1000.);
+        for(TActorIterator<ABotanicusCashRegisterActor> It(GetWorld());It;++It)
+        {
+            if(!It->GetIsReplicated() || It->ActorHasTag(TEXT("BotanicusPlacementPreview")) || It->ActorHasTag(TEXT("BotanicusEquippedPreview")))continue;
+            const double D=FVector::DistSquared2D(GetActorLocation(),It->GetActorLocation());
+            if(D<Best){Best=D;CheckoutRegister=*It;}
+        }
+    }
+    const auto* Cash=CheckoutRegister.Get();if(!Cash)return;
+    FVector Centre=Cash->GetActorLocation()+Cash->GetActorForwardVector()*80.f;Centre.Z=GetActorLocation().Z;
+    const FRotator Facing(0,Cash->GetActorRotation().Yaw,0);
+    const FVector Extent(120,100,BoxExtent.Z);
+    const bool Changed=!GetActorLocation().Equals(Centre,.1) || !GetActorRotation().Equals(Facing,.1) || !GetActorScale3D().Equals(FVector::OneVector,.001) || !BoxExtent.Equals(Extent,.01);
+    if(!Changed)return;
+    BoxExtent=Extent;SetActorScale3D(FVector::OneVector);SetActorLocationAndRotation(Centre,Facing);
+    RefreshVisuals();ForceNetUpdate();
 }

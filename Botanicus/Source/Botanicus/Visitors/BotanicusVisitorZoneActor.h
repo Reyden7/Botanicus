@@ -6,6 +6,7 @@
 #include "GameFramework/Actor.h"
 #include "BotanicusVisitorZoneActor.generated.h"
 
+class ABotanicusCashRegisterActor;
 class UBoxComponent;
 class UStaticMeshComponent;
 class UTextRenderComponent;
@@ -28,6 +29,7 @@ class BOTANICUS_API ABotanicusVisitorZoneActor : public AActor
 public:
 	ABotanicusVisitorZoneActor();
 	virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 	virtual void OnConstruction(const FTransform& Transform) override;
 
 	virtual void GetLifetimeReplicatedProps(
@@ -44,7 +46,12 @@ public:
 	}
 	FVector GetZoneExtent() const { return BoxExtent; }
 
+    /** Opt-in on the main checkout area: follow the restored/moved register without changing its payment rules. */
+    UPROPERTY(EditInstanceOnly, Category="Botanicus|Checkout") bool bFollowCheckoutRegister=false;
 private:
+    void RefreshCheckoutArea();
+    TWeakObjectPtr<ABotanicusCashRegisterActor> CheckoutRegister;
+    FTimerHandle CheckoutAreaTimer;
 	UFUNCTION()
 	void OnRep_ZoneConfiguration();
 
