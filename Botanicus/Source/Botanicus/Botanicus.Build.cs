@@ -14,6 +14,7 @@ public class Botanicus : ModuleRules
 			"CoreUObject",
 			"Engine",
 			"DeveloperSettings",
+            "PhysicsCore",
 			"InputCore",
 			"EnhancedInput",
 			"ItemDataRuntime",
