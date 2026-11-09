@@ -25,7 +25,7 @@ public:
 
     /** Offset added in the shared UI root: +X towards the player, +Y brings the right column inward, +Z up. */
     UPROPERTY(EditAnywhere,Config,Category="Presentation|Icones laterales",meta=(Units="cm"))
-    FVector SideIconsLocalOffset=FVector(0,8,0);
+    FVector SideIconsLocalOffset=FVector(0,18,0);
     UPROPERTY(EditAnywhere,Config,Category="Presentation|Icones laterales",meta=(ClampMin="0.05",ClampMax="0.30"))
     float SideIconsScale=.16f;
     UPROPERTY(EditAnywhere,Config,Category="Presentation|Panneau",meta=(ClampMin="-30",ClampMax="60",Units="cm"))

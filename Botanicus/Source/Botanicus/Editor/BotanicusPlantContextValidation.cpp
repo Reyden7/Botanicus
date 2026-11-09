@@ -206,7 +206,7 @@ FString UBotanicusPlantContextValidation::Snapshot(UObject* Context)
                     auto Element=MakeShared<FJsonObject>();Element->SetStringField(TEXT("name"),Widget->GetName());Element->SetBoolField(TEXT("visible"),Widget->GetVisibility()!=ESlateVisibility::Collapsed && Widget->GetVisibility()!=ESlateVisibility::Hidden);
                     if(auto* Image=Cast<UImage>(Widget))Element->SetStringField(TEXT("image"),GetPathNameSafe(Image->GetBrush().GetResourceObject()));
                     else if(auto* TextWidget=Cast<UTextBlock>(Widget))Element->SetStringField(TEXT("text"),TextWidget->GetText().ToString());else return;
-                    if(auto* CanvasSlot=Cast<UCanvasPanelSlot>(Widget->Slot)){Element->SetNumberField(TEXT("x"),CanvasSlot->GetPosition().X);Element->SetNumberField(TEXT("y"),CanvasSlot->GetPosition().Y);}
+                    if(auto* CanvasSlot=Cast<UCanvasPanelSlot>(Widget->Slot)){Element->SetNumberField(TEXT("x"),CanvasSlot->GetPosition().X);Element->SetNumberField(TEXT("y"),CanvasSlot->GetPosition().Y);Element->SetNumberField(TEXT("w"),CanvasSlot->GetSize().X);Element->SetNumberField(TEXT("h"),CanvasSlot->GetSize().Y);}
                     Elements.Add(MakeShared<FJsonValueObject>(Element));
                 });J->SetArrayField(TEXT("elements"),Elements);
             }

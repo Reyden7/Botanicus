@@ -92,13 +92,16 @@ void UBotanicusPlantInspectionWidget::SetInspectionData(
 	UTexture2D* ElementTexture, const int32 WateringCount,
 	const float AgeSeconds)
 {
+    const FText FormattedPrice=FText::AsNumber(Price);
+    const bool ContentChanged=(QualityText && !QualityText->GetText().EqualTo(Quality)) ||
+        (PriceText && !PriceText->GetText().EqualTo(FormattedPrice));
 	if (QualityText)
 	{
 		QualityText->SetText(Quality);
 	}
 	if (PriceText)
 	{
-		PriceText->SetText(FText::AsNumber(Price));
+		PriceText->SetText(FormattedPrice);
 	}
 	if (ElementIcon && ElementTexture)
 	{
@@ -108,12 +111,16 @@ void UBotanicusPlantInspectionWidget::SetInspectionData(
 	(void)WateringCount;
 	if (AgeText)
 	{
-        if(AgeSeconds<0){AgeText->SetText(FText::FromString(TEXT("—")));return;}
+        if(AgeSeconds<0){AgeText->SetText(FText::FromString(TEXT("—")));}
+        else
+        {
 		const int32 TotalSeconds = FMath::Max(0, FMath::FloorToInt(AgeSeconds));
 		AgeText->SetText(FText::FromString(FString::Printf(
 			TEXT("%02d:%02d"),
 			TotalSeconds / 60, TotalSeconds % 60)));
+        }
 	}
+    if(ContentChanged)ApplyPanelWidth(ContextPanelWidth);
 }
 
 void UBotanicusPlantInspectionWidget::ConfigureContextLayout()
@@ -164,9 +171,45 @@ void UBotanicusPlantInspectionWidget::ConfigureContextLayout()
 }
 void UBotanicusPlantInspectionWidget::ApplyPanelWidth(float Width)
 {
+    // Keep the validated component envelope/pivot unchanged. Only the card inside
+    // it adapts to content, so neither the panel transform nor column spacing moves.
     ContextPanelWidth=FMath::Clamp(Width,360.f,720.f);
-    if(ContextPlantName)ContextPlantName->SetWrapTextAt(ContextPanelWidth-72);
+    if(!WidgetTree)return;
     if(auto* Root=Cast<USizeBox>(WidgetTree->RootWidget))Root->SetWidthOverride(ContextPanelWidth);
+    auto Measure=[](const UTextBlock* Text)
+    {
+        return Text && FSlateApplication::IsInitialized()
+            ? float(FSlateApplication::Get().GetRenderer()->GetFontMeasureService()->Measure(Text->GetText(),Text->GetFont()).X):0.f;
+    };
+    auto Visible=[](const UWidget* Widget)
+    {return Widget && Widget->GetVisibility()!=ESlateVisibility::Collapsed && Widget->GetVisibility()!=ESlateVisibility::Hidden;};
+    const bool HasName=ContextPlantName && !ContextPlantName->GetText().IsEmpty();
+    const bool HasPrice=Visible(PriceText) && !PriceText->GetText().IsEmpty();
+    const bool HasQuality=Visible(QualityText) && !QualityText->GetText().IsEmpty();
+    const bool HasElement=Visible(ElementIcon) && ElementIcon->GetBrush().GetResourceObject();
+    const bool HasTime=Visible(AgeText) && !AgeText->GetText().IsEmpty();
+    auto* Credit=GetWidgetFromName(TEXT("CreditIcon"));
+    const float CreditWidth=Visible(Credit) ? 50.f:0.f;
+    const float CreditGap=CreditWidth>0 ? 12.f:0.f;
+    const float PriceWidth=FMath::Max(32.f,Measure(PriceText));
+    const float NameWidth=Measure(ContextPlantName);
+    const float RequiredWidth=FMath::Max3(NameWidth+16,Measure(QualityText),FMath::Max3(CreditWidth+CreditGap+PriceWidth+16,HasElement ? 80.f:0.f,Measure(AgeText)));
+    // The authored background's frame occupies [5.5%,94.5%] x [9%,91%].
+    // Respect its decoration and transparent margins instead of cropping its art.
+    constexpr float FrameX=.055f,FrameY=.09f,FrameW=.89f,FrameH=.82f,PadX=18,PadY=12,Gap=6;
+    const float CardWidth=FMath::Clamp((RequiredWidth+2*PadX)/FrameW,256.f,ContextPanelWidth);
+    const float ContentWidth=CardWidth*FrameW-2*PadX;
+    const float NameHeight=NameWidth>ContentWidth-16 ? 52.f:32.f;
+    if(ContextPlantName)ContextPlantName->SetWrapTextAt(ContentWidth-16);
+    float ContentHeight=0;int32 Count=0;
+    auto Add=[&](bool Present,float Height){if(Present){if(Count++)ContentHeight+=Gap;ContentHeight+=Height;}};
+    Add(HasName,NameHeight+8);Add(HasPrice,58);Add(HasQuality,28);Add(HasElement,80);Add(HasTime,20);
+    const float CardHeight=FMath::Clamp((ContentHeight+2*PadY)/FrameH,48.f,360.f);
+    const FVector2D CardPosition((ContextPanelWidth-CardWidth)*.5f,(360-CardHeight)*.5f);
+    const float Left=float(CardPosition.X)+CardWidth*FrameX+PadX;
+    float Y=float(CardPosition.Y)+CardHeight*FrameY+PadY;bool First=true;
+    auto Row=[&](bool Present,float Height)
+    {if(!Present)return Y;if(!First)Y+=Gap;First=false;const float Start=Y;Y+=Height;return Start;};
     auto Place=[](UWidget* Widget,const FVector2D& Position,const FVector2D& Size)
     {
         if(Widget)if(auto* CanvasSlot=Cast<UCanvasPanelSlot>(Widget->Slot))
@@ -174,15 +217,22 @@ void UBotanicusPlantInspectionWidget::ApplyPanelWidth(float Width)
     };
     UImage* Back=nullptr;WidgetTree->ForEachWidget([&Back](UWidget* Widget)
     {if(auto* Image=Cast<UImage>(Widget);Image && Image->GetBrush().GetResourceObject() && Image->GetBrush().GetResourceObject()->GetName()==TEXT("bg"))Back=Image;});
-    Place(Back,FVector2D::ZeroVector,FVector2D(ContextPanelWidth,360));
-    Place(GetWidgetFromName(TEXT("QualityBackground")),FVector2D(10,18),FVector2D(ContextPanelWidth-20,76));
-    Place(GetWidgetFromName(TEXT("PriceBackground")),FVector2D(10,98),FVector2D(ContextPanelWidth-20,76));
-    Place(NameScaleBox,FVector2D(36,26),FVector2D(ContextPanelWidth-72,60));
-    Place(QualityText,FVector2D(34,181),FVector2D(ContextPanelWidth-68,32));
-    Place(GetWidgetFromName(TEXT("CreditIcon")),FVector2D(ContextPanelWidth*.5f-106,112),FVector2D(50));
-    Place(PriceText,FVector2D(ContextPanelWidth*.5f-56,121),FVector2D(162,32));
-    Place(ElementIcon,FVector2D(ContextPanelWidth*.5f-40,219),FVector2D(80));
-    Place(AgeText,FVector2D(30,306),FVector2D(ContextPanelWidth-60,30));
+    Place(Back,CardPosition,FVector2D(CardWidth,CardHeight));
+    const float NameY=Row(HasName,NameHeight+8);
+    auto* NameBackground=GetWidgetFromName(TEXT("QualityBackground"));
+    if(NameBackground)NameBackground->SetVisibility(HasName ? ESlateVisibility::HitTestInvisible:ESlateVisibility::Collapsed);
+    Place(NameBackground,FVector2D(Left,NameY),FVector2D(ContentWidth,NameHeight+8));
+    Place(NameScaleBox,FVector2D(Left+8,NameY+4),FVector2D(ContentWidth-16,NameHeight));
+    const float PriceY=Row(HasPrice,58);
+    auto* PriceBackground=GetWidgetFromName(TEXT("PriceBackground"));
+    if(PriceBackground)PriceBackground->SetVisibility(HasPrice ? ESlateVisibility::HitTestInvisible:ESlateVisibility::Collapsed);
+    Place(PriceBackground,FVector2D(Left,PriceY),FVector2D(ContentWidth,58));
+    const float PriceStart=ContextPanelWidth*.5f-(CreditWidth+CreditGap+PriceWidth)*.5f;
+    Place(Credit,FVector2D(PriceStart,PriceY+4),FVector2D(CreditWidth,50));
+    Place(PriceText,FVector2D(PriceStart+CreditWidth+CreditGap,PriceY+15),FVector2D(PriceWidth,28));
+    Place(QualityText,FVector2D(Left,Row(HasQuality,28)),FVector2D(ContentWidth,28));
+    Place(ElementIcon,FVector2D(ContextPanelWidth*.5f-40,Row(HasElement,80)),FVector2D(80));
+    Place(AgeText,FVector2D(Left,Row(HasTime,20)),FVector2D(ContentWidth,20));
     InvalidateLayoutAndVolatility();
 }
 void UBotanicusPlantInspectionWidget::SetPlantName(const FText& Name)
