@@ -18,6 +18,7 @@ class BOTANICUS_API UBotanicusPlantEnvironmentAlertWidget
 	GENERATED_BODY()
 
 public:
+    void SetColumnState(const FBotanicusPlantEnvironmentState& State);
     void SetContextAlert(UTexture2D* Texture,const FLinearColor& Tint);
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Plant UI")
 	void SetEnvironmentState(

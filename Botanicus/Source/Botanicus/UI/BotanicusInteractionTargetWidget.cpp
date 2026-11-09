@@ -235,38 +235,10 @@ void UBotanicusInteractionTargetWidget::NativeTick(
 	RefreshHoldRing();
 }
 
-void UBotanicusInteractionTargetWidget::SetPlantInspectPrompt(
-	const FText& PlantName)
+void UBotanicusInteractionTargetWidget::SetPassivePlantPrompt(const FText& PlantName)
 {
-	if (!TargetNameText || PlantName.IsEmpty())
-	{
-		ClearTarget();
-		return;
-	}
-	TargetNameText->SetText(PlantName);
-	if (bLocalHoldProgressActive)
-	{
-		// Picking up a planted pot with E temporarily takes priority over the
-		// passive right-click inspection hint.
-		UpdateAdaptiveHeight();
-		SetVisibility(ESlateVisibility::HitTestInvisible);
-		return;
-	}
-	bShowHoldProgress = false;
-	HoldProgress = 0.0f;
-	if (ActionLabel)
-	{
-		ActionLabel->SetText(NSLOCTEXT(
-			"BotanicusInteraction", "Inspect", "INSPECTER"));
-	}
-	if (KeyIcon)
-	{
-		KeyIcon->SetBrushFromTexture(LoadObject<UTexture2D>(nullptr,
-			TEXT("/Game/PCKeyboardMouseIconPack/Textures/T_MouseRightClick.T_MouseRightClick")),
-			true);
-	}
-	UpdateAdaptiveHeight();
-	SetVisibility(ESlateVisibility::HitTestInvisible);
+    if(bLocalHoldProgressActive)SetTargetName(PlantName);
+    else ClearTarget();
 }
 
 void UBotanicusInteractionTargetWidget::SetLeftMousePrompt(

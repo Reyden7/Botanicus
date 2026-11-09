@@ -30,7 +30,7 @@
 #include "Editor.h"
 namespace
 {
-UWorld* TestWorld(UObject* C)
+UWorld* NightValidationWorld(UObject* C)
 {
     UWorld* W=C ? C->GetWorld():nullptr;
     return W && W->WorldType==EWorldType::PIE && FParse::Param(FCommandLine::Get(),TEXT("BotanicusNightValidation")) && FPaths::ProjectSavedDir().Contains(TEXT("/isolated_user/")) ? W:nullptr;
@@ -42,7 +42,7 @@ TMap<TWeakObjectPtr<UWorld>,bool> PlayerBlocked,NPCBlocked;
 bool UBotanicusNightValidation::Action(UObject* Context,FName Command,float Value)
 {
 #if WITH_EDITOR
-    UWorld* W=TestWorld(Context);if(!W || W->GetNetMode()==NM_Client)return false;
+    UWorld* W=NightValidationWorld(Context);if(!W || W->GetNetMode()==NM_Client)return false;
     W->GetTimerManager().SetTimerForNextTick([Weak=TWeakObjectPtr<UWorld>(W),Command,Value]()
     {
         UWorld* World=Weak.Get();if(!World)return;auto* D=Door(World);auto* GS=World->GetGameState<ABotanicusGameState>();if(!D || !GS)return;
@@ -78,7 +78,7 @@ bool UBotanicusNightValidation::Action(UObject* Context,FName Command,float Valu
 FString UBotanicusNightValidation::Snapshot(UObject* Context)
 {
 #if WITH_EDITOR
-    UWorld* W=TestWorld(Context);if(!W)return TEXT("{}");auto* D=Door(W);auto* GS=W->GetGameState<ABotanicusGameState>();if(!D || !GS)return TEXT("{}");
+    UWorld* W=NightValidationWorld(Context);if(!W)return TEXT("{}");auto* D=Door(W);auto* GS=W->GetGameState<ABotanicusGameState>();if(!D || !GS)return TEXT("{}");
     auto R=MakeShared<FJsonObject>();R->SetNumberField(TEXT("hour"),GS->GetDayTimeMinutes()/60);R->SetBoolField(TEXT("shop"),GS->IsMainShopOpen());R->SetBoolField(TEXT("trade"),GS->IsIllegalTradeActive());
     R->SetNumberField(TEXT("open"),D->GetOpenFraction());R->SetNumberField(TEXT("neon"),D->GetNeonWeight());R->SetNumberField(TEXT("publicWeight"),D->GetPublicLightWeight());R->SetBoolField(TEXT("blocked"),D->IsPassageBlocked());R->SetBoolField(TEXT("safetyHold"),D->IsWaitingForExit());
     R->SetNumberField(TEXT("collision"),int32(D->GetBlocker()->GetCollisionEnabled()));R->SetBoolField(TEXT("playerSweepBlocked"),PlayerBlocked.FindRef(W));R->SetBoolField(TEXT("npcSweepBlocked"),NPCBlocked.FindRef(W));

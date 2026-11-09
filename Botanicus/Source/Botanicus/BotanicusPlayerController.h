@@ -93,11 +93,18 @@ class BOTANICUS_API ABotanicusPlayerController : public APlayerController
 	GENERATED_BODY()
 	
 public:
+    friend class UBotanicusRefillValidation;
     friend class UBotanicusCashRegisterValidation;
     friend class UBotanicusPlantContextValidation;
     ABotanicusCheckoutScanner* GetCheckoutScanner() const;
     void SetCheckoutScannerReference(ABotanicusCheckoutScanner* Scanner);
     bool CanTakeCheckoutScanner() const;
+    bool TryWaterReserveInput(const FInputKeyEventArgs& Params);
+    bool TryRefreshRefillStationContext();
+    bool TraceRefillStationAim(FHitResult& Hit) const;
+    bool WantsRefillZone(const ABotanicusWaterReserveActor* Station) const;
+    UFUNCTION(Server,Reliable) void ServerSetRefillFaucet(ABotanicusWaterReserveActor* Station,ABotanicusWateringCanActor* ExpectedCan,bool bOpen);
+
     bool TryCheckoutInput(const FInputKeyEventArgs& Params);
     bool TraceCheckoutAim(FHitResult& Hit) const;
     bool TryRefreshCheckoutContext();
@@ -406,6 +413,7 @@ protected:
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	virtual void PlayerTick(float DeltaTime) override;
+    virtual void UpdateCameraManager(float DeltaSeconds) override;
 
 	/** Input mapping context setup */
 	virtual void SetupInputComponent() override;
@@ -476,7 +484,6 @@ protected:
 	void UpdatePlaceableItemMoveCharge(float DeltaTime);
 	void CancelPlaceableItemMoveCharge();
 	bool TryBeginNearbyPlantPotAction();
-	bool TryTogglePlantInspection();
 	bool TryBeginNearbySalePotAction();
 	bool TryUseGardenTrowelForTransplant();
 	void UpdateGardenTrowelTransplantHold(float DeltaTime);

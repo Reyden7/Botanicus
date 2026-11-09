@@ -23,6 +23,7 @@ public:
 	ABotanicusSalePotActor();
 	virtual void OnConstruction(const FTransform& Transform) override;
 
+    virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -42,6 +43,7 @@ public:
 	float GetPreparationHeightAdjustment() const;
 
 private:
+    friend class UBotanicusPlantContextSubsystem;
 	float GetSoilLevel() const;
 	bool IsSoilFull() const;
 	bool IsOnPreparationWorkbench() const;

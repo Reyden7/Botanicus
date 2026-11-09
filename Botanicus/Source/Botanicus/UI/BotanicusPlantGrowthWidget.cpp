@@ -4,6 +4,7 @@
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/CanvasPanel.h"
+#include "Components/Border.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/Image.h"
 #include "Components/SizeBox.h"
@@ -60,7 +61,7 @@ void DrawRing(FSlateWindowElementList& Elements, const FGeometry& Geometry,
 	}
 	FSlateDrawElement::MakeLines(Elements, Layer, Geometry.ToPaintGeometry(),
 		Background, ESlateDrawEffect::None,
-		FLinearColor(0.24f, 0.26f, 0.25f, 0.95f), true, 8.0f);
+		FLinearColor(0.24f, 0.26f, 0.25f, 0.95f*Color.A), true, 8.0f);
 
 	const int32 FilledSegments = FMath::Max(1,
 		FMath::RoundToInt(Segments * FMath::Clamp(Percent, 0.0f, 1.0f)));
@@ -104,6 +105,7 @@ void UBotanicusPlantGrowthWidget::NativeOnInitialized()
 			FVector2D(86.0f, 32.0f), 19);
 		WidgetTree->RootWidget = Root;
 	}
+	RefreshIndicatorLayout();
 	SetVisibility(ESlateVisibility::HitTestInvisible);
 }
 
@@ -127,6 +129,7 @@ void UBotanicusPlantGrowthWidget::SetPlantState(
 		GrowthPercentText->SetText(FText::FromString(FString::Printf(
 			TEXT("%d%%"), FMath::RoundToInt(GrowthPercent * 100.0f))));
 	}
+    RefreshIndicatorLayout();
 	InvalidateLayoutAndVolatility();
 }
 
@@ -138,14 +141,36 @@ int32 UBotanicusPlantGrowthWidget::NativePaint(
 {
 	const FVector2D Size = AllottedGeometry.GetLocalSize();
 	const float ScaleX = Size.X / 360.0f;
-	const float ScaleY = Size.Y / 180.0f;
+	const float ScaleY = Size.Y / 128.0f;
 	const float Radius = 40.0f * FMath::Min(ScaleX, ScaleY);
+    if(GrowthPercent<1.f)
 	DrawRing(OutDrawElements, AllottedGeometry, LayerId,
-		FVector2D(126.0f * ScaleX, 81.0f * ScaleY), Radius,
+		FVector2D(126.0f * ScaleX, 44.0f * ScaleY), Radius,
 		WaterPercent, FLinearColor(0.02f, 0.55f, 1.0f, 1.0f) * InWidgetStyle.GetColorAndOpacityTint());
 	DrawRing(OutDrawElements, AllottedGeometry, LayerId,
-		FVector2D(234.0f * ScaleX, 81.0f * ScaleY), Radius,
+		FVector2D((GrowthPercent>=1.f ? 180.f:234.f) * ScaleX, 44.0f * ScaleY), Radius,
 		GrowthPercent, FLinearColor(0.35f, 0.86f, 0.12f, 1.0f) * InWidgetStyle.GetColorAndOpacityTint());
 	return Super::NativePaint(Args, AllottedGeometry, MyCullingRect,
 		OutDrawElements, LayerId + 2, InWidgetStyle, bParentEnabled);
+}
+
+void UBotanicusPlantGrowthWidget::RefreshIndicatorLayout()
+{
+    if(!WidgetTree)return;
+    if(auto* Root=Cast<USizeBox>(WidgetTree->RootWidget)){Root->SetWidthOverride(360);Root->SetHeightOverride(128);}
+    // Reuse the authored glyphs and native rings; this group has no panel.
+    WidgetTree->ForEachWidget([this](UWidget* W)
+    {
+        if(auto* Image=Cast<UImage>(W);Image && Image!=WaterIcon && Image!=GrowthIcon)Image->SetVisibility(ESlateVisibility::Collapsed);
+        if(auto* Border=Cast<UBorder>(W))Border->SetBrushColor(FLinearColor::Transparent);
+    });
+    if(PlantNameText)PlantNameText->SetVisibility(ESlateVisibility::Collapsed);
+    const bool WaterVisible=GrowthPercent<1.f;
+    auto Place=[](UWidget* W,const FVector2D& P,const FVector2D& S)
+    {if(W)if(auto* Slot=Cast<UCanvasPanelSlot>(W->Slot)){Slot->SetAnchors(FAnchors(0,0));Slot->SetAlignment(FVector2D::ZeroVector);Slot->SetPosition(P);Slot->SetSize(S);}};
+    if(WaterIcon)WaterIcon->SetVisibility(WaterVisible ? ESlateVisibility::HitTestInvisible:ESlateVisibility::Collapsed);
+    if(WaterPercentText)WaterPercentText->SetVisibility(WaterVisible ? ESlateVisibility::HitTestInvisible:ESlateVisibility::Collapsed);
+    Place(WaterIcon,FVector2D(97,15),FVector2D(58));Place(WaterPercentText,FVector2D(83,92),FVector2D(86,32));
+    Place(GrowthIcon,FVector2D((WaterVisible ? 234.f:180.f)-29,15),FVector2D(58));
+    Place(GrowthPercentText,FVector2D((WaterVisible ? 234.f:180.f)-43,92),FVector2D(86,32));
 }

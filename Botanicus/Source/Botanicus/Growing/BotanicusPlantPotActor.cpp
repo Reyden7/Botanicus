@@ -478,19 +478,19 @@ void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 					(CameraLocation -
 					 ContextActionText->GetComponentLocation()).Rotation());
 			}
-			if (PlantGrowthWidget && PlantGrowthWidget->IsVisible())
+			if (PlantGrowthWidget && PlantGrowthWidget->IsVisible() && PlantGrowthWidget->GetWidgetSpace()==EWidgetSpace::World && !PlantGrowthWidget->ComponentHasTag(TEXT("BotanicusPlantContextUI")))
 			{
 				PlantGrowthWidget->SetWorldRotation(
 					(CameraLocation -
 					 PlantGrowthWidget->GetComponentLocation()).Rotation());
 			}
-			if (EnvironmentAlertWidget && EnvironmentAlertWidget->IsVisible())
+			if (EnvironmentAlertWidget && EnvironmentAlertWidget->IsVisible() && EnvironmentAlertWidget->GetWidgetSpace()==EWidgetSpace::World && !EnvironmentAlertWidget->ComponentHasTag(TEXT("BotanicusPlantContextUI")))
 			{
 				EnvironmentAlertWidget->SetWorldRotation(
 					(CameraLocation -
 					 EnvironmentAlertWidget->GetComponentLocation()).Rotation());
 			}
-			if (EnvironmentDebugWidget && EnvironmentDebugWidget->IsVisible())
+			if (EnvironmentDebugWidget && EnvironmentDebugWidget->IsVisible() && EnvironmentDebugWidget->GetWidgetSpace()==EWidgetSpace::World && !EnvironmentDebugWidget->ComponentHasTag(TEXT("BotanicusPlantContextUI")))
 			{
 				FVector CameraRight = CameraManager->GetCameraRotation().
 					RotateVector(FVector::RightVector);
@@ -504,7 +504,7 @@ void ABotanicusPlantPotActor::Tick(float DeltaSeconds)
 					(CameraLocation -
 					 EnvironmentDebugWidget->GetComponentLocation()).Rotation());
 			}
-			if (PlantInspectionWidget && PlantInspectionWidget->IsVisible())
+			if (PlantInspectionWidget && PlantInspectionWidget->IsVisible() && PlantInspectionWidget->GetWidgetSpace()==EWidgetSpace::World && !PlantInspectionWidget->ComponentHasTag(TEXT("BotanicusPlantContextUI")))
 			{
 				FVector TowardCamera = CameraLocation - GetActorLocation();
 				TowardCamera.Z = 0.0f;
@@ -1611,6 +1611,7 @@ void ABotanicusPlantPotActor::RefreshInspectionWidget()
 	const float AgeSeconds = GetWorld()
 		? FMath::Max(0.0f, GetWorld()->GetTimeSeconds() - PlantingStartServerTime)
 		: 0.0f;
+    Widget->SetPlantName(Definition->DisplayName);
 	Widget->SetInspectionData(
 		FText::FromString(GetPlantQualityLabel()), Price, ElementName,
 		LoadObject<UTexture2D>(nullptr, ElementTexturePath),
@@ -2158,7 +2159,7 @@ void ABotanicusPlantPotActor::RefreshVisuals()
 		const float WidgetBelowPivot =
 			PlantGrowthWidget->GetDrawSize().Y *
 			PlantGrowthWidgetScale * PlantGrowthWidget->GetPivot().Y;
-		PlantGrowthWidget->SetRelativeLocation(FVector(
+		if(PlantGrowthWidget->GetWidgetSpace()==EWidgetSpace::World && !PlantGrowthWidget->ComponentHasTag(TEXT("BotanicusPlantContextUI"))) PlantGrowthWidget->SetRelativeLocation(FVector(
 			0.0f, 0.0f,
 			HighestVisiblePoint + PlantGrowthWidgetClearance +
 			WidgetBelowPivot));

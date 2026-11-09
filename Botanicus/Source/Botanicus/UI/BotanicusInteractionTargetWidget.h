@@ -24,7 +24,7 @@ public:
 	void SetKeyboardPrompt(
 		const FText& ActionText,
 		const FText& TargetName);
-	void SetPlantInspectPrompt(const FText& PlantName);
+	void SetPassivePlantPrompt(const FText& PlantName);
 	void SetLeftMousePrompt(
 		const FText& ActionText,
 		const FText& TargetName,

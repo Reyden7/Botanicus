@@ -9,6 +9,7 @@ class UBotanicusPlantContextValidation : public UBlueprintFunctionLibrary
 {
     GENERATED_BODY()
 public:
+    UFUNCTION(BlueprintCallable,meta=(WorldContext="Context",DevelopmentOnly)) static bool Capture(UObject* Context,FString Name);
     UFUNCTION(BlueprintCallable,meta=(WorldContext="Context",DevelopmentOnly)) static bool Step(UObject* Context,FName Action);
     UFUNCTION(BlueprintPure,meta=(WorldContext="Context")) static FString Snapshot(UObject* Context);
 };

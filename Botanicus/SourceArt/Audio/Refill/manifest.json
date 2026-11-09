@@ -1,0 +1,20 @@
+{
+  "source": "C:\\Users\\quent\\Documents\\Botanicus\\sons\\Robinet ouvert.mp3",
+  "sha256": "6475b90d84aad5edae57fe0bf1beb2995b32fed1ef1c40a8480ea42d39fd78b9",
+  "wav": "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\SourceArt\\Audio\\Refill\\Robinet_ouvert.wav",
+  "duration": 2.0164583333333335,
+  "gain": 1,
+  "pitch": 1,
+  "trim": false,
+  "continuous_flow": {
+    "source": "C:\\Users\\quent\\Documents\\Botanicus\\sons\\Remplir arosoir avec reserve d'eau.mp3",
+    "sha256": "42ca6888e4bcedd1b80f7692bb4edb06160e241d0c8731241e7c209783f7a47d",
+    "wav": "C:\\Users\\quent\\Documents\\repos\\Botanicus\\Botanicus\\SourceArt\\Audio\\Refill\\Reserve_refill_loop.wav",
+    "selection_seconds": [
+      1,
+      8
+    ],
+    "crossfade_ms": 40,
+    "duration": 6.96
+  }
+}

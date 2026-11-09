@@ -7,6 +7,7 @@ class UBotanicusAudioCatalog;
 class UAudioComponent;
 class USoundBase;
 class USoundConcurrency;
+class USoundAttenuation;
 
 USTRUCT()
 struct FBotanicusWaterVoice
@@ -46,8 +47,9 @@ public:
 	UFUNCTION(BlueprintPure, Category="Botanicus|Audio|Diagnostics") float GetNightAmbienceWeight() const {return NightWeight;}
 	UFUNCTION(BlueprintPure, Category="Botanicus|Audio|Diagnostics") float GetAmbienceMixVolume(bool bNight) const {return bNight ? InsectVolume : WindVolume;}
 	UFUNCTION(BlueprintPure, Category="Botanicus|Audio|Diagnostics") int32 GetActiveAmbienceVoiceCount() const;
+    UAudioComponent* StartRefillLoop(AActor* Owner,const FVector& Position);
     /** Local, already synchronized presentation; no extra network event. Caller may fade/stop the voice. */
-    UAudioComponent* PlaySpatialTransition(AActor* Owner,USoundBase* Asset,const FVector& Position,float Volume,float StartAt=0.f);
+    UAudioComponent* PlaySpatialTransition(AActor* Owner,USoundBase* Asset,const FVector& Position,float Volume,float StartAt=0.f,USoundAttenuation* OverrideAttenuation=nullptr);
 	ABotanicusAudioRelay* GetRelay();
 private:
 	void UpdateLocalAudio();

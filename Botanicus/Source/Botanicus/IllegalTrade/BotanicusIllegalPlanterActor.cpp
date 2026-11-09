@@ -816,7 +816,7 @@ void ABotanicusIllegalPlanterActor::RefreshGrowthWidgets()
 
 		const bool bOccupied = PlantSlots.IsValidIndex(Index) &&
 			!PlantSlots[Index].PlantId.IsNone();
-		GrowthComponent->SetRelativeScale3D(
+		if(!GrowthComponent->ComponentHasTag(TEXT("BotanicusPlantContextUI"))) GrowthComponent->SetRelativeScale3D(
 			FVector(PlantGrowthWidgetScale));
 		if (!bOccupied || ActorHasTag(TEXT("BotanicusPlacementPreview"))) GrowthComponent->SetVisibility(false);
 		if (!bOccupied)
@@ -832,13 +832,13 @@ void ABotanicusIllegalPlanterActor::RefreshGrowthWidgets()
 		const float WidgetBelowPivot =
 			GrowthComponent->GetDrawSize().Y * PlantGrowthWidgetScale *
 			GrowthComponent->GetPivot().Y;
-		GrowthComponent->SetRelativeLocation(FVector(
+		if(GrowthComponent->GetWidgetSpace()==EWidgetSpace::World && !GrowthComponent->ComponentHasTag(TEXT("BotanicusPlantContextUI"))) GrowthComponent->SetRelativeLocation(FVector(
 			Start + Spacing * Index,
 			0.0f,
 			FMath::Max(PlantTopHeight, PlanterRimHeight) +
 			PlantGrowthWidgetClearance + WidgetBelowPivot));
 
-		if (CameraManager && GrowthComponent->IsVisible())
+		if (CameraManager && GrowthComponent->IsVisible() && GrowthComponent->GetWidgetSpace()==EWidgetSpace::World && !GrowthComponent->ComponentHasTag(TEXT("BotanicusPlantContextUI")))
 		{
 			GrowthComponent->SetWorldRotation(
 				(CameraManager->GetCameraLocation() -

@@ -275,7 +275,7 @@ void ABotanicusMultiPlantPotActor::Tick(float DeltaSeconds)
 							Rotation());
 					for (UWidgetComponent* AlertWidget : EnvironmentAlertWidgets)
 					{
-						if (AlertWidget && AlertWidget->IsVisible())
+						if (AlertWidget && AlertWidget->IsVisible() && AlertWidget->GetWidgetSpace()==EWidgetSpace::World && !AlertWidget->ComponentHasTag(TEXT("BotanicusPlantContextUI")))
 						{
 							AlertWidget->SetWorldRotation(
 								(CameraLocation -
@@ -284,7 +284,7 @@ void ABotanicusMultiPlantPotActor::Tick(float DeltaSeconds)
 					}
 					for (UWidgetComponent* GrowthWidget : SlotGrowthWidgets)
 					{
-						if (GrowthWidget && GrowthWidget->IsVisible())
+						if (GrowthWidget && GrowthWidget->IsVisible() && GrowthWidget->GetWidgetSpace()==EWidgetSpace::World && !GrowthWidget->ComponentHasTag(TEXT("BotanicusPlantContextUI")))
 						{
 							GrowthWidget->SetWorldRotation(
 								(CameraLocation -
@@ -302,7 +302,7 @@ void ABotanicusMultiPlantPotActor::Tick(float DeltaSeconds)
 					{
 						UWidgetComponent* DebugWidget =
 							EnvironmentDebugWidgets[Index];
-						if (!DebugWidget || !DebugWidget->IsVisible())
+						if (!DebugWidget || !DebugWidget->IsVisible() || DebugWidget->GetWidgetSpace()!=EWidgetSpace::World)
 						{
 							continue;
 						}
@@ -1162,7 +1162,7 @@ void ABotanicusMultiPlantPotActor::RefreshVisuals()
 			SlotGrowthWidgets[Index])
 		{
 			UWidgetComponent* GrowthComponent = SlotGrowthWidgets[Index];
-			GrowthComponent->SetRelativeScale3D(
+			if(!GrowthComponent->ComponentHasTag(TEXT("BotanicusPlantContextUI"))) GrowthComponent->SetRelativeScale3D(
 				FVector(SlotGrowthWidgetScale));
 			const UStaticMesh* PlantMesh =
 				MultiFlowerMeshes[Index]->GetStaticMesh();
@@ -1174,7 +1174,7 @@ void ABotanicusMultiPlantPotActor::RefreshVisuals()
 			const float WidgetBelowPivot =
 				GrowthComponent->GetDrawSize().Y * SlotGrowthWidgetScale *
 				GrowthComponent->GetPivot().Y;
-			GrowthComponent->SetRelativeLocation(FVector(
+			if(GrowthComponent->GetWidgetSpace()==EWidgetSpace::World && !GrowthComponent->ComponentHasTag(TEXT("BotanicusPlantContextUI"))) GrowthComponent->SetRelativeLocation(FVector(
 				BaseLocation.X,
 				BaseLocation.Y,
 				FMath::Max(PlantTopHeight, PotRimHeight) +

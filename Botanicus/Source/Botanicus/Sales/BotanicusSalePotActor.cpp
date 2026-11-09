@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Sales/BotanicusSalePotActor.h"
+#include "UI/BotanicusPlantContextSubsystem.h"
 #include "Audio/BotanicusAudioWorldSubsystem.h"
 
 #include "BotanicusCharacter.h"
@@ -790,4 +791,10 @@ void ABotanicusSalePotActor::SendInteractorMessage(
 void ABotanicusSalePotActor::OnRep_SalePotState()
 {
 	RefreshVisuals();
+}
+
+void ABotanicusSalePotActor::BeginPlay()
+{
+    Super::BeginPlay();
+    if(auto* Context=GetWorld()->GetSubsystem<UBotanicusPlantContextSubsystem>())Context->RegisterPlant(this);
 }

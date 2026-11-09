@@ -46,6 +46,7 @@ protected:
 	TObjectPtr<UTextBlock> GrowthPercentText;
 
 private:
+    void RefreshIndicatorLayout();
 	float WaterPercent = 0.0f;
 	float GrowthPercent = 0.0f;
 };

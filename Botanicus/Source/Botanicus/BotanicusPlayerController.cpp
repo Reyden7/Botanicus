@@ -821,6 +821,12 @@ void ABotanicusPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReaso
 	Super::EndPlay(EndPlayReason);
 }
 
+void ABotanicusPlayerController::UpdateCameraManager(float DeltaSeconds)
+{
+    Super::UpdateCameraManager(DeltaSeconds);
+    if(IsLocalPlayerController())if(auto* Context=GetWorld()->GetSubsystem<UBotanicusPlantContextSubsystem>())Context->UpdateCameraLayout(*this);
+}
+
 void ABotanicusPlayerController::PlayerTick(float DeltaTime)
 {
 	Super::PlayerTick(DeltaTime);
@@ -1224,6 +1230,7 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		return true;
 	}
 
+    if(TryWaterReserveInput(Params)) return true;
     if(TryCheckoutInput(Params)) return true;
 
 	// Old Blueprint input mappings cannot re-enable construction.
@@ -1521,7 +1528,6 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 			 TryPlacePlantOnNearbySalesDisplay() ||
 			 TryCheckoutNearbyRegister() ||
 			 TryBeginNearbyParcelCut() ||
-			 TryRefillHeldWateringCan() ||
 			 TryBeginNearbyPlantPotAction() ||
 			 TryBeginNearbySalePotAction()))
 		{
@@ -1566,12 +1572,6 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 	// Never forward left click to EBS' damage/destruction trace. Quickbar
 	// quantities are consumed only by an authoritative confirmed placement.
 	if (Params.Key == EKeys::LeftMouseButton)
-	{
-		return true;
-	}
-	if (Params.Key == EKeys::RightMouseButton &&
-		Params.Event == IE_Pressed &&
-		TryTogglePlantInspection())
 	{
 		return true;
 	}
@@ -2082,6 +2082,7 @@ void ABotanicusPlayerController::RefreshInteractionTargetName(
 	{
 		return;
 	}
+    if(TryRefreshRefillStationContext()) return;
     if(TryRefreshCheckoutContext()) return;
 
 	if (!IsValid(TargetActor))
@@ -2253,7 +2254,7 @@ void ABotanicusPlayerController::RefreshInteractionTargetName(
 		}
 		if (SelectedItemKey.IsNone() && bHasPlant)
 		{
-			InteractionTargetWidget->SetPlantInspectPrompt(
+			InteractionTargetWidget->SetPassivePlantPrompt(
 				PlantName);
 			return;
 		}
@@ -6515,22 +6516,24 @@ bool ABotanicusPlayerController::ResolveQuickBarItemPlacement(
 				MeshBounds.Origin.Z * DefinitionScale.Z;
 		}
 	}
-	const FVector EffectiveBoxExtent =
-		Definition &&
-			!Definition->CollisionHalfExtentOverride.IsNearlyZero()
-			? Definition->CollisionHalfExtentOverride.GetAbs()
-			: BoxExtent;
-	if (Definition &&
-		!Definition->CollisionHalfExtentOverride.IsNearlyZero())
-	{
-		PlacementBottomOffset = EffectiveBoxExtent.Z;
-	}
 	const FVector PlacementScale =
 		IsValid(IgnoredWorldItem)
 			? IgnoredWorldItem->GetActorScale3D()
 			: (IsValid(LocalQuickBarItemPreview)
 				? LocalQuickBarItemPreview->GetActorScale3D()
 				: FVector::OneVector);
+    const bool bCalibratedWateringCan=ItemKey==TEXT("WateringCan") && Definition &&
+        ABotanicusWateringCanActor::ResolveGroundGeometry(this,*Definition,PlacementScale,BoxExtent,PlacementBottomOffset);
+	const FVector EffectiveBoxExtent =
+		Definition &&
+			!Definition->CollisionHalfExtentOverride.IsNearlyZero()
+			? Definition->CollisionHalfExtentOverride.GetAbs()
+			: BoxExtent;
+	if (!bCalibratedWateringCan && Definition &&
+		!Definition->CollisionHalfExtentOverride.IsNearlyZero())
+	{
+		PlacementBottomOffset = EffectiveBoxExtent.Z;
+	}
 	float PlacementGroundOffset = PlacementBottomOffset;
 	const ABotanicusPlaceableItemActor* PlacementPlaceable =
 		IsValid(IgnoredWorldItem)
@@ -6869,7 +6872,7 @@ bool ABotanicusPlayerController::ResolveQuickBarItemPlacement(
 		(IsValid(IgnoredWorldItem) &&
 		 IsFurnitureActor(IgnoredWorldItem));
 	const float GroundClearance =
-		bIsFurniturePlacement ? 0.0f : 3.0f;
+		bIsFurniturePlacement ? 0.0f : (bCalibratedWateringCan ? ABotanicusWateringCanActor::GroundClearance:3.0f);
 	const FVector PlacementLocation(
 		RequestedLocation.X,
 		RequestedLocation.Y,
@@ -7459,92 +7462,8 @@ bool ABotanicusPlayerController::TryHandleNearbyWateringCan()
 	return true;
 }
 
-bool ABotanicusPlayerController::TryRefillHeldWateringCan()
-{
-	if (!IsLocalPlayerController() || !GetPawn() || !GetWorld())
-	{
-		return false;
-	}
-	const ABotanicusCharacter* BotanicusCharacter =
-		Cast<ABotanicusCharacter>(GetPawn());
-	const UBotanicusQuickBarComponent* QuickBar =
-		BotanicusCharacter
-			? BotanicusCharacter->GetQuickBarComponent()
-			: nullptr;
-	if (!QuickBar || !QuickBar->HasSelectedWateringCan())
-	{
-		return false;
-	}
-
-	ABotanicusWaterReserveActor* NearestReserve = nullptr;
-	float BestDistanceSquared = FMath::Square(400.0f);
-	for (TActorIterator<ABotanicusWaterReserveActor> ReserveIt(
-			 GetWorld());
-		 ReserveIt;
-		 ++ReserveIt)
-	{
-		const float DistanceSquared = FVector::DistSquared(
-			BotanicusCharacter->GetActorLocation(),
-			ReserveIt->GetActorLocation());
-		if (DistanceSquared <= BestDistanceSquared &&
-			IsLookingAtWorldItem(
-				*ReserveIt,
-				MaximumWorldInteractionDistance))
-		{
-			BestDistanceSquared = DistanceSquared;
-			NearestReserve = *ReserveIt;
-		}
-	}
-	if (!NearestReserve)
-	{
-		return false;
-	}
-	LocalActiveWaterReserve = NearestReserve;
-	bWaterRefillActionHeld = true;
-	WaterRefillRequestAccumulator = 0.0f;
-	ServerRefillWateringCan(NearestReserve);
-	return true;
-}
-
-void ABotanicusPlayerController::UpdateWateringCanRefill(
-	float DeltaTime)
-{
-	if (IsLocalPlayerController() &&
-		bWaterRefillActionHeld)
-	{
-		const ABotanicusCharacter* BotanicusCharacter =
-			Cast<ABotanicusCharacter>(GetPawn());
-		const UBotanicusQuickBarComponent* QuickBar =
-			BotanicusCharacter
-				? BotanicusCharacter->GetQuickBarComponent()
-				: nullptr;
-		if (!IsValid(LocalActiveWaterReserve) ||
-			!QuickBar ||
-			!QuickBar->HasSelectedWateringCan() ||
-			QuickBar->GetSelectedWateringCanWaterLevel() >=
-				1.0f - KINDA_SMALL_NUMBER ||
-			!IsLookingAtWorldItem(
-				LocalActiveWaterReserve,
-				MaximumWorldInteractionDistance))
-		{
-			EndWateringCanRefill(true);
-		}
-		else
-		{
-			WaterRefillRequestAccumulator +=
-				FMath::Max(0.0f, DeltaTime);
-			if (WaterRefillRequestAccumulator >= 0.1f)
-			{
-				WaterRefillRequestAccumulator =
-					FMath::Fmod(
-						WaterRefillRequestAccumulator,
-						0.1f);
-				ServerRefillWateringCan(
-					LocalActiveWaterReserve);
-			}
-		}
-	}
-}
+bool ABotanicusPlayerController::TryRefillHeldWateringCan(){return false;}
+void ABotanicusPlayerController::UpdateWateringCanRefill(float DeltaTime){(void)DeltaTime;}
 
 void ABotanicusPlayerController::EndWateringCanRefill(
 	bool bNotifyServer)
@@ -8049,25 +7968,6 @@ void ABotanicusPlayerController::RefreshStorageQuantityWidget(
 		Quantity,
 		MaximumQuantity,
 		bStoring);
-}
-
-bool ABotanicusPlayerController::TryTogglePlantInspection()
-{
-	ABotanicusPlantPotActor* PlantPot =
-		Cast<ABotanicusPlantPotActor>(LocalInteractionHighlightActor.Get());
-	ABotanicusCharacter* BotanicusCharacter =
-		Cast<ABotanicusCharacter>(GetPawn());
-	UBotanicusQuickBarComponent* QuickBar = BotanicusCharacter
-		? BotanicusCharacter->GetQuickBarComponent()
-		: nullptr;
-	if (!IsValid(PlantPot) || PlantPot->GetPlantKey().IsNone() ||
-		!QuickBar || !QuickBar->GetSelectedSlot().ItemKey.IsNone())
-	{
-		return false;
-	}
-
-	// Details now follow local aim automatically; right click no longer pins a stale panel.
-	return true;
 }
 
 bool ABotanicusPlayerController::TryBeginNearbyPlantPotAction()
@@ -10486,6 +10386,7 @@ void ABotanicusPlayerController::
 
 	if (!bMountedOnSalesDisplay && IsValid(PlacedItem))
 	{
+        if(auto* Can=Cast<ABotanicusWateringCanActor>(PlacedItem))ABotanicusWaterReserveActor::AcceptPlacement(Can);
 		UBotanicusJuiceWorldSubsystem::PlacementSucceeded(PlacedItem,GetPawn());
 		PlacedItem->SetOwner(nullptr);
 		PlacedItem->SetNetDormancy(DORM_Awake);
@@ -10974,6 +10875,7 @@ void ABotanicusPlayerController::
 	WorldItem->SetNetDormancy(DORM_Awake);
 	WorldItem->FlushNetDormancy();
 	WorldItem->ForceNetUpdate();
+    if(auto* Can=Cast<ABotanicusWateringCanActor>(WorldItem))ABotanicusWaterReserveActor::AcceptPlacement(Can);
 	UBotanicusJuiceWorldSubsystem::PlacementSucceeded(WorldItem,GetPawn());
 	ServerMovedPlaceableItem = nullptr;
 	if (ABotanicusGameMode* GameMode =
@@ -11160,91 +11062,9 @@ void ABotanicusPlayerController::
 	}
 }
 
-void ABotanicusPlayerController::
-	ServerRefillWateringCan_Implementation(
-		ABotanicusWaterReserveActor* WaterReserve)
-{
-	ABotanicusCharacter* BotanicusCharacter =
-		Cast<ABotanicusCharacter>(GetPawn());
-	UBotanicusQuickBarComponent* QuickBar =
-		BotanicusCharacter
-			? BotanicusCharacter->GetQuickBarComponent()
-			: nullptr;
-	if (!BotanicusCharacter || !QuickBar ||
-		!QuickBar->HasSelectedWateringCan())
-	{
-		ClientMessage(
-			TEXT(
-				"Remplissage impossible : selectionnez l'arrosoir dans la hotbar."));
-		return;
-	}
-	if (!IsLookingAtWorldItem(
-			WaterReserve,
-			MaximumWorldInteractionDistance))
-	{
-		ClientMessage(
-			TEXT(
-				"Remplissage impossible : regardez la reserve et rapprochez-vous."));
-		return;
-	}
-	if (QuickBar->GetSelectedWateringCanWaterLevel() >=
-		1.0f - KINDA_SMALL_NUMBER)
-	{
-		ClientMessage(TEXT("L'arrosoir est deja plein."));
-		return;
-	}
-	ServerActiveWaterReserve = WaterReserve;
-	const double CurrentServerTime =
-		GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
-	const double ElapsedSincePulse =
-		CurrentServerTime - LastServerWaterRefillPulseTime;
-	if (ElapsedSincePulse < 0.075)
-	{
-		return;
-	}
-
-	const float RefillDeltaTime =
-		LastServerWaterRefillPulseTime < -100.0
-			? 0.1f
-			: FMath::Clamp(
-				static_cast<float>(ElapsedSincePulse),
-				0.075f,
-				0.15f);
-	LastServerWaterRefillPulseTime = CurrentServerTime;
-	constexpr float WaterRefillPerSecond = 0.40f;
-	if (WaterReserve->TryRefill(
-			BotanicusCharacter,
-			WaterRefillPerSecond * RefillDeltaTime))
-	{
-		bServerWaterRefillChanged = true;
-		if (QuickBar->GetSelectedWateringCanWaterLevel() >=
-			1.0f - KINDA_SMALL_NUMBER)
-		{
-			ClientMessage(TEXT("Arrosoir rempli : eau 100%."));
-		}
-	}
-}
-
-void ABotanicusPlayerController::
-	ServerEndWateringCanRefill_Implementation(
-		ABotanicusWaterReserveActor* WaterReserve)
-{
-	if (ServerActiveWaterReserve != WaterReserve)
-	{
-		return;
-	}
-	if (bServerWaterRefillChanged)
-	{
-		if (ABotanicusGameMode* GameMode =
-			GetWorld()->GetAuthGameMode<ABotanicusGameMode>())
-		{
-			GameMode->ScheduleInventoryAutosave();
-		}
-	}
-	ServerActiveWaterReserve = nullptr;
-	bServerWaterRefillChanged = false;
-	LastServerWaterRefillPulseTime = -1000.0;
-}
+// Retired hold-click refill RPCs remain inert for old Blueprint/native callers.
+void ABotanicusPlayerController::ServerRefillWateringCan_Implementation(ABotanicusWaterReserveActor* WaterReserve){(void)WaterReserve;}
+void ABotanicusPlayerController::ServerEndWateringCanRefill_Implementation(ABotanicusWaterReserveActor* WaterReserve){(void)WaterReserve;}
 
 void ABotanicusPlayerController::
 	ServerPulseWateringCanSpray_Implementation()

@@ -115,7 +115,7 @@ void UBotanicusAudioWorldSubsystem::PlayFeedback(FName Id,const FVector& Positio
 	if (Cooldowns.Num()>256) Cooldowns.Reset();
 	Cooldowns.FindOrAdd(Key)=Now;
 	UAudioComponent* Voice=bSpatial
-		? UGameplayStatics::SpawnSoundAtLocation(GetWorld(),Entry->Sound,Position,FRotator::ZeroRotator,Entry->Volume,Entry->Pitch*PitchMultiplier,0,Catalog->InteractionAttenuation,Entry->Concurrency)
+		? UGameplayStatics::SpawnSoundAtLocation(GetWorld(),Entry->Sound,Position,FRotator::ZeroRotator,Entry->Volume,Entry->Pitch*PitchMultiplier,0,Id==TEXT("FaucetOpen") && Catalog->RefillAttenuation ? Catalog->RefillAttenuation.Get():Catalog->InteractionAttenuation.Get(),Entry->Concurrency)
 		: UGameplayStatics::SpawnSound2D(GetWorld(),Entry->Sound,Entry->Volume,Entry->Pitch*PitchMultiplier,0,Entry->Concurrency);
 	if (Voice && Voice->IsPlaying()) ++PlayCounts.FindOrAdd(Id);
 }
@@ -219,7 +219,7 @@ void UBotanicusAudioWorldSubsystem::Deinitialize()
 	WaterVoices.Reset();Super::Deinitialize();
 }
 
-UAudioComponent* UBotanicusAudioWorldSubsystem::PlaySpatialTransition(AActor* Owner,USoundBase* Asset,const FVector& Position,float Volume,float StartAt)
+UAudioComponent* UBotanicusAudioWorldSubsystem::PlaySpatialTransition(AActor* Owner,USoundBase* Asset,const FVector& Position,float Volume,float StartAt,USoundAttenuation* OverrideAttenuation)
 {
     if(!Owner || !Asset || GetWorld()->GetNetMode()==NM_DedicatedServer || FVector::DistSquared(ListenerPosition(),Position)>FMath::Square(1800.f))return nullptr;
     LoadCatalog();
@@ -229,8 +229,13 @@ UAudioComponent* UBotanicusAudioWorldSubsystem::PlaySpatialTransition(AActor* Ow
         TransitionConcurrency->Concurrency.bLimitToOwner=true;TransitionConcurrency->Concurrency.ResolutionRule=EMaxConcurrentResolutionRule::StopQuietest;
     }
     auto* Voice=NewObject<UAudioComponent>(Owner);Voice->bAutoActivate=false;Voice->bAutoDestroy=true;Voice->bStopWhenOwnerDestroyed=true;
-    Voice->SetSound(Asset);Voice->bAllowSpatialization=true;if(Catalog)Voice->AttenuationSettings=Catalog->InteractionAttenuation;
+    Voice->SetSound(Asset);Voice->bAllowSpatialization=true;if(OverrideAttenuation)Voice->AttenuationSettings=OverrideAttenuation;else if(Catalog)Voice->AttenuationSettings=Catalog->InteractionAttenuation;
     Voice->ConcurrencySet.Add(TransitionConcurrency);Voice->SetVolumeMultiplier(FMath::Clamp(Volume,0.f,1.f));
     Voice->RegisterComponentWithWorld(GetWorld());Voice->SetWorldLocation(Position);Voice->Play(FMath::Max(0.f,StartAt));
     if(Voice->IsPlaying())++PlayCounts.FindOrAdd(Asset->GetFName());return Voice;
+}
+
+UAudioComponent* UBotanicusAudioWorldSubsystem::StartRefillLoop(AActor* Owner,const FVector& Position)
+{
+    LoadCatalog();return Catalog ? PlaySpatialTransition(Owner,Catalog->RefillLoop,Position,Catalog->RefillVolume,0.f,Catalog->RefillAttenuation) : nullptr;
 }

@@ -4,6 +4,7 @@
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/CanvasPanel.h"
+#include "Components/Border.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/Image.h"
 #include "Components/SizeBox.h"
@@ -124,6 +125,7 @@ bool UBotanicusPlantEnvironmentAlertWidget::ApplyConditionIcon(
 
 void UBotanicusPlantEnvironmentAlertWidget::SetContextAlert(UTexture2D* Texture,const FLinearColor& Tint)
 {
+    if(auto* Root=Cast<USizeBox>(WidgetTree ? WidgetTree->RootWidget:nullptr)){Root->SetWidthOverride(240);Root->SetHeightOverride(72);}
     bHasAnyAlert=Texture!=nullptr;
     if(AirHumidityImage) AirHumidityImage->SetVisibility(ESlateVisibility::Collapsed);
     if(LuminosityImage) LuminosityImage->SetVisibility(ESlateVisibility::Collapsed);
@@ -132,4 +134,22 @@ void UBotanicusPlantEnvironmentAlertWidget::SetContextAlert(UTexture2D* Texture,
     if(TemperatureImage->GetBrush().GetResourceObject()!=Texture) TemperatureImage->SetBrushFromTexture(Texture,true);
     TemperatureImage->SetColorAndOpacity(Tint);
     TemperatureImage->SetVisibility(Texture ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+}
+
+void UBotanicusPlantEnvironmentAlertWidget::SetColumnState(const FBotanicusPlantEnvironmentState& State)
+{
+    SetEnvironmentState(State);
+    if(!WidgetTree)return;
+    if(auto* Root=Cast<USizeBox>(WidgetTree->RootWidget)){Root->SetWidthOverride(72);Root->SetHeightOverride(240);}
+    WidgetTree->ForEachWidget([this](UWidget* W)
+    {
+        if(auto* I=Cast<UImage>(W);I && I!=TemperatureImage && I!=AirHumidityImage && I!=LuminosityImage)I->SetVisibility(ESlateVisibility::Collapsed);
+        if(auto* Border=Cast<UBorder>(W))Border->SetBrushColor(FLinearColor::Transparent);
+    });
+    int32 Index=0;for(UImage* I:{TemperatureImage.Get(),AirHumidityImage.Get(),LuminosityImage.Get()})
+    {
+        const int32 Row=Index++;if(!I)continue;
+        I->SetColorAndOpacity(FLinearColor::White);
+        if(auto* ImageSlot=Cast<UCanvasPanelSlot>(I->Slot)){ImageSlot->SetAnchors(FAnchors(0,0));ImageSlot->SetAlignment(FVector2D::ZeroVector);ImageSlot->SetPosition(FVector2D(0,Row*80));ImageSlot->SetSize(FVector2D(72));}
+    }
 }

@@ -36,6 +36,9 @@ class BOTANICUS_API UBotanicusAudioCatalog : public UDataAsset
 {
 	GENERATED_BODY()
 public:
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Refill") TObjectPtr<USoundBase> RefillLoop;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Refill") TObjectPtr<USoundAttenuation> RefillAttenuation;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Refill",meta=(ClampMin="0",ClampMax="1")) float RefillVolume=.25f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Feedback") TMap<FName,FBotanicusSoundFeedback> Feedback;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Feedback") TObjectPtr<USoundAttenuation> InteractionAttenuation;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Loops") TObjectPtr<USoundBase> WaterLoop;
