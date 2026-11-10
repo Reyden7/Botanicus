@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Delivery/BotanicusPlaceableItemActor.h"
 #include "Sales/Checkout/BotanicusCheckoutTypes.h"
+#include "Sales/Checkout/BotanicusCheckoutScanner.h"
 #include "BotanicusCashRegisterActor.generated.h"
 
 class ABotanicusVisitorCharacter;
@@ -30,6 +31,8 @@ public:
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out) const override;
     virtual void EndPlay(const EEndPlayReason::Type Reason) override;
     const FBotanicusCheckoutReceipt& GetReceipt() const {return Receipt;}
+    bool IsCheckoutScanning() const {return PendingScan.Id.IsValid() && !PendingScan.bCompleted;}
+    const FBotanicusCheckoutScan& GetCheckoutScan() const {return PendingScan;}
     bool TryScanCustomer(ABotanicusPlayerController* PC,ABotanicusVisitorCharacter* Customer);
     bool TryCollectPayment(ABotanicusPlayerController* PC,const FGuid& ExpectedId);
     double CheckoutServerTime() const;
@@ -77,6 +80,12 @@ private:
     void BeginCheckout();
     void UpdatePaymentAnchor(ABotanicusVisitorCharacter* Customer);
     void TickCheckout(float DeltaSeconds);
+    bool CompleteCheckoutScan(ABotanicusPlayerController* PC,ABotanicusVisitorCharacter* Customer);
+    void UpdatePendingScan();
+    void CancelPendingScan();
+    UFUNCTION() void OnRep_PendingScan();
+    UPROPERTY(Transient,ReplicatedUsing=OnRep_PendingScan) FBotanicusCheckoutScan PendingScan;
+    TWeakObjectPtr<ABotanicusPlayerController> ScanOperator;
     void NotifyCheckoutChanged();
     UFUNCTION() void OnRep_Checkout();
     UPROPERTY(ReplicatedUsing=OnRep_Checkout) FBotanicusCheckoutReceipt Receipt;

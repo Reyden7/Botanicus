@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Visitors/BotanicusVisitorCharacter.h"
+#include "StaticMeshResources.h"
 #include "Visitors/BotanicusVisitorMeshComponent.h"
 #include "Components/BoxComponent.h"
 #include "Sales/Checkout/BotanicusCheckoutTypes.h"
@@ -357,6 +358,24 @@ bool ABotanicusVisitorCharacter::CommitManualCheckout(FBotanicusCheckoutReceipt&
     ManualCheckoutId=Out.TransactionId;CheckoutStage=2;SetSpeechLine(TEXT("Merci, voici le paiement."));RefreshCheckoutScanTarget();RefreshStatusText();ForceNetUpdate();return true;
 }
 FVector ABotanicusVisitorCharacter::GetCheckoutPlantLocation() const {return CarriedPlantVisual ? CarriedPlantVisual->Bounds.Origin : GetActorLocation();}
+bool ABotanicusVisitorCharacter::GetCheckoutPlantVisualBounds(FBox& OutBounds) const
+{
+    OutBounds=FBox(ForceInit);
+    if(!bCarryingPlant || !CarriedPlantVisual || !CarriedPlantVisual->IsVisible() || CarriedPlantVisual->bHiddenInGame || !CarriedPlantVisual->GetStaticMesh())return false;
+    const UStaticMesh* Asset=CarriedPlantVisual->GetStaticMesh();const auto* Data=Asset->GetRenderData();
+    OutBounds=(Data ? Data->Bounds.GetBox():Asset->GetBoundingBox()).TransformBy(CarriedPlantVisual->GetComponentTransform());
+    return OutBounds.IsValid && OutBounds.GetSize().Z>.01;
+}
+float ABotanicusVisitorCharacter::GetCheckoutPlantProjectedExtent(const FVector& WorldDirection) const
+{
+    if(!CarriedPlantVisual || !CarriedPlantVisual->GetStaticMesh())return 0;
+    const UStaticMesh* Asset=CarriedPlantVisual->GetStaticMesh();const auto* Data=Asset->GetRenderData();
+    const FVector E=(Data ? Data->Bounds.GetBox():Asset->GetBoundingBox()).GetExtent();
+    const FTransform& T=CarriedPlantVisual->GetComponentTransform();
+    return FMath::Abs(FVector::DotProduct(WorldDirection,T.TransformVector(FVector(E.X,0,0))))+
+        FMath::Abs(FVector::DotProduct(WorldDirection,T.TransformVector(FVector(0,E.Y,0))))+
+        FMath::Abs(FVector::DotProduct(WorldDirection,T.TransformVector(FVector(0,0,E.Z))));
+}
 bool ABotanicusVisitorCharacter::IsCheckoutPlantHit(const UPrimitiveComponent* Component) const {return Component==CheckoutScanTarget;}
 void ABotanicusVisitorCharacter::RefreshCheckoutScanTarget()
 {

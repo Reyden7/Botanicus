@@ -6,12 +6,34 @@ class ABotanicusCheckoutScanner;
 class ABotanicusPaymentCoins;
 class UMaterialInterface;
 class UStaticMesh;
+class USoundBase;
 UCLASS(Config=Game,DefaultConfig,meta=(DisplayName="Botanicus Cash Register Juice"))
 class BOTANICUS_API UBotanicusCheckoutSettings : public UDeveloperSettings
 {
     GENERATED_BODY()
 public:
     UBotanicusCheckoutSettings();
+    UPROPERTY(EditAnywhere,Config,Category="Scan|Audio") TSoftObjectPtr<USoundBase> ScanSound=TSoftObjectPtr<USoundBase>(FSoftObjectPath(TEXT("/Game/Botanicus/Audio/Sounds/S_ScanLoad.S_ScanLoad")));
+    UPROPERTY(EditAnywhere,Config,Category="Scan|Audio",meta=(ClampMin="0",ClampMax="1")) float ScanSoundVolume=.35f;
+    UPROPERTY(EditAnywhere,Config,Category="Scan|Audio",meta=(ClampMin="0.01",ClampMax="0.15",Units="s")) float ScanSoundFadeOut=.1f;
+    UPROPERTY(EditAnywhere,Config,Category="Scan|Timing",meta=(ClampMin="0.1",ClampMax="3",Units="s")) float ScanDurationUp=.6f;
+    UPROPERTY(EditAnywhere,Config,Category="Scan|Timing",meta=(ClampMin="0.1",ClampMax="3",Units="s")) float ScanDurationDown=.6f;
+    UPROPERTY(EditAnywhere,Config,Category="Scan|Timing",meta=(ClampMin="0.05",ClampMax="0.3",Units="s")) float ScanFadeSeconds=.12f;
+    UPROPERTY(EditAnywhere,Config,Category="Scan|Hologram") FLinearColor ScanBeamColor=FLinearColor(FColor(70,184,255));
+    UPROPERTY(EditAnywhere,Config,Category="Scan|Hologram",meta=(ClampMin="0.4",ClampMax="6",Units="cm")) float ScanBeamWidth=2.2f;
+    UPROPERTY(EditAnywhere,Config,Category="Scan|Hologram",meta=(ClampMin="0.05",ClampMax="0.7")) float ScanBeamOpacity=.42f;
+    UPROPERTY(EditAnywhere,Config,Category="Scan|Hologram",meta=(ClampMin="0",ClampMax="3")) float ScanGlowIntensity=1.1f;
+    UPROPERTY(EditAnywhere,Config,Category="Scan|Hologram") TSoftObjectPtr<UMaterialInterface> ScanHologramMaterial=TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/Botanicus/Materials/Juice/Placement/M_PlacementHologram.M_PlacementHologram")));
+    UPROPERTY(EditAnywhere,Config,Category="Scanner|Model") TSoftObjectPtr<UStaticMesh> ScannerMesh=TSoftObjectPtr<UStaticMesh>(FSoftObjectPath(TEXT("/Game/Botanicus/Items/itemsMesh/scanette/scanette.scanette")));
+    UPROPERTY(EditAnywhere,Config,Category="Scanner|Model",meta=(ClampMin="0.05",ClampMax="2")) float ScannerMeshScale=.4f;
+    UPROPERTY(EditAnywhere,Config,Category="Scanner|Model") FRotator ScannerMeshRotation=FRotator(0,180,0);
+    /** Points in the imported mesh's coordinates, before its scale/rotation. */
+    UPROPERTY(EditAnywhere,Config,Category="Scanner|Model") FVector ScannerGripPoint=FVector(5,0,-8);
+    UPROPERTY(EditAnywhere,Config,Category="Scanner|Model") FVector ScannerReadHeadPoint=FVector(-30.5,0,26);
+    UPROPERTY(EditAnywhere,Config,Category="Scanner|Held") FVector ScannerFirstPersonOffset=FVector(32,18,-21);
+    UPROPERTY(EditAnywhere,Config,Category="Scanner|Held") FRotator ScannerFirstPersonRotation=FRotator::ZeroRotator;
+    UPROPERTY(EditAnywhere,Config,Category="Scanner|Dock") FVector ScannerDockPoseOffset=FVector(0,0,7.6f);
+    UPROPERTY(EditAnywhere,Config,Category="Scanner|Dock") FRotator ScannerDockPoseRotation=FRotator::ZeroRotator;
     UPROPERTY(EditAnywhere,Config,Category="Presentation") bool bAnimationsEnabled=true;
     UPROPERTY(EditAnywhere,Config,Category="Presentation") bool bScanBeamEnabled=true;
     UPROPERTY(EditAnywhere,Config,Category="Presentation") bool bDisableMotionOnLowQuality=true;

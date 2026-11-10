@@ -91,6 +91,8 @@ public:
     FGuid GetCheckoutCustomerId() const {return CheckoutCustomerId;}
     FName GetCarriedCheckoutPlantKey() const {return CarriedPlantItemKey;}
     FVector GetCheckoutPlantLocation() const;
+    bool GetCheckoutPlantVisualBounds(FBox& OutBounds) const;
+    float GetCheckoutPlantProjectedExtent(const FVector& WorldDirection) const;
     bool IsCheckoutPlantHit(const UPrimitiveComponent* Component) const;
     bool CommitManualCheckout(FBotanicusCheckoutReceipt& Out);
     void RecordManualCheckoutOutcome() {if(HasAuthority() && ManualCheckoutId.IsValid()) RecordVisitOutcome(true);}

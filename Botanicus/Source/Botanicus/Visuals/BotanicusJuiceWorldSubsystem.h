@@ -60,9 +60,11 @@ UCLASS()
 class BOTANICUS_API UBotanicusJuiceWorldSubsystem : public UTickableWorldSubsystem
 {
     friend class UBotanicusPlacementValidation;
+    friend class UBotanicusCashRegisterValidation;
 	GENERATED_BODY()
 public:
-    void StartCheckoutScan(ABotanicusCheckoutScanner* Scanner,const FVector& Start,const FVector& End,float Age);
+    void StartCheckoutScan(class ABotanicusCashRegisterActor* Register,const struct FBotanicusCheckoutScan& Scan);
+    void StopCheckoutScan(const FGuid& Id);
     int32 GetCheckoutBeamCount() const {return CheckoutBeams.Num();}
     int32 GetCheckoutScanCount() const {return CheckoutScansStarted;}
 

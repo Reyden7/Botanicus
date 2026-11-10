@@ -58,16 +58,12 @@ FVector ABotanicusCashRegisterActor::GetDrawerDepositLocation() const {return Dr
 void ABotanicusCashRegisterActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);DOREPLIFETIME(ABotanicusCashRegisterActor,Receipt);DOREPLIFETIME(ABotanicusCashRegisterActor,RegisterId);
-    DOREPLIFETIME(ABotanicusCashRegisterActor,DockScanner);DOREPLIFETIME(ABotanicusCashRegisterActor,PaymentCoins);
+    DOREPLIFETIME(ABotanicusCashRegisterActor,DockScanner);DOREPLIFETIME(ABotanicusCashRegisterActor,PaymentCoins);DOREPLIFETIME(ABotanicusCashRegisterActor,PendingScan);
 }
 void ABotanicusCashRegisterActor::OnRep_Checkout()
 {
     if(PaymentCoins) PaymentCoins->RefreshFromReceipt();
-    if(Receipt.Phase==EBotanicusCheckoutPhase::Opening && LastBeamTransaction!=Receipt.TransactionId && GetNetMode()!=NM_DedicatedServer)
-    {
-        LastBeamTransaction=Receipt.TransactionId;
-        if(auto* J=GetWorld()->GetSubsystem<UBotanicusJuiceWorldSubsystem>()) J->StartCheckoutScan(DockScanner,Receipt.ScanOrigin,Receipt.ScanTarget,static_cast<float>(CheckoutServerTime()-Receipt.PhaseStartedAt));
-    }
+
 }
 void ABotanicusCashRegisterActor::NotifyCheckoutChanged()
 {
@@ -76,9 +72,52 @@ void ABotanicusCashRegisterActor::NotifyCheckoutChanged()
 }
 bool ABotanicusCashRegisterActor::TryScanCustomer(ABotanicusPlayerController* PC,ABotanicusVisitorCharacter* Customer)
 {
-    if(!HasAuthority() || !PC || !Customer || Receipt.Phase!=EBotanicusCheckoutPhase::Idle || !IsOperational() ||
-        !DockScanner || DockScanner->GetCarrier()!=PC->GetPawn() || GetCheckoutCustomer()!=Customer) return false;
-    FBotanicusCheckoutReceipt Candidate;Candidate.TransactionId=FGuid::NewGuid();
+    FBox Bounds;
+    if(!HasAuthority() || PendingScan.Id.IsValid() || !PC || !IsValid(Customer) || Receipt.Phase!=EBotanicusCheckoutPhase::Idle || !IsOperational() ||
+        !DockScanner || DockScanner->GetCarrier()!=PC->GetPawn() || GetCheckoutCustomer()!=Customer || !Customer->CanUsePlayerCheckout() || !Customer->GetCheckoutPlantVisualBounds(Bounds))return false;
+    const auto* Settings=GetDefault<UBotanicusCheckoutSettings>();
+    PendingScan=FBotanicusCheckoutScan();PendingScan.Id=FGuid::NewGuid();PendingScan.Customer=Customer;
+    PendingScan.CustomerId=Customer->GetCheckoutCustomerId();PendingScan.PlantKey=Customer->GetCarriedCheckoutPlantKey();PendingScan.StartedAt=CheckoutServerTime();
+    PendingScan.UpSeconds=FMath::Clamp(Settings->ScanDurationUp,.1f,3.f);PendingScan.DownSeconds=FMath::Clamp(Settings->ScanDurationDown,.1f,3.f);PendingScan.FadeSeconds=FMath::Clamp(Settings->ScanFadeSeconds,.05f,.3f);
+    ScanOperator=PC;FlushNetDormancy();ForceNetUpdate();OnRep_PendingScan();return true;
+}
+void ABotanicusCashRegisterActor::OnRep_PendingScan()
+{
+    if(GetNetMode()==NM_DedicatedServer)return;
+    if(auto* Juice=GetWorld()->GetSubsystem<UBotanicusJuiceWorldSubsystem>())
+    {
+        if(!PendingScan.Id.IsValid()){Juice->StopCheckoutScan(LastBeamTransaction);return;}
+        if(LastBeamTransaction!=PendingScan.Id && IsValid(PendingScan.Customer) && IsValid(DockScanner))
+        {LastBeamTransaction=PendingScan.Id;Juice->StartCheckoutScan(this,PendingScan);}
+    }
+}
+void ABotanicusCashRegisterActor::CancelPendingScan()
+{
+    if(!HasAuthority() || !PendingScan.Id.IsValid())return;
+    PendingScan=FBotanicusCheckoutScan();ScanOperator.Reset();FlushNetDormancy();ForceNetUpdate();OnRep_PendingScan();
+}
+void ABotanicusCashRegisterActor::UpdatePendingScan()
+{
+    if(!PendingScan.Id.IsValid())return;
+    const double Age=CheckoutServerTime()-PendingScan.StartedAt;
+    if(!PendingScan.bCompleted)
+    {
+        auto* PC=ScanOperator.Get();auto* Customer=PendingScan.Customer.Get();
+        if(!PC || !IsValid(PC->GetPawn()) || !IsValid(Customer) || !IsOperational() || !DockScanner || DockScanner->GetCarrier()!=PC->GetPawn() ||
+           !Customer->CanUsePlayerCheckout() || GetCheckoutCustomer()!=Customer || Customer->GetCheckoutCustomerId()!=PendingScan.CustomerId || Customer->GetCarriedCheckoutPlantKey()!=PendingScan.PlantKey)
+        {CancelPendingScan();return;}
+        if(Age>=PendingScan.TravelSeconds())
+        {
+            if(!PC->CanScanCheckoutCustomer(DockScanner,Customer,PendingScan.CustomerId,PendingScan.PlantKey,false) || !CompleteCheckoutScan(PC,Customer))
+            {CancelPendingScan();return;}
+        }
+    }
+    if(PendingScan.bCompleted && Age>=PendingScan.TotalSeconds())CancelPendingScan();
+}
+bool ABotanicusCashRegisterActor::CompleteCheckoutScan(ABotanicusPlayerController* PC,ABotanicusVisitorCharacter* Customer)
+{
+    if(!HasAuthority() || !PendingScan.Id.IsValid() || PendingScan.bCompleted || Receipt.Phase!=EBotanicusCheckoutPhase::Idle || !PC || !IsValid(Customer))return false;
+    FBotanicusCheckoutReceipt Candidate;Candidate.TransactionId=PendingScan.Id;
     if(!Customer->CommitManualCheckout(Candidate)) return false;
     const auto* S=GetDefault<UBotanicusCheckoutSettings>();Candidate.Phase=EBotanicusCheckoutPhase::Opening;Candidate.PhaseStartedAt=CheckoutServerTime();
     Candidate.OpenSeconds=FMath::Clamp(S->DrawerOpenSeconds,.1f,1.f);Candidate.CloseSeconds=FMath::Clamp(S->DrawerCloseSeconds,.1f,1.f);Candidate.DepositSeconds=FMath::Clamp(S->CoinDepositSeconds,.1f,.6f);Candidate.ClosePauseSeconds=FMath::Clamp(S->AfterLastCoinPause,0.f,1.f);
@@ -87,7 +126,7 @@ bool ABotanicusCashRegisterActor::TryScanCustomer(ABotanicusPlayerController* PC
     Candidate.CoinIntervalSeconds=FMath::Min(FMath::Clamp(S->CoinInterval,.03f,.2f),FMath::Max(.001f,(FMath::Clamp(S->MaximumCollectionSeconds,1.f,5.f)-Candidate.CoinFlightSeconds)/FMath::Max(1,Candidate.VisualCount()-1)));
     Candidate.CollectionSeconds=Candidate.CoinFlightSeconds+FMath::Max(0,Candidate.VisualCount()-1)*Candidate.CoinIntervalSeconds;
     Candidate.ScanOrigin=DockScanner->GetMuzzleLocation();Candidate.ScanTarget=Customer->GetCheckoutPlantLocation();Candidate.CustomerHand=Customer->GetCheckoutPlantLocation();
-    Receipt=Candidate;UpdatePaymentAnchor(Customer);OpeningCustomer=Customer;Customer->RecordManualCheckoutOutcome();++AcceptedScans;NotifyCheckoutChanged();
+    PendingScan.bCompleted=true;Receipt=Candidate;UpdatePaymentAnchor(Customer);OpeningCustomer=Customer;Customer->RecordManualCheckoutOutcome();++AcceptedScans;NotifyCheckoutChanged();
     UBotanicusAudioWorldSubsystem::Emit(this,TEXT("ScannerBeep"),Receipt.ScanOrigin);UBotanicusAudioWorldSubsystem::Emit(this,TEXT("RegisterOpen"),GetDrawerDepositLocation());return true;
 }
 bool ABotanicusCashRegisterActor::TryCollectPayment(ABotanicusPlayerController* PC,const FGuid& ExpectedId)
@@ -103,6 +142,7 @@ bool ABotanicusCashRegisterActor::TryCollectPayment(ABotanicusPlayerController* 
 void ABotanicusCashRegisterActor::TickCheckout(float DeltaSeconds)
 {
     if(ActorHasTag(TEXT("BotanicusPlacementPreview"))) return;const double Now=CheckoutServerTime();
+    if(HasAuthority())UpdatePendingScan();else if(PendingScan.Id.IsValid() && LastBeamTransaction!=PendingScan.Id)OnRep_PendingScan();
     if(HasAuthority())
     {
         if(Receipt.Phase==EBotanicusCheckoutPhase::Opening && Now-Receipt.PhaseStartedAt>=Receipt.OpenSeconds)
@@ -130,7 +170,7 @@ FBotanicusSavedCashRegister ABotanicusCashRegisterActor::CaptureCheckout() const
 }
 void ABotanicusCashRegisterActor::RestoreCheckout(const FBotanicusSavedCashRegister& Saved)
 {
-    if(!HasAuthority()) return;RegisterId=Saved.RegisterId.IsValid() ? Saved.RegisterId : FGuid::NewGuid();Receipt=Saved.Receipt;OpeningCustomer.Reset();
+    if(!HasAuthority()) return;CancelPendingScan();RegisterId=Saved.RegisterId.IsValid() ? Saved.RegisterId : FGuid::NewGuid();Receipt=Saved.Receipt;OpeningCustomer.Reset();
     if(!Receipt.TransactionId.IsValid() || Receipt.Amount<=0 || Receipt.PlantItemKey.IsNone()) Receipt=FBotanicusCheckoutReceipt();
     else
     {
@@ -148,6 +188,7 @@ void ABotanicusCashRegisterActor::RestoreCheckout(const FBotanicusSavedCashRegis
 bool ABotanicusCashRegisterActor::IsScannerDockHit(const UPrimitiveComponent* Component) const {return Component==ScannerDockHit;}
 void ABotanicusCashRegisterActor::EndPlay(const EEndPlayReason::Type Reason)
 {
+    if(auto* Juice=GetWorld()->GetSubsystem<UBotanicusJuiceWorldSubsystem>())Juice->StopCheckoutScan(LastBeamTransaction);
     if(HasAuthority()) {if(DockScanner) DockScanner->Destroy();if(PaymentCoins) PaymentCoins->Destroy();}Super::EndPlay(Reason);
 }
 

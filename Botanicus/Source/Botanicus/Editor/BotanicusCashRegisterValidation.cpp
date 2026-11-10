@@ -18,6 +18,7 @@
 #include "Catalog/BotanicusItemCatalogSubsystem.h"
 #include "Audio/BotanicusAudioWorldSubsystem.h"
 #include "Visuals/BotanicusJuiceWorldSubsystem.h"
+#include "ProceduralMeshComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "NavigationSystem.h"
@@ -71,7 +72,7 @@ bool UBotanicusCashRegisterValidation::Prepare(UObject* Context,int32 Price)
     auto Definitions=Catalog->GetAllItems();const auto* Choice=Definitions.FindByPredicate([GS](const auto& D){return D.bWholePlant && D.SalePrice>0 && GS->CountMatchingTrends(D)==0;});if(!Choice) return false;
     CashTestPlant=Choice->ItemKey;auto* Runtime=const_cast<FBotanicusItemDefinition*>(Catalog->FindItem(CashTestPlant));if(!Runtime) return false;Runtime->SalePrice=Price;
     if(Cash->DockScanner && Cash->DockScanner->GetCarrier()) Cash->DockScanner->ReturnToDock();
-    Cash->Receipt=FBotanicusCheckoutReceipt();Cash->OpeningCustomer.Reset();Cash->NotifyCheckoutChanged();
+    Cash->CancelPendingScan();Cash->Receipt=FBotanicusCheckoutReceipt();Cash->OpeningCustomer.Reset();Cash->NotifyCheckoutChanged();
     int32 I=0;const FVector Forward=Cash->GetActorForwardVector(),Right=Cash->GetActorRightVector();
     const FVector2D Offsets[]={FVector2D(-100,45),FVector2D(-135,-55),FVector2D(-180,140),FVector2D(-180,-150)};
     for(FConstPlayerControllerIterator It=W->GetPlayerControllerIterator();It;++It) if(auto* P=Cast<ABotanicusCharacter>(It->Get()->GetPawn()))
@@ -114,6 +115,20 @@ bool UBotanicusCashRegisterValidation::Step(UObject* Context,FName Action)
     if(!bCashValidationExecuting) {TWeakObjectPtr<UWorld> Weak=W;W->GetTimerManager().SetTimerForNextTick([Weak,Action](){if(Weak.IsValid()){TGuardValue<bool> Guard(bCashValidationExecuting,true);Step(Weak.Get(),Action);}});return true;}
     auto* Cash=CashValidationRegister(W);auto* PC=Cast<ABotanicusPlayerController>(W->GetFirstPlayerController());if(!Cash || !PC) return false;
     auto* Scanner=Cash->GetDockScanner();auto* Customer=CashValidationCustomer(W);
+    if(Action==TEXT("SetupScanTest"))
+    {
+        if(W->GetNetMode()==NM_Client)return false;
+        for(TActorIterator<ABotanicusVisitorManager> It(W);It;++It)It->SetActorTickEnabled(false);
+        if(!Cash->IsOperational()){auto* Zone=W->SpawnActor<ABotanicusVisitorZoneActor>();Zone->SetActorLocation(Cash->GetActorLocation());Zone->InitializeZone(EBotanicusVisitorZoneType::Checkout,FVector(500,500,8));Zone->Tags.Add(TEXT("CashValidationFixture"));}
+        return true;
+    }
+    if(Action==TEXT("VisualSmall") || Action==TEXT("VisualLarge"))
+    {
+        if(!Customer || !Customer->CarriedPlantVisual)return false;
+        Customer->RefreshCarriedPlantVisuals();Customer->CarriedPlantVisual->SetRelativeScale3D(Customer->CarriedPlantVisual->GetRelativeScale3D()*(Action==TEXT("VisualSmall") ? .4f:1.25f));Customer->RefreshCheckoutScanTarget();return true;
+    }
+    if(Action==TEXT("NudgeScanTarget"))
+    {if(W->GetNetMode()==NM_Client || !Customer)return false;Customer->AddActorWorldOffset(Cash->GetActorRightVector()*4);Customer->ForceNetUpdate();return true;}
     if(Action==TEXT("DeskSupport"))
     {
         if(W->GetNetMode()==NM_Client) return false;
@@ -194,6 +209,18 @@ FString UBotanicusCashRegisterValidation::Snapshot(UObject* Context)
     const auto& R=Cash->GetReceipt();Root->SetNumberField(TEXT("phase"),static_cast<int32>(R.Phase));Root->SetStringField(TEXT("transaction"),R.TransactionId.ToString());Root->SetStringField(TEXT("plantId"),R.PlantInstanceId.ToString());Root->SetStringField(TEXT("customerId"),R.CustomerId.ToString());
     Root->SetNumberField(TEXT("amount"),R.Amount);Root->SetBoolField(TEXT("credited"),R.bCredited);Root->SetNumberField(TEXT("gold"),R.VisibleGoldCoins);Root->SetNumberField(TEXT("voucher"),R.VoucherCredits);Root->SetNumberField(TEXT("duration"),R.CollectionSeconds);
     Root->SetNumberField(TEXT("scansAccepted"),Cash->GetAcceptedScans());Root->SetNumberField(TEXT("collectionsAccepted"),Cash->GetAcceptedCollections());Root->SetBoolField(TEXT("operational"),Cash->IsOperational());Root->SetStringField(TEXT("drawer"),Cash->DrawerVisualRoot->GetRelativeLocation().ToString());
+    const auto& Scan=Cash->GetCheckoutScan();Root->SetBoolField(TEXT("scanning"),Cash->IsCheckoutScanning());Root->SetStringField(TEXT("scanId"),Scan.Id.ToString());Root->SetNumberField(TEXT("scanStart"),Scan.StartedAt);Root->SetNumberField(TEXT("scanUp"),Scan.UpSeconds);Root->SetNumberField(TEXT("scanDown"),Scan.DownSeconds);
+    if(auto* Customer=CashValidationCustomer(W)){FBox Bounds;if(Customer->GetCheckoutPlantVisualBounds(Bounds)){Root->SetStringField(TEXT("plantBoundsMin"),Bounds.Min.ToString());Root->SetStringField(TEXT("plantBoundsMax"),Bounds.Max.ToString());Root->SetNumberField(TEXT("plantHeight"),Bounds.GetSize().Z);}}
+    if(auto* Tool=Cash->GetDockScanner())
+    {
+        Root->SetStringField(TEXT("muzzle"),Tool->GetMuzzleLocation().ToString());Root->SetNumberField(TEXT("muzzleForwardDot"),FVector::DotProduct(Tool->ScannerMuzzle->GetForwardVector(),Tool->GetActorForwardVector()));
+        TInlineComponentArray<UStaticMeshComponent*> Parts;Tool->GetComponents(Parts);for(auto* Part:Parts)if(Part->GetStaticMesh()) {Root->SetStringField(TEXT("scannerMesh"),Part->GetStaticMesh()->GetPathName());Root->SetNumberField(TEXT("scannerMaterialCount"),Part->GetNumMaterials());}
+    }
+    if(auto* Juice=W->GetSubsystem<UBotanicusJuiceWorldSubsystem>();Juice && !Juice->CheckoutBeams.IsEmpty())
+    {
+        const auto& Beam=Juice->CheckoutBeams[0];Root->SetNumberField(TEXT("scanProgress"),Beam.Progress);Root->SetNumberField(TEXT("bandWidth"),Beam.BandWidth);Root->SetNumberField(TEXT("contactZ"),Beam.Contact.Z);Root->SetNumberField(TEXT("boundsBottom"),Beam.TargetBounds.Min.Z);Root->SetNumberField(TEXT("boundsTop"),Beam.TargetBounds.Max.Z);
+        Root->SetNumberField(TEXT("effectAge"),Cash->CheckoutServerTime()-Beam.StartedAt);Root->SetStringField(TEXT("fanOrigin"),Beam.Vertices.IsEmpty() ? TEXT(""):Beam.Vertices[0].ToString());Root->SetStringField(TEXT("effectMaterial"),Beam.Material ? Beam.Material->Parent->GetPathName():TEXT(""));
+    }
     if(auto* Coins=Cash->GetPaymentCoins()) {Root->SetNumberField(TEXT("renderedGold"),Coins->GetRenderedCoinCount());Root->SetNumberField(TEXT("arrivals"),Coins->GetArrivalCount());
         TInlineComponentArray<UInstancedStaticMeshComponent*> Instances;Coins->GetComponents(Instances);if(Instances.Num() && Instances[0]->GetInstanceCount()) {FTransform First,Last;Instances[0]->GetInstanceTransform(0,First,true);Instances[0]->GetInstanceTransform(Instances[0]->GetInstanceCount()-1,Last,true);Root->SetStringField(TEXT("firstCoin"),First.GetLocation().ToString());Root->SetStringField(TEXT("lastCoin"),Last.GetLocation().ToString());Root->SetNumberField(TEXT("firstScale"),First.GetScale3D().X);Root->SetNumberField(TEXT("lastScale"),Last.GetScale3D().X);}}
     if(auto* Tool=Cash->GetDockScanner()) {Root->SetStringField(TEXT("scanner"),Tool->GetName());Root->SetStringField(TEXT("carrier"),Tool->GetCarrier() ? Tool->GetCarrier()->GetName() : TEXT(""));Root->SetBoolField(TEXT("owned"),Tool->GetCarrier()==PC->GetPawn());Root->SetNumberField(TEXT("carrierPlayerId"),Tool->GetCarrier() && Tool->GetCarrier()->GetPlayerState() ? Tool->GetCarrier()->GetPlayerState()->GetPlayerId() : -1);}

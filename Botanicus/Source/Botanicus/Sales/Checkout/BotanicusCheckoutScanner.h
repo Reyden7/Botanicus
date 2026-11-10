@@ -5,7 +5,24 @@
 class ABotanicusCashRegisterActor;
 class ABotanicusPlayerController;
 class UBoxComponent;
+class ABotanicusVisitorCharacter;
 class UStaticMeshComponent;
+USTRUCT()
+struct FBotanicusCheckoutScan
+{
+    GENERATED_BODY()
+    UPROPERTY() FGuid Id;
+    UPROPERTY() TObjectPtr<ABotanicusVisitorCharacter> Customer;
+    UPROPERTY() FGuid CustomerId;
+    UPROPERTY() FName PlantKey;
+    UPROPERTY() double StartedAt=0;
+    UPROPERTY() float UpSeconds=.6f;
+    UPROPERTY() float DownSeconds=.6f;
+    UPROPERTY() float FadeSeconds=.12f;
+    UPROPERTY() bool bCompleted=false;
+    float TravelSeconds() const {return UpSeconds+DownSeconds;}
+    float TotalSeconds() const {return TravelSeconds()+FadeSeconds;}
+};
 UCLASS(Blueprintable)
 class BOTANICUS_API ABotanicusCheckoutScanner : public AActor
 {
@@ -27,6 +44,7 @@ public:
 private:
     UFUNCTION() void OnRep_Carry();
     void UpdatePose();
+    void ConfigureModel();
     UPROPERTY(VisibleAnywhere) TObjectPtr<UBoxComponent> HitBox;
     UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> Handle;
     UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> Head;

@@ -68,6 +68,7 @@ bool ABotanicusPlayerController::TryCheckoutInput(const FInputKeyEventArgs& Para
         {ServerCollectCheckoutCoins(Coins,Coins->GetRegister()->GetReceipt().TransactionId);return true;}
         if(Held)
         {
+            if(Held->GetRegister() && Held->GetRegister()->IsCheckoutScanning())return true;
             if(bHit) if(auto* Customer=Cast<ABotanicusVisitorCharacter>(Hit.GetActor())) ServerScanCheckoutCustomer(Held,Customer,Customer->GetCheckoutCustomerId(),Customer->GetCarriedCheckoutPlantKey());
             return true;
         }
@@ -88,11 +89,21 @@ void ABotanicusPlayerController::ServerReturnCheckoutScanner_Implementation(ABot
     if(!Register || Scanner->GetCarrier()!=GetPawn() || !TraceCheckoutAim(Hit) || Hit.GetActor()!=Register || !Register->IsScannerDockHit(Hit.GetComponent())) return;
     Scanner->ReturnToDock();SetCheckoutScannerReference(nullptr);
 }
-void ABotanicusPlayerController::ServerScanCheckoutCustomer_Implementation(ABotanicusCheckoutScanner* Scanner,ABotanicusVisitorCharacter* Customer,FGuid ExpectedCustomer,FName ExpectedPlant)
+bool ABotanicusPlayerController::CanScanCheckoutCustomer(ABotanicusCheckoutScanner* Scanner,ABotanicusVisitorCharacter* Customer,FGuid ExpectedCustomer,FName ExpectedPlant,bool bRequireAim) const
 {
     FHitResult Hit;
-    if(!IsValid(Scanner) || !IsValid(Customer) || Scanner->GetCarrier()!=GetPawn() || Customer->GetCheckoutCustomerId()!=ExpectedCustomer ||
-        Customer->GetCarriedCheckoutPlantKey()!=ExpectedPlant || !Customer->CanUsePlayerCheckout() || !TraceCheckoutAim(Hit) || Hit.GetActor()!=Customer || !Customer->IsCheckoutPlantHit(Hit.GetComponent())) return;
+    if(!IsValid(GetPawn()) || !IsValid(Scanner) || !IsValid(Customer) || Scanner->GetCarrier()!=GetPawn() || Customer->GetCheckoutCustomerId()!=ExpectedCustomer ||
+        Customer->GetCarriedCheckoutPlantKey()!=ExpectedPlant || !Customer->CanUsePlayerCheckout())return false;
+    if(bRequireAim)return TraceCheckoutAim(Hit) && Hit.GetActor()==Customer && Customer->IsCheckoutPlantHit(Hit.GetComponent());
+    // The accepted target stays locked during the sweep. Recheck range and occlusion,
+    // without imposing a new requirement to hold the reticle on a moving leaf.
+    FBox Bounds;if(!Customer->GetCheckoutPlantVisualBounds(Bounds) || FVector::DistSquared2D(GetPawn()->GetActorLocation(),Bounds.GetCenter())>FMath::Square(MaximumWorldInteractionDistance))return false;
+    FVector Eye;FRotator View;GetPlayerViewPoint(Eye,View);FCollisionQueryParams Query(SCENE_QUERY_STAT(CheckoutScanCompletion),true,GetPawn());Query.AddIgnoredActor(Scanner);
+    return !GetWorld()->LineTraceSingleByChannel(Hit,Eye,Bounds.GetCenter(),ECC_Visibility,Query) || (Hit.GetActor()==Customer && Customer->IsCheckoutPlantHit(Hit.GetComponent()));
+}
+void ABotanicusPlayerController::ServerScanCheckoutCustomer_Implementation(ABotanicusCheckoutScanner* Scanner,ABotanicusVisitorCharacter* Customer,FGuid ExpectedCustomer,FName ExpectedPlant)
+{
+    if(!CanScanCheckoutCustomer(Scanner,Customer,ExpectedCustomer,ExpectedPlant))return;
     if(auto* Register=Scanner->GetRegister()) Register->TryScanCustomer(this,Customer);
 }
 void ABotanicusPlayerController::ServerCollectCheckoutCoins_Implementation(ABotanicusPaymentCoins* Coins,FGuid ExpectedTransaction)
@@ -129,7 +140,9 @@ bool ABotanicusPlayerController::TryRefreshCheckoutContext()
         if(Register->GetCheckoutCustomer()!=Customer)
         {InteractionTargetWidget->SetContextStatus(FText::FromString(TEXT("Ce client n'attend pas cette caisse")));return true;}
     }
-    if(!Register) return false;const auto& R=Register->GetReceipt();
+    if(!Register) return false;
+    if(Register->IsCheckoutScanning()){InteractionTargetWidget->SetContextStatus(FText::FromString(TEXT("Analyse de la plante...")));return true;}
+    const auto& R=Register->GetReceipt();
     if(R.Phase==EBotanicusCheckoutPhase::AwaitingCollection)
     {
         const FString Value=FString::Printf(TEXT("%d crédits (%d pièces de 10%s)"),R.Amount,R.VisibleGoldCoins,R.VoucherCredits>0 ? *FString::Printf(TEXT(" + bon exact de %d"),R.VoucherCredits) : TEXT(""));

@@ -107,6 +107,7 @@ public:
 
     bool TryCheckoutInput(const FInputKeyEventArgs& Params);
     bool TraceCheckoutAim(FHitResult& Hit) const;
+    bool CanScanCheckoutCustomer(ABotanicusCheckoutScanner* Scanner,ABotanicusVisitorCharacter* Customer,FGuid ExpectedCustomer,FName ExpectedPlant,bool bRequireAim=true) const;
     bool TryRefreshCheckoutContext();
     void UpdateCheckoutEquipmentPresentation();
     UFUNCTION(Server,Reliable) void ServerTakeCheckoutScanner(ABotanicusCheckoutScanner* Scanner);

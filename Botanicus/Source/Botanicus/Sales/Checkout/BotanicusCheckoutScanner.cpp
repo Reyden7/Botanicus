@@ -23,17 +23,25 @@ ABotanicusCheckoutScanner::ABotanicusCheckoutScanner()
 void ABotanicusCheckoutScanner::BeginPlay()
 {
     Super::BeginPlay();
-    if(GetNetMode()!=NM_DedicatedServer)
-    {
-        auto* Cube=LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Cube.Cube"));Handle->SetStaticMesh(Cube);Head->SetStaticMesh(Cube);
-        if(auto* Future=FutureScannerMesh.LoadSynchronous()) {Handle->SetStaticMesh(Future);Handle->SetRelativeTransform(FTransform::Identity);Head->SetVisibility(false);}
-        if(auto* Base=GetDefault<UBotanicusCheckoutSettings>()->BodyMaterial.LoadSynchronous())
-        {
-            auto* Grip=UMaterialInstanceDynamic::Create(Base,this);Grip->SetVectorParameterValue(TEXT("Color"),FLinearColor(.025f,.075f,.07f));Handle->SetMaterial(0,Grip);
-            auto* Shell=UMaterialInstanceDynamic::Create(Base,this);Shell->SetVectorParameterValue(TEXT("Color"),FLinearColor(.12f,.65f,.75f));Head->SetMaterial(0,Shell);
-        }
-    }
+    ConfigureModel();
     OnRep_Carry();
+}
+void ABotanicusCheckoutScanner::ConfigureModel()
+{
+    const auto* Settings=GetDefault<UBotanicusCheckoutSettings>();
+    const float Scale=FMath::Clamp(Settings->ScannerMeshScale,.05f,2.f);
+    const FQuat Rotation=Settings->ScannerMeshRotation.Quaternion();
+    Handle->SetRelativeTransform(FTransform(Rotation,-Rotation.RotateVector(Settings->ScannerGripPoint*Scale),FVector(Scale)));
+    ScannerMuzzle->AttachToComponent(Handle,FAttachmentTransformRules::KeepRelativeTransform);
+    ScannerMuzzle->SetRelativeLocationAndRotation(Settings->ScannerReadHeadPoint,FRotator(0,180,0));
+    auto* Asset=Settings->ScannerMesh.LoadSynchronous();if(!Asset)Asset=FutureScannerMesh.LoadSynchronous();
+    if(Asset)
+    {
+        const FBox Box=Asset->GetBoundingBox().TransformBy(Handle->GetRelativeTransform());
+        HitBox->SetBoxExtent(Box.Min.GetAbs().ComponentMax(Box.Max.GetAbs())+FVector(1));
+    }
+    if(GetNetMode()==NM_DedicatedServer)return;
+    Handle->SetStaticMesh(Asset);Handle->EmptyOverrideMaterials();Head->SetStaticMesh(nullptr);Head->SetVisibility(false);
 }
 void ABotanicusCheckoutScanner::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
@@ -59,7 +67,8 @@ void ABotanicusCheckoutScanner::OnRep_Carry()
     HitBox->SetCollisionEnabled(IsValid(Carrier) ? ECollisionEnabled::NoCollision : ECollisionEnabled::QueryOnly);
     SetActorTickEnabled(IsValid(Carrier));SetActorTickInterval(GetNetMode()==NM_DedicatedServer ? .2f : 0.f);
     if(IsValid(Carrier)) DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
-    else if(IsValid(Register) && Register->ScannerDock) AttachToComponent(Register->ScannerDock,FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+    else if(IsValid(Register) && Register->ScannerDock)
+    {AttachToComponent(Register->ScannerDock,FAttachmentTransformRules::SnapToTargetNotIncludingScale);const auto* S=GetDefault<UBotanicusCheckoutSettings>();SetActorRelativeLocation(S->ScannerDockPoseOffset);SetActorRelativeRotation(S->ScannerDockPoseRotation);}
     if(GetWorld()) for(FConstPlayerControllerIterator It=GetWorld()->GetPlayerControllerIterator();It;++It) if(auto* PC=Cast<ABotanicusPlayerController>(It->Get());PC && PC->IsLocalController())
     {if(Carrier==PC->GetPawn()) PC->SetCheckoutScannerReference(this);else if(PC->GetCheckoutScanner()==this) PC->SetCheckoutScannerReference(nullptr);}
     UpdatePose();
@@ -72,7 +81,8 @@ void ABotanicusCheckoutScanner::UpdatePose()
         if(auto* PC=Cast<APlayerController>(Carrier->GetController()))
         {
             FVector Eye;FRotator Rot;PC->GetPlayerViewPoint(Eye,Rot);const FRotationMatrix Axes(Rot);
-            SetActorLocationAndRotation(Eye+Rot.Vector()*32+Axes.GetUnitAxis(EAxis::Y)*18-Axes.GetUnitAxis(EAxis::Z)*21,Rot);
+            const auto* S=GetDefault<UBotanicusCheckoutSettings>();
+            SetActorLocationAndRotation(Eye+Axes.TransformVector(S->ScannerFirstPersonOffset),(Rot.Quaternion()*S->ScannerFirstPersonRotation.Quaternion()).Rotator());
             if(auto* Bot=Cast<ABotanicusPlayerController>(PC)) Bot->SetCheckoutScannerReference(this);return;
         }
     }
