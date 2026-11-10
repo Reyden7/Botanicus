@@ -7,6 +7,7 @@
 #include "BotanicusDeliveryZoneActor.generated.h"
 
 class USceneComponent;
+class UBoxComponent;
 class UStaticMeshComponent;
 class UTextRenderComponent;
 
@@ -26,6 +27,26 @@ public:
 private:
 	void SnapToUnderlyingGround();
 	void RefreshVisuals();
+	void RefreshWalkableCollision();
+
+	/** Opt-in for the imported delivery platform; the legacy plane remains a visual marker. */
+	UPROPERTY(EditAnywhere, Category="Botanicus|Platform Collision")
+	bool bUseWalkablePlatformCollision = false;
+
+	UPROPERTY(VisibleAnywhere, Category="Botanicus|Platform Collision")
+	TObjectPtr<UBoxComponent> WalkableDeck;
+	UPROPERTY(VisibleAnywhere, Category="Botanicus|Platform Collision")
+	TObjectPtr<UBoxComponent> RampLanding;
+	UPROPERTY(VisibleAnywhere, Category="Botanicus|Platform Collision")
+	TObjectPtr<UBoxComponent> WalkableRamp;
+
+	/** Measured from the imported mesh, in Delivery Pad coordinates. */
+	UPROPERTY(EditAnywhere, Category="Botanicus|Platform Collision")
+	FVector RampTop = FVector(0.16855f,139.7598f,31.53161f);
+	UPROPERTY(EditAnywhere, Category="Botanicus|Platform Collision")
+	FVector RampBottom = FVector(0.16855f,228.44444f,-0.14235f);
+	UPROPERTY(EditAnywhere, Category="Botanicus|Platform Collision",meta=(ClampMin="1"))
+	float RampHalfWidth = 79.73f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Botanicus|Zone",
 		meta=(AllowPrivateAccess="true", ClampMin="100.0"))

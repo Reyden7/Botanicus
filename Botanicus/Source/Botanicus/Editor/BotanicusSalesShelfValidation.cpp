@@ -36,7 +36,7 @@
 namespace
 {
 FVector Origin;FVector WallPoint;FVector RealWallNormal;TSet<TWeakObjectPtr<AActor>> RealExistingShelves;FName NPCName,HeldName;FTransform CachedShelfPose;FGuid CachedShelfId;FName CachedShelfKey;int32 CachedShelfSlot=INDEX_NONE;bool bExecuting=false;
-UWorld* TestWorld(UObject* Context)
+UWorld* SalesShelfTestWorld(UObject* Context)
 {
     auto* W=GEngine ? GEngine->GetWorldFromContextObject(Context,EGetWorldErrorMode::ReturnNull):nullptr;
     FString Saved=FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir());FPaths::NormalizeDirectoryName(Saved);
@@ -58,7 +58,7 @@ void Aim(APlayerController* PC,const FVector& At){FVector Eye;FRotator Rot;PC->G
 bool UBotanicusSalesShelfValidation::Step(UObject* Context,FName Action,int32 Index)
 {
 #if WITH_EDITOR
-    auto* W=TestWorld(Context);if(!W)return false;
+    auto* W=SalesShelfTestWorld(Context);if(!W)return false;
     if(!bExecuting){TWeakObjectPtr<UWorld> Weak=W;W->GetTimerManager().SetTimerForNextTick([Weak,Action,Index](){if(Weak.IsValid()){TGuardValue<bool> Guard(bExecuting,true);Step(Weak.Get(),Action,Index);}});return true;}
     auto* PC=Cast<ABotanicusPlayerController>(W->GetFirstPlayerController());if(!PC || !PC->GetPawn())return false;
     auto* Pawn=Cast<ABotanicusCharacter>(PC->GetPawn());auto* Bar=Pawn ? Pawn->GetQuickBarComponent():nullptr;if(!Bar)return false;
@@ -199,7 +199,7 @@ bool UBotanicusSalesShelfValidation::Step(UObject* Context,FName Action,int32 In
 FString UBotanicusSalesShelfValidation::Snapshot(UObject* Context)
 {
 #if WITH_EDITOR
-    auto* W=TestWorld(Context);if(!W)return TEXT("{}");auto R=MakeShared<FJsonObject>();auto* PC=Cast<ABotanicusPlayerController>(W->GetFirstPlayerController());if(!PC)return TEXT("{}");
+    auto* W=SalesShelfTestWorld(Context);if(!W)return TEXT("{}");auto R=MakeShared<FJsonObject>();auto* PC=Cast<ABotanicusPlayerController>(W->GetFirstPlayerController());if(!PC)return TEXT("{}");
     auto* Pawn=Cast<ABotanicusCharacter>(PC->GetPawn());if(!Pawn)return TEXT("{}");auto* Bar=Pawn->GetQuickBarComponent();const auto Selected=Bar->GetSelectedSlot();
     FVector Eye;FRotator View;PC->GetPlayerViewPoint(Eye,View);R->SetStringField(TEXT("eye"),Eye.ToString());R->SetStringField(TEXT("view"),View.ToString());
     FHitResult Trace;FCollisionQueryParams Params(SCENE_QUERY_STAT(ShelfDiagnostic),true,Pawn);if(PC->LocalQuickBarItemPreview)Params.AddIgnoredActor(PC->LocalQuickBarItemPreview);if(PC->LocalInspectedQuickBarItem)Params.AddIgnoredActor(PC->LocalInspectedQuickBarItem);if(PC->LocalEquippedQuickBarItem)Params.AddIgnoredActor(PC->LocalEquippedQuickBarItem);
