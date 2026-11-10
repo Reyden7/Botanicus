@@ -2,6 +2,11 @@
 
 #include "Delivery/BotanicusDeliveryParcelActor.h"
 
+#include "Delivery/BotanicusParcelOpeningSettings.h"
+#include "Delivery/BotanicusParcelOpeningVisualActor.h"
+#include "NiagaraSystem.h"
+#include "GameFramework/GameStateBase.h"
+#include "EngineUtils.h"
 #include "BotanicusCharacter.h"
 #include "BotanicusGameMode.h"
 #include "BotanicusPlayerController.h"
@@ -158,6 +163,20 @@ ABotanicusDeliveryParcelActor::ABotanicusDeliveryParcelActor()
 	RefreshParcelAppearance(false);
 }
 
+void ABotanicusDeliveryParcelActor::BeginPlay()
+{
+	Super::BeginPlay();
+	if (GetNetMode() != NM_DedicatedServer && !ActorHasTag(TEXT("BotanicusPlacementPreview")))
+	{
+		// Load while the carton is still closed, before the player cuts its tape.
+		// First-use compilation/resource setup must not delay the disappearance frame.
+		PreloadedConfetti = GetDefault<UBotanicusParcelOpeningSettings>()->ConfettiSystem.LoadSynchronous();
+#if WITH_EDITOR
+		if (PreloadedConfetti) PreloadedConfetti->RequestCompile(false);
+#endif
+	}
+}
+
 void ABotanicusDeliveryParcelActor::GetLifetimeReplicatedProps(
 	TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
@@ -166,6 +185,9 @@ void ABotanicusDeliveryParcelActor::GetLifetimeReplicatedProps(
 	DOREPLIFETIME(ABotanicusDeliveryParcelActor, Quantity);
 	DOREPLIFETIME(ABotanicusDeliveryParcelActor, CutCoverageMask);
 	DOREPLIFETIME(ABotanicusDeliveryParcelActor, bOpened);
+	DOREPLIFETIME(ABotanicusDeliveryParcelActor, OpeningVisualId);
+	DOREPLIFETIME(ABotanicusDeliveryParcelActor, OpeningStartedAt);
+	DOREPLIFETIME(ABotanicusDeliveryParcelActor, OpeningDuration);
 }
 
 void ABotanicusDeliveryParcelActor::OnRep_ReplicatedMovement()
@@ -204,12 +226,8 @@ void ABotanicusDeliveryParcelActor::Tick(float DeltaSeconds)
 		return;
 	}
 
-	// Parcel guidance is displayed exclusively through WBP_HUD_Interaction.
-	// Keep the legacy yellow world-space TextRender permanently hidden.
-	if (InteractionIndicator)
-	{
-		InteractionIndicator->SetVisibility(false);
-	}
+	// Guidance remains in the existing interaction HUD; the carton stays visible until E succeeds.
+	if (InteractionIndicator) InteractionIndicator->SetVisibility(false);
 }
 
 FBotanicusInteractionPrompt
@@ -249,6 +267,10 @@ void ABotanicusDeliveryParcelActor::RestoreParcelState(
 	Quantity = FMath::Max(1, InQuantity);
 	CutCoverageMask = InCutCoverageMask;
 	bOpened = bInOpened;
+	if (!OpeningVisualId.IsValid()) OpeningVisualId = FGuid::NewGuid();
+	OpeningStartedAt = -1; // A restored open carton never replays the burst.
+	OpeningDuration = FMath::Clamp(GetDefault<UBotanicusParcelOpeningSettings>()->OpeningDuration, .2f, 1.f);
+	bOpeningVisualReplaced = false;
 	RefreshParcelAppearance(false);
 	ForceNetUpdate();
 	// No save-format change: a carton saved in flight resumes gravity at its
@@ -485,6 +507,7 @@ void ABotanicusDeliveryParcelActor::MarkTapeSegment(
 	{
 		ABotanicusCharacter* CutterCharacter = ActiveCutter.Get();
 		bOpened = true;
+		OpeningStartedAt = GetWorld()->GetGameState()->GetServerWorldTimeSeconds();
 		ActiveCutter.Reset();
 		bHasLastCutSample = false;
 		SendInteractorMessage(
@@ -646,8 +669,9 @@ void ABotanicusDeliveryParcelActor::RefreshAnimatedCarton(
 	SkeletalMeshVisual->SetRelativeScale3D(VisualScale);
 	SkeletalMeshVisual->SetRelativeLocation(
 		-SourceBounds.Origin * VisualScale);
-	SkeletalMeshVisual->SetVisibility(true, true);
-	SkeletalMeshVisual->SetHiddenInGame(false, true);
+	const bool bShowCarton = !bOpeningVisualReplaced;
+	SkeletalMeshVisual->SetVisibility(bShowCarton, true);
+	SkeletalMeshVisual->SetHiddenInGame(!bShowCarton, true);
 
 	if (!OpeningAnimation)
 	{
@@ -661,6 +685,13 @@ void ABotanicusDeliveryParcelActor::RefreshAnimatedCarton(
 		if (bJustOpened)
 		{
 			SkeletalMeshVisual->PlayAnimation(OpeningAnimation, false);
+			SkeletalMeshVisual->SetPlayRate(OpeningAnimation->GetPlayLength() /
+				(OpeningDuration * FMath::Max(.01f, FMath::Abs(OpeningAnimation->RateScale))));
+			if (OpeningStartedAt >= 0 && GetWorld() && GetWorld()->GetGameState())
+			{
+				const double Phase = FMath::Clamp((GetWorld()->GetGameState()->GetServerWorldTimeSeconds() - OpeningStartedAt) / OpeningDuration, 0.0, 1.0);
+				SkeletalMeshVisual->SetPosition(OpeningAnimation->GetPlayLength() * Phase, false);
+			}
 			if (!bPlayOpeningAnimation)
 			{
 				SkeletalMeshVisual->SetPosition(
@@ -696,6 +727,8 @@ void ABotanicusDeliveryParcelActor::Interact_Implementation(
 	}
 	if (ReleaseContents(Interactor))
 	{
+		// Only a successful authoritative transfer creates the independent cosmetic.
+		ABotanicusParcelOpeningVisualActor::Start(this);
 		SetInteractionEnabled(false);
 		Destroy();
 	}
@@ -805,5 +838,18 @@ void ABotanicusDeliveryParcelActor::SendInteractorMessage(
 
 void ABotanicusDeliveryParcelActor::OnRep_ParcelState()
 {
+	// Either actor channel may arrive first. Match the cosmetic snapshot by identity.
+	for (TActorIterator<ABotanicusParcelOpeningVisualActor> It(GetWorld()); It; ++It)
+		if (OpeningVisualId.IsValid() && It->GetSourceId() == OpeningVisualId) HandOffOpeningVisual();
 	RefreshParcelAppearance();
+}
+
+void ABotanicusDeliveryParcelActor::HandOffOpeningVisual()
+{
+	if (bOpeningVisualReplaced) return;
+	bOpeningVisualReplaced = true;
+	SkeletalMeshVisual->SetHiddenInGame(true);
+	SkeletalMeshVisual->SetVisibility(false);
+	SkeletalMeshVisual->SetComponentTickEnabled(false);
+	for (UStaticMeshComponent* Segment : TapeSegments) Segment->SetVisibility(false);
 }

@@ -5,6 +5,7 @@
 #include "BotanicusCharacter.h"
 #include "BotanicusPlayerController.h"
 #include "Camera/CameraComponent.h"
+#include "Preparation/BotanicusTerminalEyesComponent.h"
 
 ABotanicusComputerActor::ABotanicusComputerActor()
 {
@@ -12,6 +13,7 @@ ABotanicusComputerActor::ABotanicusComputerActor()
 	// meshes, materials and component transforms instead of applying the native
 	// catalogue's primitive fallback at runtime.
 	bUseBlueprintAppearance = true;
+	TerminalEyes = CreateDefaultSubobject<UBotanicusTerminalEyesComponent>(TEXT("Terminal Eyes"));
 
 	InteractionAction =
 		NSLOCTEXT(

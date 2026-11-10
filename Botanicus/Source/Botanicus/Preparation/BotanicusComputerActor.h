@@ -7,6 +7,7 @@
 #include "BotanicusComputerActor.generated.h"
 
 class UCameraComponent;
+class UBotanicusTerminalEyesComponent;
 
 /** Physical nursery computer used to access the command panel. */
 UCLASS()
@@ -35,6 +36,9 @@ public:
 		AActor* Interactor) override;
 
 protected:
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Botanicus|Eyes")
+	TObjectPtr<UBotanicusTerminalEyesComponent> TerminalEyes;
+
 	/** Camera used while smoothly approaching the command screen. Its transform
 	 * can be adjusted directly on the inherited component in the computer BP. */
 	UPROPERTY(

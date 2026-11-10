@@ -6,6 +6,7 @@
 #include "Interaction/BotanicusInteractableActor.h"
 #include "BotanicusDeliveryParcelActor.generated.h"
 
+class UNiagaraSystem;
 class UBoxComponent;
 class UPhysicalMaterial;
 class UTextRenderComponent;
@@ -25,6 +26,7 @@ public:
 
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void OnRep_ReplicatedMovement() override;
 	virtual FBotanicusInteractionPrompt
@@ -54,7 +56,19 @@ public:
 	}
 	FVector GetParcelHalfExtent() const { return ParcelHalfExtent; }
 
+	const FGuid& GetOpeningVisualId() const { return OpeningVisualId; }
+	UAnimSequence* GetOpeningAnimation() const { return OpeningAnimation; }
+	double GetOpeningStartedAt() const { return OpeningStartedAt; }
+	float GetOpeningDuration() const { return OpeningDuration; }
+	/** Presentation handoff only: the authoritative inventory actor remains intact. */
+	void HandOffOpeningVisual();
+
 private:
+	UPROPERTY(Transient) TObjectPtr<UNiagaraSystem> PreloadedConfetti;
+	UPROPERTY(ReplicatedUsing=OnRep_ParcelState) FGuid OpeningVisualId;
+	UPROPERTY(ReplicatedUsing=OnRep_ParcelState) double OpeningStartedAt = -1;
+	UPROPERTY(Replicated) float OpeningDuration = .5f;
+	bool bOpeningVisualReplaced = false;
 	UFUNCTION()
 	void OnDeliveryBodySleep(UPrimitiveComponent* Component, FName BoneName);
 	UFUNCTION()
