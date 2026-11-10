@@ -7,6 +7,10 @@
 #include "BotanicusSalesDisplayActor.generated.h"
 
 class UStaticMeshComponent;
+class UBoxComponent;
+class UInstancedStaticMeshComponent;
+class UMeshComponent;
+class ABotanicusSalesShelfActor;
 class USceneComponent;
 class UTextRenderComponent;
 class UWidgetComponent;
@@ -45,16 +49,24 @@ public:
 	virtual void Interact_Implementation(AActor* Interactor) override;
 	virtual void ConfigureAsLocalPreview(bool bIsValid) override;
 
+    void InitializeShelfSlot(ABotanicusSalesShelfActor* Shelf,int32 Index);
+    bool IsShelfSlot() const;
+    ABotanicusSalesShelfActor* GetSalesShelf() const;
+    virtual void OnRep_Owner() override;
+    FVector GetVisitorApproachLocation() const;
+    void GetSalePresentationMeshes(TArray<UMeshComponent*>& Out) const;
+    FGuid GetDisplayedPotInstanceId() const {return DisplayedPotInstanceId;}
+    void RestoreDisplayedPotInstanceId(FGuid Id) {if(HasAuthority())DisplayedPotInstanceId=Id;}
 	/** Server-only placement of the selected complete plant. */
 	void TryPlaceSelectedPlant(AActor* Interactor);
 	bool TryMountSalePot(
 		ABotanicusSalePotActor* SalePot,
-		ABotanicusPlayerController* Seller);
+		ABotanicusPlayerController* Seller, bool bSuppressListed=false);
 	bool TryMountSalePotState(
 		FName SoilItemKey,
 		FName PlantItemKey,
 		ABotanicusPlayerController* Seller,
-		FName SalePotItemKey = TEXT("SalePot"));
+		FName SalePotItemKey = TEXT("SalePot"), FGuid InstanceId=FGuid(), bool bSuppressListed=false);
 	bool IsEmpty() const { return DisplayedPlantItemKey.IsNone(); }
 	bool CanRetrieveDisplayedSalePot() const;
 	bool IsDisplayedSalePotTargeted(const AActor* Interactor) const;
@@ -113,6 +125,12 @@ public:
 private:
     friend class UBotanicusCashRegisterValidation;
     FGuid SaleLotId;
+    FGuid DisplayedPotInstanceId;
+    UPROPERTY(ReplicatedUsing=OnRep_ShelfSlot) int32 ShelfSlotIndex=INDEX_NONE;
+    UPROPERTY(VisibleAnywhere) TObjectPtr<UBoxComponent> ShelfSlotHit;
+    UPROPERTY(Transient) TObjectPtr<UInstancedStaticMeshComponent> DepositIndicator;
+    UFUNCTION() void OnRep_ShelfSlot();
+    void RefreshDepositIndicator();
 	FName GetSelectedItemKey(AActor* Interactor) const;
 	const FBotanicusItemDefinition* GetSelectedPlantDefinition(
 		AActor* Interactor) const;

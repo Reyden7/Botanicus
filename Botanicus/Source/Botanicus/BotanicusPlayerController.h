@@ -100,6 +100,9 @@ public:
     void SetCheckoutScannerReference(ABotanicusCheckoutScanner* Scanner);
     bool CanTakeCheckoutScanner() const;
     bool TryWaterReserveInput(const FInputKeyEventArgs& Params);
+    bool HasSalePotForDeposit() const;
+    bool FindAimedSalesDisplay(ABotanicusSalesDisplayActor*& Out) const;
+    bool TryRefreshSalesDepositContext();
     bool TryRefreshRefillStationContext();
     bool TraceRefillStationAim(FHitResult& Hit) const;
     bool WantsRefillZone(const ABotanicusWaterReserveActor* Station) const;
@@ -116,6 +119,7 @@ public:
     UFUNCTION(Server,Reliable) void ServerCollectCheckoutCoins(ABotanicusPaymentCoins* Coins,FGuid ExpectedTransaction);
 
 	friend class UBotanicusJuiceValidation;
+    friend class UBotanicusSalesShelfValidation;
 	friend class UBotanicusEquipmentValidation;
 	friend class UBotanicusPlacementValidation;
 	FVector GetPlacementCosmeticHandPosition(FName ExpectedItem) const;
@@ -497,7 +501,7 @@ protected:
 	void CancelDisplayedSalePotPickup();
 	bool TryBeginNearbyParcelCut();
 	void EndParcelCut();
-	bool TryPlacePlantOnNearbySalesDisplay();
+	bool TryPlacePlantOnNearbySalesDisplay(bool bConsumeOccupied=false);
 	bool TryCheckoutNearbyRegister();
 	void EndPlantPotAction();
 	bool TryHandleNearbyLargeEquipment();
@@ -700,7 +704,7 @@ protected:
 
 	UFUNCTION(Server, Reliable)
 	void ServerPlacePlantOnSalesDisplay(
-		ABotanicusSalesDisplayActor* SalesDisplay);
+		ABotanicusSalesDisplayActor* SalesDisplay, FGuid ExpectedInstanceId, ABotanicusSalePotActor* HeldPot);
 
 	UFUNCTION(Server, Reliable)
 	void ServerCheckoutRegister(

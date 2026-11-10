@@ -53,5 +53,6 @@ struct FBotanicusPendingPlacement
     FTransform FinalTransform;
     FVector Start=FVector::ZeroVector;
     FName ItemKey,AudioId;
+    bool bContentsOnly=false;
     double ExpiresAt=0;
 };

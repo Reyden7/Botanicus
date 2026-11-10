@@ -54,6 +54,7 @@ public:
 	void FillIllegalPlanterWater();
 
 private:
+    friend class UBotanicusSalesShelfValidation;
 	FString GetAutosaveSlotName() const;
 	FString GetPlayerSaveKey(const AController* Controller);
 	void LoadAutosave();

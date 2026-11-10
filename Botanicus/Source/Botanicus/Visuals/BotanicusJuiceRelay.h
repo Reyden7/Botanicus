@@ -14,6 +14,7 @@ struct FBotanicusPlacementEvent
     UPROPERTY() FTransform Final;
     UPROPERTY() FVector_NetQuantize Start;
     UPROPERTY() FName AudioId;
+    UPROPERTY() bool bContentsOnly=false;
 };
 /** Transient planting and lifecycle events; watering reuses the existing replicated audio active-source list unchanged. */
 UCLASS(NotBlueprintable)
@@ -22,7 +23,7 @@ class ABotanicusJuiceRelay : public AActor
 	GENERATED_BODY()
 public:
 	ABotanicusJuiceRelay();
-	void Placement(AActor* Item,APawn* Placer,FName ItemKey,const FTransform& Final,const FVector& Start,FName AudioId);
+	void Placement(AActor* Item,APawn* Placer,FName ItemKey,const FTransform& Final,const FVector& Start,FName AudioId,bool bContentsOnly=false);
     UFUNCTION(NetMulticast,Unreliable) void MulticastPlacementBatch(const TArray<FBotanicusPlacementEvent>& Events);
     virtual void EndPlay(const EEndPlayReason::Type Reason) override;
     void Lifecycle(AActor* Pot,uint8 Event,const FVector& Position);

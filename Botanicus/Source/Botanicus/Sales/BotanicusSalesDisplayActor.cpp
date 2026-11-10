@@ -2,6 +2,11 @@
 
 #include "Sales/BotanicusSalesDisplayActor.h"
 #include "Sales/Checkout/BotanicusCheckoutTypes.h"
+#include "Sales/BotanicusSalesShelfActor.h"
+#include "Components/BoxComponent.h"
+#include "Components/InstancedStaticMeshComponent.h"
+#include "NavigationSystem.h"
+#include "Sales/Checkout/BotanicusCheckoutSettings.h"
 #include "Audio/BotanicusAudioWorldSubsystem.h"
 
 #include "BotanicusCharacter.h"
@@ -88,6 +93,9 @@ ABotanicusSalesDisplayActor::ABotanicusSalesDisplayActor()
 		Mesh->SetRelativeScale3D(FVector(1.15f, 0.45f, 0.65f));
 	}
 
+    ShelfSlotHit=CreateDefaultSubobject<UBoxComponent>(TEXT("Shelf Slot Target"));ShelfSlotHit->SetupAttachment(SceneRoot);
+    ShelfSlotHit->SetBoxExtent(FVector(20,20,3));ShelfSlotHit->SetRelativeLocation(FVector(0,0,2));ShelfSlotHit->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    ShelfSlotHit->SetCollisionResponseToAllChannels(ECR_Ignore);ShelfSlotHit->SetCollisionResponseToChannel(ECC_Visibility,ECR_Block);ShelfSlotHit->SetGenerateOverlapEvents(false);ShelfSlotHit->SetCanEverAffectNavigation(false);
 	SalePotSlot = CreateDefaultSubobject<USceneComponent>(
 		TEXT("SalePotSlot"));
 	SalePotSlot->SetupAttachment(SceneRoot);
@@ -288,11 +296,12 @@ void ABotanicusSalesDisplayActor::Tick(float DeltaSeconds)
 		}
 	}
 	RefreshLocalAction();
+    RefreshDepositIndicator();
 	if (EmptyDisplayWidget)
 	{
 		APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
 		EmptyDisplayWidget->SetVisibility(
-			IsEmpty() && Pawn &&
+			!IsShelfSlot() && IsEmpty() && Pawn &&
 			!ActorHasTag(TEXT("BotanicusPlacementPreview")) &&
 			IsLocalPlayerTargetingDisplay(Pawn));
 	}
@@ -325,6 +334,7 @@ void ABotanicusSalesDisplayActor::Tick(float DeltaSeconds)
 void ABotanicusSalesDisplayActor::GetLifetimeReplicatedProps(
 	TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
+    DOREPLIFETIME(ABotanicusSalesDisplayActor,ShelfSlotIndex);
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(
 		ABotanicusSalesDisplayActor,
@@ -423,7 +433,7 @@ void ABotanicusSalesDisplayActor::TryPlaceSelectedPlant(
 
 bool ABotanicusSalesDisplayActor::TryMountSalePot(
 	ABotanicusSalePotActor* SalePot,
-	ABotanicusPlayerController* Seller)
+	ABotanicusPlayerController* Seller, bool bSuppressListed)
 {
 	if (!HasAuthority() || !IsEmpty() || !IsValid(SalePot) ||
 		!SalePot->IsReadyForSale() || !IsValid(Seller))
@@ -434,7 +444,7 @@ bool ABotanicusSalesDisplayActor::TryMountSalePot(
 			SalePot->GetSoilItemKey(),
 			SalePot->GetPlantItemKey(),
 			Seller,
-			SalePot->GetItemKey()))
+			SalePot->GetItemKey(),FGuid(),bSuppressListed))
 	{
 		return false;
 	}
@@ -446,21 +456,23 @@ bool ABotanicusSalesDisplayActor::TryMountSalePotState(
 	FName SoilItemKey,
 	FName PlantItemKey,
 	ABotanicusPlayerController* Seller,
-	FName SalePotItemKey)
+	FName SalePotItemKey, FGuid InstanceId, bool bSuppressListed)
 {
 	if (!HasAuthority() || !IsEmpty() || SoilItemKey.IsNone() ||
 		PlantItemKey.IsNone() || !IsValid(Seller))
 	{
 		return false;
 	}
-	SaleLotId=FGuid::NewGuid();
+    const auto* Catalog=GetGameInstance() ? GetGameInstance()->GetSubsystem<UBotanicusItemCatalogSubsystem>():nullptr;
+    if(!Catalog || !Catalog->FindItem(PlantItemKey))return false;
+	SaleLotId=FGuid::NewGuid();DisplayedPotInstanceId=InstanceId.IsValid() ? InstanceId:FGuid::NewGuid();
 	DisplayedPlantItemKey = PlantItemKey;
 	DisplayedSoilItemKey = SoilItemKey;
 	DisplayedPotItemKey = SalePotItemKey.IsNone()
 		? FName(TEXT("SalePot"))
 		: SalePotItemKey;
 	SellerController = Seller;
-	UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Listed"), GetActorLocation());
+	if(!bSuppressListed)UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Listed"), GetActorLocation());
 	SaleEndServerTime = 0.0f;
 	bVisitorEnRoute = false;
 	bPlantTakenByVisitor = false;
@@ -526,6 +538,8 @@ bool ABotanicusSalesDisplayActor::CompleteVisitorPurchase(
 bool ABotanicusSalesDisplayActor::TryReserveForVisitor(
 	ABotanicusVisitorCharacter* Visitor)
 {
+    if(HasAuthority() && IsShelfSlot() && !IsValid(SellerController))SellerController=Cast<ABotanicusPlayerController>(GetWorld()->GetFirstPlayerController());
+
 	if (!HasAuthority() ||
 		!IsValid(Visitor) ||
 		DisplayedPlantItemKey.IsNone() ||
@@ -611,6 +625,7 @@ FVector ABotanicusSalesDisplayActor::
 
 float ABotanicusSalesDisplayActor::GetDisplaySurfaceHeight() const
 {
+    if(IsShelfSlot())return 0.f;
 	if (Mesh && Mesh->GetStaticMesh())
 	{
 		const FBoxSphereBounds FurnitureBounds =
@@ -747,7 +762,7 @@ bool ABotanicusSalesDisplayActor::TryRetrieveDisplayedSalePot(
 				? FName(TEXT("SalePot"))
 				: DisplayedPotItemKey,
 			State,
-			AddedSlotIndex))
+			AddedSlotIndex,DisplayedPotInstanceId))
 	{
 		SendInteractorMessage(
 			Interactor,
@@ -1122,7 +1137,8 @@ void ABotanicusSalesDisplayActor::RefreshVisuals()
 	{
 		OccupiedDisplayWidget->SetVisibility(
 			bHasPlant && !bPlantTakenByVisitor &&
-			!ActorHasTag(TEXT("BotanicusPlacementPreview")));
+			!ActorHasTag(TEXT("BotanicusPlacementPreview")) &&
+            (!IsShelfSlot() || (GetWorld()->GetFirstPlayerController() && IsLocalPlayerTargetingDisplay(GetWorld()->GetFirstPlayerController()->GetPawn()))));
 	}
 	if (!bHasPlant)
 	{
@@ -1201,4 +1217,45 @@ void ABotanicusSalesDisplayActor::SendInteractorMessage(
 void ABotanicusSalesDisplayActor::OnRep_DisplayedPlant()
 {
 	RefreshVisuals();
+}
+
+ABotanicusSalesShelfActor* ABotanicusSalesDisplayActor::GetSalesShelf() const {return Cast<ABotanicusSalesShelfActor>(GetOwner());}
+bool ABotanicusSalesDisplayActor::IsShelfSlot() const {return IsValid(GetSalesShelf());}
+void ABotanicusSalesDisplayActor::InitializeShelfSlot(ABotanicusSalesShelfActor* Shelf,int32 Index)
+{if(!HasAuthority())return;SetOwner(Shelf);ShelfSlotIndex=Index;OnRep_ShelfSlot();}
+void ABotanicusSalesDisplayActor::OnRep_Owner(){Super::OnRep_Owner();OnRep_ShelfSlot();}
+void ABotanicusSalesDisplayActor::OnRep_ShelfSlot()
+{
+    if(!IsShelfSlot())return;
+    Mesh->SetStaticMesh(nullptr);Mesh->SetVisibility(false);Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);Mesh->SetCanEverAffectNavigation(false);
+    ShelfSlotHit->SetCollisionEnabled(ECollisionEnabled::QueryOnly);EmptyDisplayWidget->SetVisibility(false);
+    OccupiedDisplayWidgetHeight=75;RefreshVisuals();
+}
+FVector ABotanicusSalesDisplayActor::GetVisitorApproachLocation() const
+{
+    auto* Shelf=GetSalesShelf();if(!Shelf)return GetActorLocation();
+    FVector Point=GetActorLocation()+Shelf->GetActorForwardVector()*75;
+    FNavLocation Floor;if(auto* Nav=FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());Nav && Nav->ProjectPointToNavigation(Point,Floor,FVector(40,40,250)))return Floor.Location;
+    return Point-FVector(0,0,100);
+}
+void ABotanicusSalesDisplayActor::GetSalePresentationMeshes(TArray<UMeshComponent*>& Out) const
+{Out.Add(PotVisual);Out.Add(StemVisual);Out.Add(PlantVisual);}
+void ABotanicusSalesDisplayActor::RefreshDepositIndicator()
+{
+    if(GetNetMode()==NM_DedicatedServer || ActorHasTag(TEXT("BotanicusPlacementPreview")) || ActorHasTag(TEXT("BotanicusEquippedPreview")))return;
+    auto* PC=Cast<ABotanicusPlayerController>(GetWorld()->GetFirstPlayerController());
+    const bool bShow=IsEmpty() && !IsHidden() && PC && PC->HasSalePotForDeposit() &&
+        FVector::DistSquared(PC->GetPawn()->GetActorLocation(),GetSalePotPlacementTransform().GetLocation())<=FMath::Square(450.f);
+    if(bShow && !DepositIndicator)
+    {
+        auto* Base=GetDefault<UBotanicusCheckoutSettings>()->ScanHologramMaterial.LoadSynchronous();if(!Base)return;
+        DepositIndicator=NewObject<UInstancedStaticMeshComponent>(this,TEXT("Free Sale Slot"));DepositIndicator->SetupAttachment(SalePotSlot);DepositIndicator->SetRelativeLocation(FVector(0,0,.6f));
+        DepositIndicator->ComponentTags.Add(TEXT("BotanicusSalesDepositIndicator"));
+        DepositIndicator->SetStaticMesh(LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Cube.Cube")));
+        DepositIndicator->SetCollisionEnabled(ECollisionEnabled::NoCollision);DepositIndicator->SetCanEverAffectNavigation(false);DepositIndicator->SetCastShadow(false);
+        auto* Tint=UMaterialInstanceDynamic::Create(Base,this);Tint->SetVectorParameterValue(TEXT("BodyTint"),FLinearColor(.06f,.8f,.16f));Tint->SetVectorParameterValue(TEXT("RimTint"),FLinearColor(.12f,.95f,.2f));Tint->SetScalarParameterValue(TEXT("Opacity"),.45f);Tint->SetScalarParameterValue(TEXT("Emission"),.7f);DepositIndicator->SetMaterial(0,Tint);
+        for(float Sign:{-1.f,1.f}){DepositIndicator->AddInstance(FTransform(FQuat::Identity,FVector(0,Sign*16.7f,0),FVector(.34f,.006f,.003f)));DepositIndicator->AddInstance(FTransform(FQuat::Identity,FVector(Sign*16.7f,0,0),FVector(.006f,.328f,.003f)));}
+        DepositIndicator->RegisterComponent();
+    }
+    if(DepositIndicator && DepositIndicator->IsVisible()!=bShow)DepositIndicator->SetVisibility(bShow);
 }

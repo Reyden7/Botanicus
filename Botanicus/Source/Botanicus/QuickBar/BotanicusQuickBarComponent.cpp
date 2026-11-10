@@ -255,7 +255,7 @@ bool UBotanicusQuickBarComponent::AddItem(
 bool UBotanicusQuickBarComponent::AddUniqueItem(
 	FName ItemKey,
 	const FBotanicusCarriedItemState& State,
-	int32& OutSlotIndex)
+	int32& OutSlotIndex, FGuid PreservedInstanceId)
 {
 	OutSlotIndex = INDEX_NONE;
 	AActor* OwnerActor = GetOwner();
@@ -265,6 +265,7 @@ bool UBotanicusQuickBarComponent::AddUniqueItem(
 		return false;
 	}
 
+	if(PreservedInstanceId.IsValid() && Slots.ContainsByPredicate([&](const auto& S){return !S.IsEmpty() && S.InstanceId==PreservedInstanceId;}))return false;
 	for (int32 SlotIndex = 0; SlotIndex < Slots.Num(); ++SlotIndex)
 	{
 		if (!Slots[SlotIndex].IsEmpty())
@@ -275,7 +276,7 @@ bool UBotanicusQuickBarComponent::AddUniqueItem(
 		FBotanicusQuickBarSlot& Slot = Slots[SlotIndex];
 		Slot.ItemKey = ItemKey;
 		Slot.Quantity = 1;
-		Slot.InstanceId = FGuid::NewGuid();
+		Slot.InstanceId = PreservedInstanceId.IsValid() ? PreservedInstanceId:FGuid::NewGuid();
 		Slot.CarriedState = State;
 		OutSlotIndex = SlotIndex;
 		break;

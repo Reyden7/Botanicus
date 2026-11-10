@@ -210,7 +210,7 @@ public:
 	bool AddUniqueItem(
 		FName ItemKey,
 		const FBotanicusCarriedItemState& State,
-		int32& OutSlotIndex);
+		int32& OutSlotIndex, FGuid PreservedInstanceId=FGuid());
 
 	/** Removes a quantity from one slot, clearing it when it reaches zero. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Botanicus|Inventory")

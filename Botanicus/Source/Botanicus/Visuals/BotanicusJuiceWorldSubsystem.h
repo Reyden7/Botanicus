@@ -75,9 +75,9 @@ public:
 	virtual TStatId GetStatId() const override {RETURN_QUICK_DECLARE_CYCLE_STAT(UBotanicusJuiceWorldSubsystem,STATGROUP_Tickables);}
 	virtual bool IsTickable() const override;
     /** Reuses the existing successful placement branches and cosmetic relay. */
-    static void PlacementSucceeded(AActor* Item,APawn* Placer);
+    static void PlacementSucceeded(AActor* Item,APawn* Placer,bool bContentsOnly=false);
     static FVector PlacementHandPosition(APawn* Pawn,FName ExpectedItem);
-    void ReceivePlacement(uint32 Sequence,AActor* Item,APawn* Placer,FName ItemKey,const FTransform& Final,const FVector& Start,FName AudioId);
+    void ReceivePlacement(uint32 Sequence,AActor* Item,APawn* Placer,FName ItemKey,const FTransform& Final,const FVector& Start,FName AudioId,bool bContentsOnly=false);
     bool SetPlacementHologram(AActor* Preview,bool bValid);
     void ClearPlacementHologram(AActor* Preview);
     UFUNCTION(BlueprintPure,Category="Botanicus|Placement|Diagnostics") int32 GetPlacementAnimationCount() const {return PlacementAnimations.Num();}

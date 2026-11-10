@@ -120,6 +120,7 @@ public:
 
 private:
     friend class UBotanicusCashRegisterValidation;
+    friend class UBotanicusSalesShelfValidation;
     friend class UBotanicusVisitorMeshComponent;
     UPROPERTY(Replicated) FVector_NetQuantize10 PresentationFocus=FVector::ZeroVector;
     void RefreshCheckoutScanTarget();

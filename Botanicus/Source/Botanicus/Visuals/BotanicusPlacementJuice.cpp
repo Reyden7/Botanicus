@@ -4,6 +4,7 @@
 #include "Audio/BotanicusAudioWorldSubsystem.h"
 #include "BotanicusPlayerController.h"
 #include "BotanicusCharacter.h"
+#include "Sales/BotanicusSalesDisplayActor.h"
 #include "Delivery/BotanicusPlaceableItemActor.h"
 #include "Delivery/BotanicusLargeEquipmentActor.h"
 #include "Camera/PlayerCameraManager.h"
@@ -28,8 +29,9 @@ void GatherPlacementMeshes(AActor* Actor,TArray<UMeshComponent*>& Meshes,TSet<AA
     TArray<AActor*> Children;Actor->GetAttachedActors(Children);
     for(AActor* Child:Children) GatherPlacementMeshes(Child,Meshes,Seen);
 }
-TArray<UMeshComponent*> PlacementMeshes(AActor* Actor)
+TArray<UMeshComponent*> PlacementMeshes(AActor* Actor,bool bContentsOnly=false)
 {
+    if(bContentsOnly)if(auto* Display=Cast<ABotanicusSalesDisplayActor>(Actor)){TArray<UMeshComponent*> Parts;Display->GetSalePresentationMeshes(Parts);return Parts;}
     TArray<UMeshComponent*> Result;TSet<AActor*> Seen;GatherPlacementMeshes(Actor,Result,Seen);return Result;
 }
 FName PlacementKey(AActor* Actor)
@@ -77,12 +79,13 @@ FVector UBotanicusJuiceWorldSubsystem::PlacementHandPosition(APawn* Pawn,FName E
         return Character->GetMesh()->GetSocketLocation(TEXT("hand_r"));
     return Pawn->GetPawnViewLocation()+Pawn->GetBaseAimRotation().Vector()*45.f-FVector(0,0,25);
 }
-void UBotanicusJuiceWorldSubsystem::PlacementSucceeded(AActor* Item,APawn* Placer)
+void UBotanicusJuiceWorldSubsystem::PlacementSucceeded(AActor* Item,APawn* Placer,bool bContentsOnly)
 {
-    if(!IsValid(Item) || Item->GetWorld()->GetNetMode()==NM_Client || !Item->HasAuthority()) return;
+    if(!IsValid(Item) || Item->GetWorld()->GetNetMode()==NM_Client || !Item->HasAuthority())return;
+    auto* Display=bContentsOnly ? Cast<ABotanicusSalesDisplayActor>(Item):nullptr;
+    const FName Key=Display ? Display->GetDisplayedPlantItemKey():PlacementKey(Item);
     if(auto* Juice=Item->GetWorld()->GetSubsystem<UBotanicusJuiceWorldSubsystem>())
-        if(auto* Events=Juice->GetRelay()) Events->Placement(Item,Placer,PlacementKey(Item),Item->GetActorTransform(),
-            PlacementHandPosition(Placer,PlacementKey(Item)),UBotanicusAudioWorldSubsystem::PlacementEvent(Item));
+        if(auto* Events=Juice->GetRelay())Events->Placement(Item,Placer,Key,Item->GetActorTransform(),PlacementHandPosition(Placer,Key),Display ? FName(TEXT("PotPlace")):UBotanicusAudioWorldSubsystem::PlacementEvent(Item),bContentsOnly);
 }
 bool UBotanicusJuiceWorldSubsystem::SetPlacementHologram(AActor* Preview,bool bValid)
 {
@@ -133,7 +136,7 @@ void UBotanicusJuiceWorldSubsystem::ClearPlacementHologram(AActor* Preview)
         PlacementHolograms.Remove(Preview);
     }
 }
-void UBotanicusJuiceWorldSubsystem::ReceivePlacement(uint32 Sequence,AActor* Item,APawn* Placer,FName ItemKey,const FTransform& Final,const FVector& Start,FName AudioId)
+void UBotanicusJuiceWorldSubsystem::ReceivePlacement(uint32 Sequence,AActor* Item,APawn* Placer,FName ItemKey,const FTransform& Final,const FVector& Start,FName AudioId,bool bContentsOnly)
 {
     if(Sequence==0 || static_cast<int32>(Sequence-LastPlacementSequence)<=0) return;LastPlacementSequence=Sequence;
     const auto* S=GetDefault<UBotanicusPlacementJuiceSettings>();
@@ -147,7 +150,7 @@ void UBotanicusJuiceWorldSubsystem::ReceivePlacement(uint32 Sequence,AActor* Ite
     PendingPlacements.RemoveAll([Item](const auto& P){return P.Source==Item;});
 
     FBotanicusPendingPlacement Pending;Pending.Source=Item;Pending.Pawn=Placer;Pending.ItemKey=ItemKey;Pending.FinalTransform=Final;
-    Pending.Start=Placer && Placer->IsLocallyControlled() ? PlacementHandPosition(Placer,ItemKey) : Start;
+    Pending.bContentsOnly=bContentsOnly;Pending.Start=Placer && Placer->IsLocallyControlled() ? PlacementHandPosition(Placer,ItemKey) : Start;
     Pending.AudioId=AudioId;Pending.ExpiresAt=GetWorld()->GetTimeSeconds()+.20;
     PendingPlacements.Add(Pending);
 }
@@ -166,7 +169,7 @@ bool UBotanicusJuiceWorldSubsystem::BeginPlacementAnimation(const FBotanicusPend
     const auto* S=GetDefault<UBotanicusPlacementJuiceSettings>();
     if(PlacementAnimations.ContainsByPredicate([Actor](const auto& A){return A.Source==Actor;})) return false;
     TArray<UMeshComponent*> Sources;FBox Box(ForceInit);int32 Vertices=0;
-    for(UMeshComponent* Mesh:PlacementMeshes(Actor))
+    for(UMeshComponent* Mesh:PlacementMeshes(Actor,Pending.bContentsOnly))
     {
         if(!Mesh->IsVisible() || Mesh->bHiddenInGame || !Mesh->bRenderInMainPass || (Mesh->GetOwner() && Mesh->GetOwner()->IsHidden())) continue;
         if(auto* Static=Cast<UStaticMeshComponent>(Mesh))
@@ -188,9 +191,9 @@ bool UBotanicusJuiceWorldSubsystem::BeginPlacementAnimation(const FBotanicusPend
     Animation.Anchor=FVector(Box.GetCenter().X,Box.GetCenter().Y,Box.Min.Z);
     // Reuse the exact native furniture-pivot policy rather than trusting invisible render bounds.
     const auto* PC=Cast<ABotanicusPlayerController>(GetWorld()->GetFirstPlayerController());
-    if(S->GroundPivotItems.Contains(Pending.ItemKey) || (PC && PC->UsesPlacementCosmeticActorPivot(Actor))) Animation.Anchor.Z=Actor->GetActorLocation().Z;
+    if(!Pending.bContentsOnly && (S->GroundPivotItems.Contains(Pending.ItemKey) || (PC && PC->UsesPlacementCosmeticActorPivot(Actor)))) Animation.Anchor.Z=Actor->GetActorLocation().Z;
     Animation.Start=Pending.Start;Animation.AudioId=Pending.AudioId;
-    Animation.Fly=S->bFlyFromHand && !S->NoFlyItems.Contains(Pending.ItemKey) ? FMath::Clamp(S->FlyDuration,.03f,.3f) : 0.f;
+    Animation.Fly=!Pending.bContentsOnly && S->bFlyFromHand && !S->NoFlyItems.Contains(Pending.ItemKey) ? FMath::Clamp(S->FlyDuration,.03f,.3f) : 0.f;
     Animation.Grow=FMath::Clamp(S->GrowDuration,.06f,.3f);Animation.Bounce=FMath::Clamp(S->BounceDuration,.04f,.3f);
     Animation.Initial=FMath::Clamp(S->InitialVisualScale,.1f,.6f);Animation.Overshoot=FMath::Clamp(S->OvershootScale,1.f,1.2f);
     Animation.Height=FMath::Clamp(S->BounceHeight,0.f,8.f);Animation.Arc=FMath::Clamp(S->FlightArcHeight,0.f,20.f);
@@ -270,7 +273,8 @@ void UBotanicusJuiceWorldSubsystem::UpdatePlacementJuice(float DeltaTime)
     {
         const auto Pending=PendingPlacements[I];auto* Item=Pending.Source.Get();
         const auto* Large=Cast<ABotanicusLargeEquipmentActor>(Item);
-        const bool bReady=IsValid(Item) && PlacementKey(Item)==Pending.ItemKey && Item->GetActorTransform().Equals(Pending.FinalTransform,.5f) &&
+        const auto* Display=Pending.bContentsOnly ? Cast<ABotanicusSalesDisplayActor>(Item):nullptr;
+        const bool bReady=IsValid(Item) && (Display ? Display->GetDisplayedPlantItemKey():PlacementKey(Item))==Pending.ItemKey && Item->GetActorTransform().Equals(Pending.FinalTransform,.5f) &&
             (!Large || (!Large->IsInPlacementMode() && !Large->GetCarrier()));
         if(bReady)
         {

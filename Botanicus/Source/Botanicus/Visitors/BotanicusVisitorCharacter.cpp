@@ -475,10 +475,10 @@ void ABotanicusVisitorCharacter::Tick(float DeltaSeconds)
 			RefreshStatusText();
 			break;
 		}
-		MoveTowards(TargetDisplay->GetActorLocation(), DeltaSeconds);
+		MoveTowards(TargetDisplay->GetVisitorApproachLocation(), DeltaSeconds);
 		if (FVector::DistSquared2D(
 				GetActorLocation(),
-				TargetDisplay->GetActorLocation()) <=
+				TargetDisplay->GetVisitorApproachLocation()) <=
 			FMath::Square(AcceptanceRadius))
 		{
 			BeginInspection();
@@ -626,6 +626,7 @@ void ABotanicusVisitorCharacter::BeginInspection()
 		SetActorRotation(
 			(TargetDisplay->GetActorLocation() -
 			 GetActorLocation()).Rotation());
+        if(TargetDisplay->IsShelfSlot())SetActorRotation(FRotator(0,GetActorRotation().Yaw,0));
 	}
 	SetSpeechLine(ChooseInspectionSpeech(TargetDisplay));
 	RefreshStatusText();

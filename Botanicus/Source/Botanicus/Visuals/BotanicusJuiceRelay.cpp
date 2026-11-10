@@ -31,13 +31,13 @@ void ABotanicusJuiceRelay::ReceiveLocalPlacement(const FBotanicusPlacementEvent&
 {
     if(GetNetMode()!=NM_DedicatedServer)
         if(auto* Juice=GetWorld()->GetSubsystem<UBotanicusJuiceWorldSubsystem>())
-            Juice->ReceivePlacement(Event.Sequence,Event.Item,Event.Placer,Event.ItemKey,Event.Final,Event.Start,Event.AudioId);
+            Juice->ReceivePlacement(Event.Sequence,Event.Item,Event.Placer,Event.ItemKey,Event.Final,Event.Start,Event.AudioId,Event.bContentsOnly);
 }
-void ABotanicusJuiceRelay::Placement(AActor* Item,APawn* Placer,FName ItemKey,const FTransform& Final,const FVector& Start,FName AudioId)
+void ABotanicusJuiceRelay::Placement(AActor* Item,APawn* Placer,FName ItemKey,const FTransform& Final,const FVector& Start,FName AudioId,bool bContentsOnly)
 {
     if(!HasAuthority()) return;
     FBotanicusPlacementEvent Event;Event.Sequence=++NextSequence;Event.Item=Item;Event.Placer=Placer;
-    Event.ItemKey=ItemKey;Event.Final=Final;Event.Start=Start;Event.AudioId=AudioId;
+    Event.bContentsOnly=bContentsOnly;Event.ItemKey=ItemKey;Event.Final=Final;Event.Start=Start;Event.AudioId=AudioId;
     ReceiveLocalPlacement(Event); // Listen host starts immediately, once, without waiting for the batch.
     if(GetNetMode()==NM_Standalone) return;
     // UE limits repeated unreliable multicast calls per net update (default 2).

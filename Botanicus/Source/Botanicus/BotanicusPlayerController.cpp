@@ -13,6 +13,7 @@
 #include "ItemDataAsset.h"
 #include "ItemDataSubsystem.h"
 #include "Sales/BotanicusSalesDisplayActor.h"
+#include "Sales/BotanicusSalesShelfActor.h"
 #include "Sales/BotanicusSalePotActor.h"
 #include "Sales/BotanicusCashRegisterActor.h"
 #include "Sales/BotanicusSelfCheckoutActor.h"
@@ -1494,7 +1495,7 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		if (Params.Key == EKeys::LeftMouseButton &&
 			Params.Event == IE_Pressed)
 		{
-			TryPlaceHeldSalePotOnWorkbench();
+			if(!TryPlacePlantOnNearbySalesDisplay(true))TryPlaceHeldSalePotOnWorkbench();
 			return true;
 		}
 		if ((Params.Key == EKeys::RightMouseButton ||
@@ -1521,11 +1522,11 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 	if (Params.Key == EKeys::LeftMouseButton)
 	{
 		if (Params.Event == IE_Pressed &&
-			(TryStoreSelectedQuickBarItemOnAimedShelf() ||
+			(TryPlacePlantOnNearbySalesDisplay(true) ||
+             TryStoreSelectedQuickBarItemOnAimedShelf() ||
 			 TryBreakNearbyBrokenFlowerPot() ||
 			 TryUseGardenTrowelForTransplant() ||
 			 TryPlaceSelectedSalePotOnWorkbench() ||
-			 TryPlacePlantOnNearbySalesDisplay() ||
 			 TryCheckoutNearbyRegister() ||
 			 TryBeginNearbyParcelCut() ||
 			 TryBeginNearbyPlantPotAction() ||
@@ -1656,6 +1657,7 @@ bool ABotanicusPlayerController::IsFurnitureActor(
 		ItemKey == TEXT("WaterReserve") ||
 		ItemKey.ToString().StartsWith(TEXT("WorkSurface")) ||
 		ItemKey.ToString().StartsWith(TEXT("StorageShelf")) ||
+        ABotanicusSalesShelfActor::CapacityForKey(ItemKey)>0 ||
 		ItemKey.ToString().StartsWith(TEXT("Climate"));
 }
 
@@ -1814,7 +1816,7 @@ void ABotanicusPlayerController::SetInteractionTargetHighlighted(
 	TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents(Actor);
 	for (UPrimitiveComponent* Primitive : PrimitiveComponents)
 	{
-		if (!Primitive)
+		if (!Primitive || Primitive->ComponentHasTag(TEXT("BotanicusSalesDepositIndicator")))
 		{
 			continue;
 		}
@@ -2082,6 +2084,7 @@ void ABotanicusPlayerController::RefreshInteractionTargetName(
 	{
 		return;
 	}
+    if(TryRefreshSalesDepositContext()) return;
     if(TryRefreshRefillStationContext()) return;
     if(TryRefreshCheckoutContext()) return;
 
@@ -6485,6 +6488,9 @@ bool ABotanicusPlayerController::ResolveQuickBarItemPlacement(
 	APawn* ControlledPawn = GetPawn();
 	const FBotanicusItemDefinition* Definition =
 		FindItemDefinition(this, ItemKey);
+    if(ABotanicusSalesShelfActor::CapacityForKey(ItemKey))
+        return ABotanicusSalesShelfActor::ResolveWallPlacement(const_cast<ABotanicusPlayerController*>(this),ItemKey,OutTransform,IsValid(IgnoredWorldItem) ? IgnoredWorldItem:LocalQuickBarItemPreview.Get());
+
 	FVector BoxExtent(20.0f);
 	float PlacementBottomOffset = BoxExtent.Z;
 	if (IsValid(LocalQuickBarItemPreview))
@@ -6795,7 +6801,7 @@ bool ABotanicusPlayerController::ResolveQuickBarItemPlacement(
 			 DisplayIt;
 			 ++DisplayIt)
 		{
-			if (!DisplayIt->IsEmpty())
+			if (DisplayIt->IsShelfSlot() || !DisplayIt->IsEmpty())
 			{
 				continue;
 			}
@@ -8674,64 +8680,16 @@ bool ABotanicusPlayerController::
 	return true;
 }
 
-bool ABotanicusPlayerController::
-	TryPlacePlantOnNearbySalesDisplay()
+bool ABotanicusPlayerController::TryPlacePlantOnNearbySalesDisplay(bool bConsumeOccupied)
 {
-	ABotanicusCharacter* BotanicusCharacter =
-		Cast<ABotanicusCharacter>(GetPawn());
-	UBotanicusQuickBarComponent* QuickBar =
-		BotanicusCharacter
-			? BotanicusCharacter->GetQuickBarComponent()
-			: nullptr;
-	if (!IsLocalPlayerController() || !BotanicusCharacter || !QuickBar ||
-		!GetWorld() ||
-		IsValid(LocalQuickBarItemPreview) ||
-		IsValid(LocalLargeEquipmentPlacement))
-	{
-		return false;
-	}
-
-	const FBotanicusQuickBarSlot SelectedSlot =
-		QuickBar->GetSelectedSlot();
-	if (SelectedSlot.IsEmpty() ||
-		!IsSalePotItemKey(SelectedSlot.ItemKey) ||
-		!SelectedSlot.CarriedState.bHasSalePotState ||
-		SelectedSlot.CarriedState.SaleSoilItemKey.IsNone() ||
-		SelectedSlot.CarriedState.SalePlantItemKey.IsNone())
-	{
-		return false;
-	}
-
-	FVector ViewLocation;
-	FRotator ViewRotation;
-	GetPlayerViewPoint(ViewLocation, ViewRotation);
-	FCollisionQueryParams Query(
-		SCENE_QUERY_STAT(BotanicusSalesDisplayPlacementAim),
-		false);
-	Query.AddIgnoredActor(BotanicusCharacter);
-	FHitResult Hit;
-	if (!GetWorld()->LineTraceSingleByChannel(
-			Hit,
-			ViewLocation,
-			ViewLocation + ViewRotation.Vector() * 450.0f,
-			ECC_Visibility,
-			Query))
-	{
-		return false;
-	}
-
-	ABotanicusSalesDisplayActor* TargetDisplay =
-		Cast<ABotanicusSalesDisplayActor>(Hit.GetActor());
-	if (!IsValid(TargetDisplay) || !TargetDisplay->IsEmpty() ||
-		FVector::DistSquared(
-			BotanicusCharacter->GetActorLocation(),
-			TargetDisplay->GetActorLocation()) > FMath::Square(450.0f))
-	{
-		return false;
-	}
-
-	ServerPlacePlantOnSalesDisplay(TargetDisplay);
-	return true;
+    if(!IsLocalController() || !HasSalePotForDeposit())return false;
+    ABotanicusSalesDisplayActor* Display=nullptr;if(!FindAimedSalesDisplay(Display))return false;
+    // An occupied commercial target consumes no item and must not fall through to a nearby workbench.
+    if(!Display->IsEmpty())return bConsumeOccupied;
+    auto* Pot=Cast<ABotanicusSalePotActor>(LocalMovedPlaceableItem.Get());
+    const auto* PlayerCharacter=Cast<ABotanicusCharacter>(GetPawn());
+    const auto Slot=PlayerCharacter->GetQuickBarComponent()->GetSelectedSlot();
+    ServerPlacePlantOnSalesDisplay(Display,Pot ? FGuid():Slot.InstanceId,Pot);return true;
 }
 
 bool ABotanicusPlayerController::TryCheckoutNearbyRegister()
@@ -10368,7 +10326,7 @@ void ABotanicusPlayerController::
 					GetLocation();
 			const FVector PotLocation =
 				PlacementTransform.GetLocation();
-			if (DisplayIt->IsEmpty() &&
+			if (!DisplayIt->IsShelfSlot() && DisplayIt->IsEmpty() &&
 				FVector::DistSquared2D(
 					PotLocation,
 					DisplayLocation) <=
@@ -10408,6 +10366,8 @@ void ABotanicusPlayerController::
 		FVector_NetQuantizeNormal ThrowDirection,
 		float HoldDuration)
 {
+    if(ABotanicusSalesShelfActor::CapacityForKey(ItemKey))return;
+
 	ABotanicusCharacter* BotanicusCharacter =
 		Cast<ABotanicusCharacter>(GetPawn());
 	UBotanicusQuickBarComponent* QuickBar =
@@ -10528,6 +10488,9 @@ void ABotanicusPlayerController::
 	ServerBeginPlaceableItemMove_Implementation(
 		ABotanicusPlaceableItemActor* WorldItem)
 {
+    if(auto* Slot=Cast<ABotanicusSalesDisplayActor>(WorldItem);Slot && Slot->IsShelfSlot()){ClientEndPlaceableItemHold();return;}
+    if(auto* Shelf=Cast<ABotanicusSalesShelfActor>(WorldItem);Shelf && Shelf->HasContents()){ClientMessage(TEXT("Reprenez les pots avant de déplacer cette étagère."));ClientEndPlaceableItemHold();return;}
+
 	if (WorldItem &&
 		(WorldItem->GetItemKey() == TEXT("CashRegister") ||
 		 WorldItem->IsA<ABotanicusCashRegisterActor>()))
@@ -10621,6 +10584,9 @@ void ABotanicusPlayerController::
 		ABotanicusPlaceableItemActor* WorldItem,
 		int32 Quantity)
 {
+    if(auto* Shelf=Cast<ABotanicusSalesShelfActor>(WorldItem);Shelf && Shelf->HasContents())return;
+    if(auto* Slot=Cast<ABotanicusSalesDisplayActor>(WorldItem);Slot && Slot->IsShelfSlot())return;
+
 	ClientEndPlaceableItemHold();
 	ABotanicusCharacter* BotanicusCharacter =
 		Cast<ABotanicusCharacter>(GetPawn());
@@ -10810,7 +10776,7 @@ void ABotanicusPlayerController::
 					GetLocation();
 			const FVector PotLocation =
 				PlacementTransform.GetLocation();
-			if (DisplayIt->IsEmpty() &&
+			if (!DisplayIt->IsShelfSlot() && DisplayIt->IsEmpty() &&
 				FVector::DistSquared2D(
 					PotLocation,
 					DisplayLocation) <=
@@ -11505,56 +11471,27 @@ void ABotanicusPlayerController::
 	}
 }
 
-void ABotanicusPlayerController::
-	ServerPlacePlantOnSalesDisplay_Implementation(
-		ABotanicusSalesDisplayActor* SalesDisplay)
+void ABotanicusPlayerController::ServerPlacePlantOnSalesDisplay_Implementation(ABotanicusSalesDisplayActor* Display,FGuid ExpectedInstanceId,ABotanicusSalePotActor* HeldPot)
 {
-	ABotanicusCharacter* BotanicusCharacter =
-		Cast<ABotanicusCharacter>(GetPawn());
-	UBotanicusQuickBarComponent* QuickBar =
-		BotanicusCharacter
-			? BotanicusCharacter->GetQuickBarComponent()
-			: nullptr;
-	if (!IsValid(SalesDisplay) || !BotanicusCharacter || !QuickBar ||
-		!SalesDisplay->IsEmpty() ||
-		!IsLookingAtWorldItem(SalesDisplay, 450.0f))
-	{
-		ClientMessage(
-			TEXT(
-				"Regardez le presentoir et rapprochez-vous pour exposer la plante."));
-		return;
-	}
-
-	const int32 SelectedSlotIndex = QuickBar->GetSelectedSlotIndex();
-	const FBotanicusQuickBarSlot SelectedSlot =
-		QuickBar->GetSlot(SelectedSlotIndex);
-	if (SelectedSlot.IsEmpty() ||
-		!IsSalePotItemKey(SelectedSlot.ItemKey) ||
-		!SelectedSlot.CarriedState.bHasSalePotState ||
-		SelectedSlot.CarriedState.SaleSoilItemKey.IsNone() ||
-		SelectedSlot.CarriedState.SalePlantItemKey.IsNone())
-	{
-		ClientMessage(
-			TEXT(
-				"Selectionnez un pot de vente prepare avec du terreau et une plante."));
-		return;
-	}
-
-	if (!SalesDisplay->TryMountSalePotState(
-			SelectedSlot.CarriedState.SaleSoilItemKey,
-			SelectedSlot.CarriedState.SalePlantItemKey,
-			this,
-			SelectedSlot.ItemKey))
-	{
-		ClientMessage(TEXT("Ce presentoir ne peut pas recevoir ce pot."));
-		return;
-	}
-	QuickBar->RemoveQuantity(SelectedSlotIndex, 1);
-	if (ABotanicusGameMode* GameMode =
-			GetWorld()->GetAuthGameMode<ABotanicusGameMode>())
-	{
-		GameMode->ScheduleInventoryAutosave();
-	}
+    auto* PlayerCharacter=Cast<ABotanicusCharacter>(GetPawn());auto* Bar=PlayerCharacter ? PlayerCharacter->GetQuickBarComponent():nullptr;
+    ABotanicusSalesDisplayActor* Aimed=nullptr;
+    if(!Bar || !IsValid(Display) || !Display->IsEmpty() || !FindAimedSalesDisplay(Aimed) || Aimed!=Display)return;
+    if(HeldPot)
+    {
+        if(!IsValid(HeldPot) || ServerMovedPlaceableItem!=HeldPot || !HeldPot->IsReadyForSale())return;
+        if(!Display->TryMountSalePot(HeldPot,this,true))return;
+        ServerMovedPlaceableItem=nullptr;
+    }
+    else
+    {
+        if(IsValid(ServerMovedPlaceableItem))return;
+        const int32 Index=Bar->GetSelectedSlotIndex();const auto Slot=Bar->GetSlot(Index);
+        if(Slot.IsEmpty() || Slot.InstanceId!=ExpectedInstanceId || !IsSalePotItemKey(Slot.ItemKey) || !Slot.CarriedState.bHasSalePotState || Slot.CarriedState.SalePlantItemKey.IsNone() || Slot.CarriedState.SaleSoilItemKey.IsNone())return;
+        if(!Display->TryMountSalePotState(Slot.CarriedState.SaleSoilItemKey,Slot.CarriedState.SalePlantItemKey,this,Slot.ItemKey,Slot.InstanceId,true))return;
+        if(!Bar->RemoveQuantity(Index,1)){Display->RestoreDisplayedPlant(NAME_None);return;}
+    }
+    UBotanicusJuiceWorldSubsystem::PlacementSucceeded(Display,GetPawn(),true);
+    if(auto* GM=GetWorld()->GetAuthGameMode<ABotanicusGameMode>())GM->ScheduleInventoryAutosave();
 }
 
 void ABotanicusPlayerController::

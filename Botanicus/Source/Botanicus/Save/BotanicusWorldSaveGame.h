@@ -7,6 +7,7 @@
 #include "Growing/BotanicusPlantCatalog.h"
 #include "QuickBar/BotanicusQuickBarComponent.h"
 #include "Sales/Checkout/BotanicusCheckoutTypes.h"
+#include "Sales/BotanicusSalesShelfTypes.h"
 #include "BotanicusWorldSaveGame.generated.h"
 
 USTRUCT()
@@ -169,6 +170,8 @@ USTRUCT()
 struct BOTANICUS_API FBotanicusSavedWorldItem
 {
 	GENERATED_BODY()
+    UPROPERTY() TArray<FBotanicusSavedSalesShelfSlot> SalesShelfSlots;
+    UPROPERTY() FGuid DisplayedPotInstanceId;
 
 	UPROPERTY()
 	FSoftClassPath ActorClass;
@@ -297,7 +300,7 @@ class BOTANICUS_API UBotanicusWorldSaveGame : public USaveGame
 
 public:
 	UPROPERTY()
-	int32 SaveVersion = 33;
+	int32 SaveVersion = 34;
 
 	UPROPERTY()
 	FString MapName;

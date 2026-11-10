@@ -12,6 +12,7 @@
 #include "Preparation/BotanicusWorkSurfaceActor.h"
 #include "Preparation/BotanicusComputerActor.h"
 #include "Sales/BotanicusSalesDisplayActor.h"
+#include "Sales/BotanicusSalesShelfActor.h"
 #include "Sales/BotanicusSalePotActor.h"
 #include "Sales/BotanicusCashRegisterActor.h"
 #include "Sales/BotanicusSelfCheckoutActor.h"
@@ -757,6 +758,16 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	SalesDisplay.DeliveryQuantity = 1;
 	SalesDisplay.DeliveryDelaySeconds = 3.0f;
 
+    const FBotanicusItemDefinition BaseShelf=SalesDisplay;
+    for(int32 Count=1;Count<=6;++Count)
+    {
+        auto Shelf=BaseShelf;Shelf.ItemKey=FName(*FString::Printf(TEXT("SalesShelfS%d"),Count));
+        Shelf.DisplayName=FText::FromString(FString::Printf(TEXT("Étagère murale S%d"),Count));
+        Shelf.WorldActorClass=ABotanicusSalesShelfActor::StaticClass();Shelf.WorldScale=FVector(.44f,ABotanicusSalesShelfActor::LengthForCapacity(Count)/100.f,.04f);
+        Shelf.MaximumStack=1;Shelf.Price=BaseShelf.Price*Count;Shelf.AllowedPlacementSurfaces=static_cast<int32>(EBotanicusPlacementSurface::Wall);
+        NativeFallbackItems.Add(MoveTemp(Shelf));
+    }
+
 	FBotanicusItemDefinition& SalePot =
 		NativeFallbackItems.AddDefaulted_GetRef();
 	SalePot.ItemKey = TEXT("SalePot");
@@ -1119,7 +1130,7 @@ UBotanicusItemCatalogSubsystem::FindItem(FName ItemKey) const
 	// Shelf definitions are designer-authored. Their actor class can be a
 	// Blueprint child with a custom mesh and any number of StorageSlot
 	// components, so the Data Asset must win over the native fallback.
-	if (ItemKey.ToString().StartsWith(TEXT("StorageShelf")) && LoadedCatalog)
+	if ((ItemKey.ToString().StartsWith(TEXT("StorageShelf")) || ABotanicusSalesShelfActor::CapacityForKey(ItemKey)) && LoadedCatalog)
 	{
 		if (const FBotanicusItemDefinition* Definition =
 				LoadedCatalog->FindItem(ItemKey))

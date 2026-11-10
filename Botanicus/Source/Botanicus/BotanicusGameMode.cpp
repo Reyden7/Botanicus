@@ -21,6 +21,7 @@
 #include "IllegalTrade/BotanicusIllegalPlanterActor.h"
 #include "IllegalTrade/BotanicusIllegalTradeManager.h"
 #include "Sales/BotanicusSalesDisplayActor.h"
+#include "Sales/BotanicusSalesShelfActor.h"
 #include "Sales/BotanicusSalePotActor.h"
 #include "Sales/BotanicusCashRegisterActor.h"
 #include "Storage/BotanicusStorageShelfActor.h"
@@ -524,7 +525,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 
 	CurrentSaveGame->MapName =
 		UGameplayStatics::GetCurrentLevelName(this, true);
-	CurrentSaveGame->SaveVersion = 33;
+	CurrentSaveGame->SaveVersion = 34;
 	if (const ABotanicusGameState* BotanicusGameState =
 		World->GetGameState<ABotanicusGameState>())
 	{
@@ -681,6 +682,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		if (!IsValid(*ItemIt) ||
 			ItemIt->IsActorBeingDestroyed() ||
 			ItemIt->IsA<ABotanicusCashRegisterActor>() ||
+            (Cast<ABotanicusSalesDisplayActor>(*ItemIt) && Cast<ABotanicusSalesDisplayActor>(*ItemIt)->IsShelfSlot()) ||
 			ItemIt->ActorHasTag(TEXT("BotanicusPlacementPreview")))
 		{
 			continue;
@@ -748,7 +750,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		else if (const ABotanicusSalesDisplayActor* SalesDisplay =
 			Cast<ABotanicusSalesDisplayActor>(*ItemIt))
 		{
-            SavedItem.SaleLotId=SalesDisplay->GetSaleLotId();
+            SavedItem.SaleLotId=SalesDisplay->GetSaleLotId();SavedItem.DisplayedPotInstanceId=SalesDisplay->GetDisplayedPotInstanceId();
 			SavedItem.DisplayedPlantItemKey =
 				SalesDisplay->GetDisplayedPlantItemKey();
 			SavedItem.DisplayedSoilItemKey =
@@ -756,6 +758,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 			SavedItem.DisplayedPotItemKey =
 				SalesDisplay->GetDisplayedPotItemKey();
 		}
+        else if(const auto* Shelf=Cast<ABotanicusSalesShelfActor>(*ItemIt))SavedItem.SalesShelfSlots=Shelf->CaptureSlots();
 		else if (const ABotanicusWateringCanActor* WateringCan =
 			Cast<ABotanicusWateringCanActor>(*ItemIt))
 		{
@@ -1353,8 +1356,9 @@ void ABotanicusGameMode::RestoreWorldState()
 					CurrentSaveGame->SaveVersion >= 26
 						? SavedItem.DisplayedPotItemKey
 						: FName(TEXT("SalePot")));
-                SalesDisplay->RestoreSaleLotId(SavedItem.SaleLotId);
+                SalesDisplay->RestoreSaleLotId(SavedItem.SaleLotId);SalesDisplay->RestoreDisplayedPotInstanceId(SavedItem.DisplayedPotInstanceId);
 			}
+            else if(auto* Shelf=Cast<ABotanicusSalesShelfActor>(PlacedItem))Shelf->RestoreSlots(SavedItem.SalesShelfSlots);
 			else if (ABotanicusWateringCanActor* WateringCan =
 				Cast<ABotanicusWateringCanActor>(PlacedItem))
 			{
