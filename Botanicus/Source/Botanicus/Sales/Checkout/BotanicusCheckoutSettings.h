@@ -13,6 +13,10 @@ class BOTANICUS_API UBotanicusCheckoutSettings : public UDeveloperSettings
     GENERATED_BODY()
 public:
     UBotanicusCheckoutSettings();
+    UPROPERTY(EditAnywhere,Config,Category="Scanner|Dock Slot") bool bShowScannerDockSlot=true;
+    UPROPERTY(EditAnywhere,Config,Category="Scanner|Dock Slot",meta=(Units="cm")) FVector ScannerDockSlotOffset=FVector(2,0,.5f);
+    UPROPERTY(EditAnywhere,Config,Category="Scanner|Dock Slot",meta=(ClampMin="6",ClampMax="30",Units="cm")) FVector2D ScannerDockSlotSize=FVector2D(14,11);
+    UPROPERTY(EditAnywhere,Config,Category="Scanner|Dock Slot") FLinearColor ScannerDockSlotColor=FLinearColor(FColor(62,230,110));
     UPROPERTY(EditAnywhere,Config,Category="Scan|Audio") TSoftObjectPtr<USoundBase> ScanSound=TSoftObjectPtr<USoundBase>(FSoftObjectPath(TEXT("/Game/Botanicus/Audio/Sounds/S_ScanLoad.S_ScanLoad")));
     UPROPERTY(EditAnywhere,Config,Category="Scan|Audio",meta=(ClampMin="0",ClampMax="1")) float ScanSoundVolume=.35f;
     UPROPERTY(EditAnywhere,Config,Category="Scan|Audio",meta=(ClampMin="0.01",ClampMax="0.15",Units="s")) float ScanSoundFadeOut=.1f;

@@ -6,6 +6,7 @@
 #include "BotanicusCharacter.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/InstancedStaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -18,12 +19,16 @@ ABotanicusCheckoutScanner::ABotanicusCheckoutScanner()
     HitBox->SetCollisionEnabled(ECollisionEnabled::QueryOnly);HitBox->SetCollisionResponseToAllChannels(ECR_Ignore);HitBox->SetCollisionResponseToChannel(ECC_Visibility,ECR_Block);HitBox->SetGenerateOverlapEvents(false);HitBox->SetCanEverAffectNavigation(false);
     Handle=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Scanner Handle"));Handle->SetupAttachment(HitBox);Handle->SetRelativeLocation(FVector(0,0,4));Handle->SetRelativeScale3D(FVector(.035f,.035f,.13f));Handle->SetRelativeRotation(FRotator(0,0,-18));Handle->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     Head=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Scanner Head"));Head->SetupAttachment(HitBox);Head->SetRelativeLocation(FVector(2,0,11));Head->SetRelativeScale3D(FVector(.11f,.065f,.055f));Head->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    DockSlot=CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("Scanner Dock Slot"));DockSlot->SetupAttachment(HitBox);
+    DockSlot->SetCollisionEnabled(ECollisionEnabled::NoCollision);DockSlot->SetGenerateOverlapEvents(false);DockSlot->SetCanEverAffectNavigation(false);DockSlot->SetCastShadow(false);
+    DockSlot->SetVisibility(false);DockSlot->SetHiddenInGame(true);DockSlot->SetComponentTickEnabled(false);
     ScannerMuzzle=CreateDefaultSubobject<USceneComponent>(TEXT("ScannerMuzzle"));ScannerMuzzle->SetupAttachment(HitBox);ScannerMuzzle->SetRelativeLocation(FVector(8,0,11));ScannerMuzzle->bEditableWhenInherited=true;
 }
 void ABotanicusCheckoutScanner::BeginPlay()
 {
     Super::BeginPlay();
     ConfigureModel();
+    ConfigureDockSlot();
     OnRep_Carry();
 }
 void ABotanicusCheckoutScanner::ConfigureModel()
@@ -42,6 +47,36 @@ void ABotanicusCheckoutScanner::ConfigureModel()
     }
     if(GetNetMode()==NM_DedicatedServer)return;
     Handle->SetStaticMesh(Asset);Handle->EmptyOverrideMaterials();Head->SetStaticMesh(nullptr);Head->SetVisibility(false);
+}
+void ABotanicusCheckoutScanner::ConfigureDockSlot()
+{
+    if(GetNetMode()==NM_DedicatedServer)return;
+    const auto* S=GetDefault<UBotanicusCheckoutSettings>();
+    auto* Material=S->ScanHologramMaterial.LoadSynchronous();if(!Material)return;
+    DockSlot->SetStaticMesh(LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Cube.Cube")));
+    auto* Tint=UMaterialInstanceDynamic::Create(Material,this);Tint->SetVectorParameterValue(TEXT("BodyTint"),S->ScannerDockSlotColor);
+    Tint->SetVectorParameterValue(TEXT("RimTint"),S->ScannerDockSlotColor);Tint->SetScalarParameterValue(TEXT("Opacity"),.55f);
+    Tint->SetScalarParameterValue(TEXT("Emission"),.7f);Tint->SetScalarParameterValue(TEXT("FresnelIntensity"),.65f);DockSlot->SetMaterial(0,Tint);
+    const FVector2D Size(FMath::Clamp(S->ScannerDockSlotSize.X,6.f,30.f),FMath::Clamp(S->ScannerDockSlotSize.Y,6.f,30.f));
+    constexpr float Width=.6f,Height=.3f;
+    for(float Sign:{-1.f,1.f})
+    {
+        DockSlot->AddInstance(FTransform(FQuat::Identity,FVector(0,Sign*(Size.Y-Width)*.5f,0),FVector(Size.X,Width,Height)/100.f));
+        DockSlot->AddInstance(FTransform(FQuat::Identity,FVector(Sign*(Size.X-Width)*.5f,0,0),FVector(Width,Size.Y-2*Width,Height)/100.f));
+    }
+}
+void ABotanicusCheckoutScanner::RefreshDockSlot()
+{
+    if(GetNetMode()==NM_DedicatedServer)return;
+    const bool bValidDock=IsValid(Register) && IsValid(Register->ScannerDock);
+    if(bValidDock && DockSlot->GetAttachParent()!=Register->ScannerDock)
+    {
+        DockSlot->AttachToComponent(Register->ScannerDock,FAttachmentTransformRules::KeepRelativeTransform);
+        DockSlot->SetRelativeTransform(FTransform(GetDefault<UBotanicusCheckoutSettings>()->ScannerDockSlotOffset));
+    }
+    const bool bShow=bValidDock && IsValid(Carrier) && !Register->IsHidden() && !IsHidden() &&
+        GetDefault<UBotanicusCheckoutSettings>()->bShowScannerDockSlot && DockSlot->GetStaticMesh() && DockSlot->GetNumInstances()==4;
+    if(DockSlot->IsVisible()!=bShow){DockSlot->SetVisibility(bShow);DockSlot->SetHiddenInGame(!bShow);}
 }
 void ABotanicusCheckoutScanner::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
@@ -72,6 +107,7 @@ void ABotanicusCheckoutScanner::OnRep_Carry()
     if(GetWorld()) for(FConstPlayerControllerIterator It=GetWorld()->GetPlayerControllerIterator();It;++It) if(auto* PC=Cast<ABotanicusPlayerController>(It->Get());PC && PC->IsLocalController())
     {if(Carrier==PC->GetPawn()) PC->SetCheckoutScannerReference(this);else if(PC->GetCheckoutScanner()==this) PC->SetCheckoutScannerReference(nullptr);}
     UpdatePose();
+    RefreshDockSlot();
 }
 void ABotanicusCheckoutScanner::UpdatePose()
 {
@@ -97,11 +133,12 @@ void ABotanicusCheckoutScanner::Tick(float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
     if(HasAuthority() && (!IsValid(Carrier) || !IsValid(Carrier->GetController()))) {ReturnToDock();return;}
-    if(GetNetMode()!=NM_DedicatedServer) UpdatePose();
+    if(GetNetMode()!=NM_DedicatedServer){UpdatePose();RefreshDockSlot();}
 }
 FVector ABotanicusCheckoutScanner::GetMuzzleLocation() {UpdatePose();return ScannerMuzzle->GetComponentLocation();}
 void ABotanicusCheckoutScanner::EndPlay(const EEndPlayReason::Type Reason)
 {
     if(auto* PC=Carrier ? Cast<ABotanicusPlayerController>(Carrier->GetController()) : nullptr) if(PC->GetCheckoutScanner()==this) PC->SetCheckoutScannerReference(nullptr);
+    if(DockSlot)DockSlot->DestroyComponent();
     Super::EndPlay(Reason);
 }

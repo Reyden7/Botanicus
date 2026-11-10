@@ -7,6 +7,7 @@ class ABotanicusPlayerController;
 class UBoxComponent;
 class ABotanicusVisitorCharacter;
 class UStaticMeshComponent;
+class UInstancedStaticMeshComponent;
 USTRUCT()
 struct FBotanicusCheckoutScan
 {
@@ -45,6 +46,9 @@ private:
     UFUNCTION() void OnRep_Carry();
     void UpdatePose();
     void ConfigureModel();
+    void ConfigureDockSlot();
+    void RefreshDockSlot();
+    UPROPERTY(VisibleAnywhere,Category="Scanner") TObjectPtr<UInstancedStaticMeshComponent> DockSlot;
     UPROPERTY(VisibleAnywhere) TObjectPtr<UBoxComponent> HitBox;
     UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> Handle;
     UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> Head;
