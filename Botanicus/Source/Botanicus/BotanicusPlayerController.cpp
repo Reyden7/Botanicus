@@ -8959,9 +8959,13 @@ void ABotanicusPlayerController::ServerOrderTestDelivery_Implementation()
 		Definition
 			? FMath::Max(1, Definition->DeliveryQuantity)
 			: 10);
-	Parcel->SetActorLocation(
-		Parcel->GetActorLocation() +
-		FVector(0.0f, 0.0f, Parcel->GetParcelHalfExtent().Z));
+	bool bGroundFallback = false;
+	if (!DeliveryZone->StartParcelDelivery(Parcel, ParcelIndex, bGroundFallback))
+	{
+		Parcel->Destroy();
+		ClientMessage(TEXT("Zone de livraison pleine ou obstruee."));
+		return;
+	}
 	ClientMessage(
 		TEXT(
 			"Commande livrée : récupérez le colis avec E."));
@@ -9489,9 +9493,16 @@ bool ABotanicusPlayerController::DeliverCatalogItem(
 		return false;
 	}
 	Parcel->InitializeParcel(ItemKey, FMath::Max(1, Quantity));
-	Parcel->SetActorLocation(
-		DeliverySpawnLocation +
-		FVector(0.0f, 0.0f, Parcel->GetParcelHalfExtent().Z));
+	bool bGroundFallback = false;
+	if (!DeliveryZone->StartParcelDelivery(Parcel, DeliveryIndex, bGroundFallback))
+	{
+		Parcel->Destroy();
+		return false;
+	}
+	if (bGroundFallback)
+	{
+		ClientMessage(TEXT("Chute obstruee : colis depose au sol dans la zone de livraison."));
+	}
 	return true;
 }
 
@@ -10924,6 +10935,7 @@ void ABotanicusPlayerController::
 		return;
 	}
 
+	Parcel->StopDeliveryPhysics();
 	Parcel->SetActorTransform(
 		PlacementTransform,
 		false,

@@ -2,6 +2,8 @@
 
 #include "Delivery/BotanicusDeliveryZoneActor.h"
 
+#include "Delivery/BotanicusDeliveryParcelActor.h"
+#include "EngineUtils.h"
 #include "Components/SceneComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -121,6 +123,82 @@ FVector ABotanicusDeliveryZoneActor::GetParcelSpawnLocation(
         if(Up.Z>.7f)Spawn.Z=Top.Z-(Up.X*(Spawn.X-Top.X)+Up.Y*(Spawn.Y-Top.Y))/Up.Z;
     }
     return Spawn;
+}
+
+bool ABotanicusDeliveryZoneActor::StartParcelDelivery(
+	ABotanicusDeliveryParcelActor* Parcel, int32 ParcelIndex, bool& bOutGroundFallback) const
+{
+	bOutGroundFallback = false;
+	if (!HasAuthority() || !IsValid(Parcel) || !GetWorld()) return false;
+	const FVector Extent = Parcel->GetParcelHalfExtent() * Parcel->GetActorScale3D().GetAbs();
+	const float Radius = Extent.Size(); // Includes every orientation during the fall.
+	const float Margin = Radius + 25.0f;
+	const bool bDeck = bUseWalkablePlatformCollision && WalkableDeck;
+	const FVector Up = bDeck ? WalkableDeck->GetUpVector() : GetActorUpVector();
+	if (Up.Z < 0.95f) return false;
+	const FVector Center = bDeck
+		? WalkableDeck->GetComponentLocation() + Up * WalkableDeck->GetScaledBoxExtent().Z
+		: GetActorLocation();
+	const FQuat Facing = FRotator(0, bDeck ? WalkableDeck->GetComponentRotation().Yaw : GetActorRotation().Yaw, 0).Quaternion();
+	const FVector Across = Facing.GetAxisX(), Along = Facing.GetAxisY();
+	const FVector Half = bDeck ? WalkableDeck->GetScaledBoxExtent()
+		: FVector(ZoneSize.X, ZoneSize.Y, 0) * GetActorScale3D().GetAbs() * 0.5f;
+	if (Half.X <= Margin || Half.Y <= Margin) return false;
+	const float Step = FMath::Max(160.0f, Radius * 2.0f + 30.0f);
+	const int32 Columns = FMath::Max(1, FMath::FloorToInt((Half.X - Margin) * 2 / Step) + 1);
+	const int32 Rows = FMath::Max(1, FMath::FloorToInt((Half.Y - Margin) * 2 / Step) + 1);
+	TArray<FVector2D> Slots;
+	for (int32 X = 0; X < Columns; ++X)
+		for (int32 Y = 0; Y < Rows; ++Y)
+			Slots.Emplace((X - (Columns - 1) * 0.5f) * Step, (Y - (Rows - 1) * 0.5f) * Step);
+	Slots.Sort([](const FVector2D& A, const FVector2D& B) { return A.SizeSquared() < B.SizeSquared(); });
+	FCollisionQueryParams Query(SCENE_QUERY_STAT(BotanicusDeliveryDrop), false, Parcel);
+	FVector Fallback = FVector::ZeroVector;
+	bool bHasFallback = false;
+	for (int32 Index = 0; Index < Slots.Num(); ++Index)
+	{
+		const FVector2D Slot = Slots[(Index + FMath::Abs(ParcelIndex)) % Slots.Num()];
+		FVector Ground = Center + Across * Slot.X + Along * Slot.Y;
+		Ground.Z = Center.Z - (Up.X * (Ground.X - Center.X) + Up.Y * (Ground.Y - Center.Y)) / Up.Z;
+		FHitResult Floor;
+		if (!GetWorld()->LineTraceSingleByChannel(Floor, Ground + FVector(0, 0, 10),
+			Ground - FVector(0, 0, 100), ECC_PhysicsBody, Query) || Floor.ImpactNormal.Z < 0.95f ||
+			(bDeck && Floor.GetComponent() != WalkableDeck)) continue;
+		Ground.Z = Floor.ImpactPoint.Z;
+		bool bReserved = false;
+		// Reserve incoming actors immediately, before Chaos has advanced a frame.
+		for (TActorIterator<ABotanicusDeliveryParcelActor> It(GetWorld()); It; ++It)
+		{
+			if (*It == Parcel || It->ActorHasTag(TEXT("BotanicusPlacementPreview"))) continue;
+			const float OtherRadius = (It->GetParcelHalfExtent() * It->GetActorScale3D().GetAbs()).Size();
+			if (FVector::DistSquared2D(Ground, It->GetActorLocation()) <
+				FMath::Square(Radius + OtherRadius + 30.0f)) { bReserved = true; break; }
+		}
+		const FVector Rest = Ground + FVector(0, 0, Extent.Z + 2.0f);
+		if (bReserved || GetWorld()->OverlapBlockingTestByChannel(Rest, Facing, ECC_PhysicsBody,
+			FCollisionShape::MakeBox(Extent), Query)) continue;
+		const FVector Spawn = Ground + FVector(0, 0, FMath::Max(DeliverySpawnHeight, Radius + 3.0f));
+		FHitResult Obstacle;
+		if (!GetWorld()->SweepSingleByChannel(Obstacle, Spawn, Ground + FVector(0, 0, Radius + 2.0f),
+			FQuat::Identity, ECC_PhysicsBody, FCollisionShape::MakeSphere(Radius), Query))
+		{
+			Parcel->SetActorLocationAndRotation(Spawn, Facing, false, nullptr, ETeleportType::TeleportPhysics);
+			Parcel->StartDeliveryPhysics();
+			return true;
+		}
+		if (!bHasFallback) { Fallback = Rest; bHasFallback = true; }
+	}
+	if (bHasFallback)
+	{
+		// An overhead obstruction must never strand a paid delivery on a roof.
+		Parcel->SetActorLocationAndRotation(Fallback, Facing, false, nullptr, ETeleportType::TeleportPhysics);
+		Parcel->StartDeliveryPhysics(false);
+		bOutGroundFallback = true;
+		UE_LOG(LogTemp, Warning, TEXT("Delivery %s: no clear vertical corridor; safe ground placement used."), *Parcel->GetName());
+		return true;
+	}
+	UE_LOG(LogTemp, Warning, TEXT("Delivery zone %s has no safe space for carton %s."), *GetName(), *Parcel->GetName());
+	return false; // Existing caller retains its delivery-failure/refund behaviour.
 }
 
 void ABotanicusDeliveryZoneActor::SnapToUnderlyingGround()

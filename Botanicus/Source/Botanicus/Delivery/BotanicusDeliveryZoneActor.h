@@ -6,6 +6,7 @@
 #include "GameFramework/Actor.h"
 #include "BotanicusDeliveryZoneActor.generated.h"
 
+class ABotanicusDeliveryParcelActor;
 class USceneComponent;
 class UBoxComponent;
 class UStaticMeshComponent;
@@ -23,8 +24,15 @@ public:
 	virtual void OnConstruction(const FTransform& Transform) override;
 
 	FVector GetParcelSpawnLocation(int32 ParcelIndex = 0) const;
+	/** Select an unobstructed drop inside the receiving deck; no post-impact teleport. */
+	bool StartParcelDelivery(ABotanicusDeliveryParcelActor* Parcel, int32 ParcelIndex,
+		bool& bOutGroundFallback) const;
 
 private:
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Botanicus|Delivery",
+		meta=(AllowPrivateAccess="true", ClampMin="0.0", Units="cm"))
+	float DeliverySpawnHeight = 2000.0f;
+
 	void SnapToUnderlyingGround();
 	void RefreshVisuals();
 	void RefreshWalkableCollision();

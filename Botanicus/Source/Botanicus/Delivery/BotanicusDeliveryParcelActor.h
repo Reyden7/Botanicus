@@ -6,6 +6,8 @@
 #include "Interaction/BotanicusInteractableActor.h"
 #include "BotanicusDeliveryParcelActor.generated.h"
 
+class UBoxComponent;
+class UPhysicalMaterial;
 class UTextRenderComponent;
 class UAnimSequence;
 class UMaterialInterface;
@@ -24,12 +26,16 @@ public:
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void Tick(float DeltaSeconds) override;
+	virtual void OnRep_ReplicatedMovement() override;
 	virtual FBotanicusInteractionPrompt
 		GetInteractionPrompt_Implementation(
 			AActor* Interactor) const override;
 	virtual void Interact_Implementation(AActor* Interactor) override;
 
 	void InitializeParcel(FName InItemKey, int32 InQuantity);
+	/** Server-only: Chaos moves the actor root, including its saved/replicated transform. */
+	void StartDeliveryPhysics(bool bAddInitialSpin = true);
+	void StopDeliveryPhysics();
 	void RestoreParcelState(
 		FName InItemKey,
 		int32 InQuantity,
@@ -49,6 +55,17 @@ public:
 	FVector GetParcelHalfExtent() const { return ParcelHalfExtent; }
 
 private:
+	UFUNCTION()
+	void OnDeliveryBodySleep(UPrimitiveComponent* Component, FName BoneName);
+	UFUNCTION()
+	void OnDeliveryBodyWake(UPrimitiveComponent* Component, FName BoneName);
+
+	/** Unscaled collision root; visual mesh scale must not scale its siblings. */
+	UPROPERTY(VisibleAnywhere, Category="Botanicus|Parcel|Physics")
+	TObjectPtr<UBoxComponent> DeliveryBody;
+	UPROPERTY()
+	TObjectPtr<UPhysicalMaterial> DeliveryPhysicalMaterial;
+
 	void RefreshParcelAppearance(bool bPlayOpeningAnimation = true);
 	void RefreshAnimatedCarton(bool bPlayOpeningAnimation);
 	void UpdateCutterTrace();

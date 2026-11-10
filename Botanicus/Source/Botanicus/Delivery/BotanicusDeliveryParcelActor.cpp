@@ -9,6 +9,9 @@
 #include "Catalog/BotanicusItemCatalogSubsystem.h"
 #include "Animation/AnimSequence.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/BoxComponent.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
+#include "TimerManager.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "Delivery/BotanicusLargeEquipmentActor.h"
@@ -28,6 +31,28 @@ ABotanicusDeliveryParcelActor::ABotanicusDeliveryParcelActor()
 	bAlwaysRelevant = true;
 	SetReplicateMovement(true);
 	PrimaryActorTick.bCanEverTick = true;
+	SetNetUpdateFrequency(30.0f);
+
+	DeliveryBody = CreateDefaultSubobject<UBoxComponent>(TEXT("Delivery Physics Body"));
+	SetRootComponent(DeliveryBody);
+	SceneRoot->SetupAttachment(DeliveryBody);
+	DeliveryBody->SetCollisionProfileName(TEXT("PhysicsActor"));
+	DeliveryBody->SetGenerateOverlapEvents(false);
+	DeliveryBody->SetEnableGravity(true);
+	DeliveryBody->BodyInstance.bUseCCD = true;
+	DeliveryBody->BodyInstance.bGenerateWakeEvents = true;
+	DeliveryBody->SetMassOverrideInKg(NAME_None, 3.0f);
+	DeliveryBody->SetLinearDamping(0.1f);
+	DeliveryBody->SetAngularDamping(1.5f);
+	DeliveryBody->OnComponentSleep.AddDynamic(this, &ThisClass::OnDeliveryBodySleep);
+	DeliveryBody->OnComponentWake.AddDynamic(this, &ThisClass::OnDeliveryBodyWake);
+	DeliveryPhysicalMaterial = CreateDefaultSubobject<UPhysicalMaterial>(TEXT("Delivery Cardboard Physics"));
+	DeliveryPhysicalMaterial->Friction = 0.75f;
+	DeliveryPhysicalMaterial->Restitution = 0.03f;
+	DeliveryPhysicalMaterial->bOverrideRestitutionCombineMode = true;
+	DeliveryPhysicalMaterial->RestitutionCombineMode = EFrictionCombineMode::Min;
+	DeliveryBody->SetPhysMaterialOverride(DeliveryPhysicalMaterial);
+	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
 	InteractionAction =
 		NSLOCTEXT("BotanicusDelivery", "UnpackParcel", "Deballer");
@@ -143,6 +168,24 @@ void ABotanicusDeliveryParcelActor::GetLifetimeReplicatedProps(
 	DOREPLIFETIME(ABotanicusDeliveryParcelActor, bOpened);
 }
 
+void ABotanicusDeliveryParcelActor::OnRep_ReplicatedMovement()
+{
+	Super::OnRep_ReplicatedMovement();
+	const FRepMovement& Movement = GetReplicatedMovement();
+	if (GetNetMode() == NM_Client && Movement.bRepPhysics && Movement.bSimulatedPhysicSleep)
+	{
+		// Default physics correction tolerates a few cm of error. At sleep, finish
+		// at the server's actual resting pose, including any natural overturning.
+		// This never moves the authoritative carton or changes its orientation.
+		DeliveryBody->SetWorldLocationAndRotation(
+			FRepMovement::RebaseOntoLocalOrigin(Movement.Location, this), Movement.Rotation,
+			false, nullptr, ETeleportType::TeleportPhysics);
+		DeliveryBody->SetPhysicsLinearVelocity(FVector::ZeroVector);
+		DeliveryBody->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+		DeliveryBody->PutAllRigidBodiesToSleep();
+	}
+}
+
 void ABotanicusDeliveryParcelActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
@@ -208,6 +251,61 @@ void ABotanicusDeliveryParcelActor::RestoreParcelState(
 	bOpened = bInOpened;
 	RefreshParcelAppearance(false);
 	ForceNetUpdate();
+	// No save-format change: a carton saved in flight resumes gravity at its
+	// saved transform. Previews never simulate. New deliveries start immediately.
+	if (HasActorBegunPlay() && GetIsReplicated() &&
+		!ActorHasTag(TEXT("BotanicusPlacementPreview")))
+	{
+		GetWorldTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this,
+			[this]() { StartDeliveryPhysics(false); }));
+	}
+}
+
+void ABotanicusDeliveryParcelActor::StartDeliveryPhysics(bool bAddInitialSpin)
+{
+	if (!HasAuthority() || !GetIsReplicated() ||
+		ActorHasTag(TEXT("BotanicusPlacementPreview")) || DeliveryBody->IsSimulatingPhysics())
+	{
+		return;
+	}
+	SetNetUpdateFrequency(30.0f);
+	DeliveryBody->SetSimulatePhysics(true);
+	if (bAddInitialSpin)
+	{
+		DeliveryBody->SetPhysicsAngularVelocityInDegrees(FVector(1.5f, 2.0f, 8.0f));
+	}
+	DeliveryBody->WakeAllRigidBodies();
+	ForceNetUpdate();
+}
+
+void ABotanicusDeliveryParcelActor::StopDeliveryPhysics()
+{
+	if (HasAuthority())
+	{
+		DeliveryBody->SetPhysicsLinearVelocity(FVector::ZeroVector);
+		DeliveryBody->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+		DeliveryBody->SetSimulatePhysics(false);
+		ForceNetUpdate();
+	}
+}
+
+void ABotanicusDeliveryParcelActor::OnDeliveryBodySleep(UPrimitiveComponent* Component, FName BoneName)
+{
+	if (HasAuthority())
+	{
+		// Sleeping bodies already suppress unchanged movement in engine replication.
+		SetNetUpdateFrequency(2.0f);
+		ForceNetUpdate();
+	}
+}
+
+void ABotanicusDeliveryParcelActor::OnDeliveryBodyWake(UPrimitiveComponent* Component, FName BoneName)
+{
+	if (HasAuthority())
+	{
+		SetNetUpdateFrequency(30.0f);
+		ForceNetUpdate();
+	}
 }
 
 void ABotanicusDeliveryParcelActor::BeginCutting(AActor* Interactor)
@@ -457,6 +555,11 @@ void ABotanicusDeliveryParcelActor::RefreshParcelAppearance(
 	}
 	Mesh->SetRelativeScale3D(CartonScale);
 	ParcelHalfExtent = CartonScale * 50.0f;
+	if (!DeliveryBody->GetUnscaledBoxExtent().Equals(ParcelHalfExtent))
+	{
+		DeliveryBody->SetBoxExtent(ParcelHalfExtent);
+	}
+	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	RefreshAnimatedCarton(bPlayOpeningAnimation);
 
 	const float TapeLength = ParcelHalfExtent.X * 2.0f * 0.92f;
