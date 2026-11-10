@@ -18,7 +18,7 @@ public:
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out) const override;
     static int32 CapacityForKey(FName Key);
     static float LengthForCapacity(int32 Count) {return 48.f*FMath::Clamp(Count,1,6)+8.f;}
-    static bool ResolveWallPlacement(APlayerController* PC,FName Key,FTransform& Out,const AActor* Ignored=nullptr);
+    static bool ResolveWallPlacement(APlayerController* PC,FName Key,FTransform& Out,const AActor* Ignored=nullptr,const FTransform* RequestedPose=nullptr);
     int32 GetCapacity() const {return Capacity;}
     ABotanicusSalesDisplayActor* GetSlot(int32 Index) const;
     ABotanicusSalesDisplayActor* FindSlotAtPoint(const FVector& WorldPoint) const;

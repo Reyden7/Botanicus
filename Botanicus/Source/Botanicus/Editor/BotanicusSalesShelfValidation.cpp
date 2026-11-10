@@ -35,7 +35,7 @@
 #include "TimerManager.h"
 namespace
 {
-FVector Origin;FVector WallPoint;FName NPCName,HeldName;bool bExecuting=false;
+FVector Origin;FVector WallPoint;FVector RealWallNormal;TSet<TWeakObjectPtr<AActor>> RealExistingShelves;FName NPCName,HeldName;FTransform CachedShelfPose;FGuid CachedShelfId;FName CachedShelfKey;int32 CachedShelfSlot=INDEX_NONE;bool bExecuting=false;
 UWorld* TestWorld(UObject* Context)
 {
     auto* W=GEngine ? GEngine->GetWorldFromContextObject(Context,EGetWorldErrorMode::ReturnNull):nullptr;
@@ -64,6 +64,53 @@ bool UBotanicusSalesShelfValidation::Step(UObject* Context,FName Action,int32 In
     auto* Pawn=Cast<ABotanicusCharacter>(PC->GetPawn());auto* Bar=Pawn ? Pawn->GetQuickBarComponent():nullptr;if(!Bar)return false;
     auto* Shelf=ShelfFor(W);auto* Display=Index<0 ? FloorDisplay(W):(Shelf ? Shelf->GetSlot(Index):nullptr);
     const bool Server=W->GetNetMode()!=NM_Client;
+    if(Action==TEXT("RealWall"))
+    {
+        if(!Server)return false;
+        for(TActorIterator<ABotanicusVisitorManager> It(W);It;++It)It->SetActorTickEnabled(false);
+        for(TActorIterator<ABotanicusVisitorCharacter> It(W);It;++It)It->Destroy();
+        RealExistingShelves.Reset();for(TActorIterator<ABotanicusSalesShelfActor> It(W);It;++It)RealExistingShelves.Add(*It);
+        UStaticMeshComponent* Target=nullptr;
+        const FString Name=FString::Printf(TEXT("StaticMeshActor_%d"),Index);
+        for(TActorIterator<AStaticMeshActor> It(W);It;++It)if(It->GetName()==Name){Target=It->GetStaticMeshComponent();break;}
+        if(!Target)return false;RealWallNormal=-Target->GetRightVector();RealWallNormal.Z=0;RealWallNormal.Normalize();
+        FCollisionQueryParams Q(SCENE_QUERY_STAT(RealShelfWall),true,Pawn);FHitResult Hit;
+        const FVector Center=Target->Bounds.Origin;
+        if(!W->LineTraceSingleByChannel(Hit,Center+RealWallNormal*100,Center-RealWallNormal*100,ECC_Visibility,Q) || Hit.GetComponent()!=Target)return false;
+        WallPoint=Hit.ImpactPoint;RealWallNormal=FVector(Hit.ImpactNormal.X,Hit.ImpactNormal.Y,0).GetSafeNormal();
+        FHitResult Floor;const FVector At=WallPoint+RealWallNormal*150;
+        if(!W->LineTraceSingleByChannel(Floor,At+FVector(0,0,100),At-FVector(0,0,1000),ECC_Visibility,Q))return false;
+        Origin=WallPoint;Origin.Z=Floor.ImpactPoint.Z;
+        Pawn->SetActorLocation(Origin+RealWallNormal*150+FVector(0,0,Pawn->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()+3));
+        Bar->ClearSlot(9);return true;
+    }
+    if(Action==TEXT("RealDistance")){Pawn->SetActorLocation(Origin+RealWallNormal*Index+FVector(0,0,Pawn->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()+3));return true;}
+    if(Action==TEXT("ClearRealShelves")){if(!Server)return false;for(TActorIterator<ABotanicusSalesShelfActor> It(W);It;++It)if(It->GetIsReplicated() && !RealExistingShelves.Contains(*It))It->Destroy();return true;}
+    if(Action==TEXT("MoveRemote") || Action==TEXT("GiveRemoteShelf"))
+    {
+        if(!Server)return false;
+        for(FConstPlayerControllerIterator It=W->GetPlayerControllerIterator();It;++It)if(!It->Get()->IsLocalController())if(auto* P=Cast<ABotanicusCharacter>(It->Get()->GetPawn()))
+        {
+            if(Action==TEXT("MoveRemote"))
+            {
+                Pawn->SetActorLocation(Origin+RealWallNormal*150+FVector(0,200,Pawn->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()+3));
+                P->SetActorLocation(Origin+RealWallNormal*Index+FVector(0,0,P->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()+3));P->ForceNetUpdate();return true;
+            }
+            int32 Added;auto* B=P->GetQuickBarComponent();if(!B->AddItem(FName(*FString::Printf(TEXT("SalesShelfS%d"),Index)),1,Added))return false;B->SelectSlotAuthoritative(Added);return true;
+        }
+        return false;
+    }
+    if(Action==TEXT("CacheShelfClick"))
+    {
+        if(!PC->LocalQuickBarItemPreview || !PC->bLocalQuickBarItemPlacementValid)return false;
+        CachedShelfPose=PC->LocalQuickBarItemPreview->GetActorTransform();CachedShelfSlot=PC->LocalQuickBarItemSlotIndex;CachedShelfId=PC->LocalQuickBarItemInstanceId;CachedShelfKey=PC->LocalQuickBarItemKey;
+        PC->QuickBarItemPreviewUpdateAccumulator=-10.f;auto Rotation=PC->GetControlRotation();Rotation.Pitch+=25;Rotation.Yaw+=30;PC->SetControlRotation(Rotation);return true;
+    }
+    if(Action==TEXT("ConfirmCachedShelf"))
+    {
+        PC->ServerPlaceQuickBarItem(CachedShelfSlot,CachedShelfId,CachedShelfKey,CachedShelfPose.GetLocation(),CachedShelfPose.Rotator().Yaw,1,true);PC->CancelQuickBarItemPlacement();return true;
+    }
+    if(Action==TEXT("RealPitch")){auto R=PC->GetControlRotation();R.Pitch=Index;PC->SetControlRotation(R);return true;}
     if(Action==TEXT("Setup"))
     {
         if(!Server)return false;
@@ -92,7 +139,7 @@ bool UBotanicusSalesShelfValidation::Step(UObject* Context,FName Action,int32 In
     if(Action==TEXT("AimHeld") || Action==TEXT("Hold"))
     {for(TActorIterator<ABotanicusSalePotActor> It(W);It;++It)if(It->GetFName()==HeldName){if(Action==TEXT("AimHeld"))Aim(PC,It->GetActorLocation()+FVector(0,0,12));else PC->BeginWorldItemMove(*It,false);return true;}return false;}
     if(Action==TEXT("GiveShelf") || Action==TEXT("GivePlain"))
-    {if(!Server)return false;int32 Added;const FName Key=Action==TEXT("GiveShelf") ? FName(TEXT("SalesShelfS6")):FName(TEXT("PottingSoil"));if(!Bar->AddItem(Key,1,Added))return false;Bar->SelectSlotAuthoritative(Added);return true;}
+    {if(!Server)return false;int32 Added;const FName Key=Action==TEXT("GiveShelf") ? FName(*FString::Printf(TEXT("SalesShelfS%d"),Index>=1 && Index<=6 ? Index:6)):FName(TEXT("PottingSoil"));if(!Bar->AddItem(Key,1,Added))return false;Bar->SelectSlotAuthoritative(Added);return true;}
     if(Action==TEXT("GivePlant") || Action==TEXT("GiveRemote"))
     {
         if(!Server)return false;auto* Ch=Pawn;
@@ -100,6 +147,15 @@ bool UBotanicusSalesShelfValidation::Step(UObject* Context,FName Action,int32 In
         if(!Ch)return false;FBotanicusCarriedItemState State;State.bHasSalePotState=true;State.SaleSoilItemKey=TEXT("PottingSoil");State.SalePlantItemKey=TEXT("Harvest_AureliaSweet_Beautiful");
         if(!W->GetGameInstance()->GetSubsystem<UBotanicusItemCatalogSubsystem>()->FindItem(State.SalePlantItemKey))return false;int32 Added;
         if(!Ch->GetQuickBarComponent()->AddUniqueItem(TEXT("SalePot"),State,Added))return false;Ch->GetQuickBarComponent()->SelectSlotAuthoritative(Added);return true;
+    }
+    if(Action==TEXT("AimHeight")){Aim(PC,FVector(WallPoint.X,WallPoint.Y,Origin.Z+Index));return true;}
+    if(Action==TEXT("TurnWall"))
+    {
+        if(!Server)return false;
+        const FRotator Rotation(0,Index,0);
+        for(TActorIterator<AStaticMeshActor> It(W);It;++It)if(It->GetFName()==TEXT("ShelfValidationWall")){It->SetActorLocationAndRotation(Origin+Rotation.RotateVector(FVector(100,0,175)),Rotation);break;}
+        WallPoint=Origin+Rotation.RotateVector(FVector(90,0,100));
+        int32 N=0;for(FConstPlayerControllerIterator It=W->GetPlayerControllerIterator();It;++It)if(auto* P=Cast<ABotanicusCharacter>(It->Get()->GetPawn()))P->SetActorLocation(Origin+Rotation.RotateVector(FVector(-150,(N++ ? 40:-40),P->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()+3)));return true;
     }
     if(Action==TEXT("AimWall") || Action==TEXT("AimLow") || Action==TEXT("AimHigh") || Action==TEXT("AimFloor"))
     {FVector At=WallPoint;if(Action==TEXT("AimLow"))At.Z=Origin.Z+35;if(Action==TEXT("AimHigh"))At.Z=Origin.Z+220;if(Action==TEXT("AimFloor"))At=Origin;Aim(PC,At);return true;}
@@ -145,6 +201,22 @@ FString UBotanicusSalesShelfValidation::Snapshot(UObject* Context)
 #if WITH_EDITOR
     auto* W=TestWorld(Context);if(!W)return TEXT("{}");auto R=MakeShared<FJsonObject>();auto* PC=Cast<ABotanicusPlayerController>(W->GetFirstPlayerController());if(!PC)return TEXT("{}");
     auto* Pawn=Cast<ABotanicusCharacter>(PC->GetPawn());if(!Pawn)return TEXT("{}");auto* Bar=Pawn->GetQuickBarComponent();const auto Selected=Bar->GetSelectedSlot();
+    FVector Eye;FRotator View;PC->GetPlayerViewPoint(Eye,View);R->SetStringField(TEXT("eye"),Eye.ToString());R->SetStringField(TEXT("view"),View.ToString());
+    FHitResult Trace;FCollisionQueryParams Params(SCENE_QUERY_STAT(ShelfDiagnostic),true,Pawn);if(PC->LocalQuickBarItemPreview)Params.AddIgnoredActor(PC->LocalQuickBarItemPreview);if(PC->LocalInspectedQuickBarItem)Params.AddIgnoredActor(PC->LocalInspectedQuickBarItem);if(PC->LocalEquippedQuickBarItem)Params.AddIgnoredActor(PC->LocalEquippedQuickBarItem);
+    W->LineTraceSingleByChannel(Trace,Eye,Eye+View.Vector()*450,ECC_Visibility,Params);R->SetStringField(TEXT("rawHit"),Trace.ImpactPoint.ToString());R->SetStringField(TEXT("rawNormal"),Trace.ImpactNormal.ToString());R->SetStringField(TEXT("hitActor"),GetNameSafe(Trace.GetActor()));R->SetStringField(TEXT("hitComponent"),GetNameSafe(Trace.GetComponent()));
+    TArray<TSharedPtr<FJsonValue>> Walls;
+    for(TActorIterator<AActor> It(W);It;++It)
+    {
+        TInlineComponentArray<UStaticMeshComponent*> Parts(*It);
+        for(auto* M:Parts)if(M->GetStaticMesh())
+        {
+            const FString Name=It->GetName()+M->GetName()+M->GetStaticMesh()->GetName();
+            if(!Name.Contains(TEXT("wall"),ESearchCase::IgnoreCase) && !Name.Contains(TEXT("mur"),ESearchCase::IgnoreCase))continue;
+            auto J=MakeShared<FJsonObject>();J->SetStringField(TEXT("actor"),It->GetName());J->SetStringField(TEXT("component"),M->GetName());J->SetStringField(TEXT("mesh"),M->GetStaticMesh()->GetPathName());J->SetStringField(TEXT("location"),M->GetComponentLocation().ToString());J->SetStringField(TEXT("rotation"),M->GetComponentRotation().ToString());J->SetStringField(TEXT("boundsOrigin"),M->Bounds.Origin.ToString());J->SetStringField(TEXT("boundsExtent"),M->Bounds.BoxExtent.ToString());Walls.Add(MakeShared<FJsonValueObject>(J));
+        }
+    }
+    R->SetArrayField(TEXT("wallCandidates"),Walls);
+    R->SetNumberField(TEXT("realFloorZ"),Origin.Z);R->SetStringField(TEXT("realWallPoint"),WallPoint.ToString());
     R->SetStringField(TEXT("selectedId"),Selected.InstanceId.ToString());R->SetStringField(TEXT("selectedKey"),Selected.ItemKey.ToString());R->SetStringField(TEXT("selectedPlant"),Selected.CarriedState.SalePlantItemKey.ToString());
     int32 Pots=0;for(int32 I=0;I<10;++I){const auto S=Bar->GetSlot(I);if(S.CarriedState.bHasSalePotState)Pots+=S.Quantity;}R->SetNumberField(TEXT("inventoryPots"),Pots);
     R->SetBoolField(TEXT("heldWorld"),IsValid(PC->LocalMovedPlaceableItem));R->SetBoolField(TEXT("heldModel"),IsValid(PC->LocalInspectedQuickBarItem));

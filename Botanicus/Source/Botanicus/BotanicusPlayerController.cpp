@@ -6165,6 +6165,7 @@ void ABotanicusPlayerController::ConfirmQuickBarItemPlacement()
 	}
 	DismissInteractionPromptAfterConfirmation();
 
+	const float RequestedPlacementYaw=ABotanicusSalesShelfActor::CapacityForKey(LocalQuickBarItemKey) ? LocalQuickBarItemPreview->GetActorRotation().Yaw:QuickBarItemPlacementYaw;
 	const FVector RequestedLocation =
 		LocalQuickBarItemPreview->GetActorLocation();
 	if (IsValid(LocalMovedPlaceableItem))
@@ -6172,7 +6173,7 @@ void ABotanicusPlayerController::ConfirmQuickBarItemPlacement()
 		ServerConfirmPlaceableItemMove(
 			LocalMovedPlaceableItem,
 			RequestedLocation,
-			QuickBarItemPlacementYaw);
+			RequestedPlacementYaw);
 	}
 	else
 	{
@@ -6181,7 +6182,7 @@ void ABotanicusPlayerController::ConfirmQuickBarItemPlacement()
 			LocalQuickBarItemInstanceId,
 			LocalQuickBarItemKey,
 			RequestedLocation,
-			QuickBarItemPlacementYaw,
+			RequestedPlacementYaw,
 			LocalQuickBarPlacementQuantity,
 			true);
 	}
@@ -10193,14 +10194,15 @@ void ABotanicusPlayerController::
 	}
 
 	FTransform PlacementTransform;
-	if (!ResolveQuickBarItemPlacement(
+	const FTransform RequestedShelfPose(FRotator(0,RequestedYaw,0),FVector(RequestedLocation));
+	if (!(ABotanicusSalesShelfActor::CapacityForKey(ItemKey) ? ABotanicusSalesShelfActor::ResolveWallPlacement(this,ItemKey,PlacementTransform,nullptr,&RequestedShelfPose):ResolveQuickBarItemPlacement(
 			ItemKey,
 			FVector(RequestedLocation),
 			RequestedYaw,
 			PlacementTransform,
 			nullptr,
 			Quantity,
-			bFloorOnlyPlacement))
+			bFloorOnlyPlacement)))
 	{
 		ClientMessage(
 			TEXT("Placement refuse : position invalide."));
@@ -10749,14 +10751,15 @@ void ABotanicusPlayerController::
 	}
 
 	FTransform PlacementTransform;
-	if (!ResolveQuickBarItemPlacement(
+	const FTransform RequestedShelfPose(FRotator(0,RequestedYaw,0),FVector(RequestedLocation));
+	if (!(ABotanicusSalesShelfActor::CapacityForKey(WorldItem->GetItemKey()) ? ABotanicusSalesShelfActor::ResolveWallPlacement(this,WorldItem->GetItemKey(),PlacementTransform,WorldItem,&RequestedShelfPose):ResolveQuickBarItemPlacement(
 			WorldItem->GetItemKey(),
 			FVector(RequestedLocation),
 			RequestedYaw,
 		PlacementTransform,
 		WorldItem,
 		1,
-		false))
+		false)))
 	{
 		ClientMessage(TEXT("Deplacement refuse : position invalide."));
 		ServerMovedPlaceableItem = nullptr;
