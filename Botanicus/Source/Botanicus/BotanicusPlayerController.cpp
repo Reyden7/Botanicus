@@ -10348,6 +10348,7 @@ void ABotanicusPlayerController::
 					180.0f &&
 				DisplayIt->TryMountSalePot(SalePot, this))
 			{
+				UBotanicusJuiceWorldSubsystem::PlacementSucceeded(*DisplayIt,GetPawn(),true);
 				bMountedOnSalesDisplay = true;
 				break;
 			}
@@ -10799,6 +10800,7 @@ void ABotanicusPlayerController::
 					180.0f &&
 				DisplayIt->TryMountSalePot(SalePot, this))
 			{
+				UBotanicusJuiceWorldSubsystem::PlacementSucceeded(*DisplayIt,GetPawn(),true);
 				ServerMovedPlaceableItem = nullptr;
 				return;
 			}
