@@ -29,7 +29,7 @@ bool ABotanicusPlayerController::FindAimedSalesDisplay(ABotanicusSalesDisplayAct
     FHitResult Hit;if(!GetWorld()->LineTraceSingleByChannel(Hit,Eye,Eye+View.Vector()*450,ECC_Visibility,Q))return false;
     Out=Cast<ABotanicusSalesDisplayActor>(Hit.GetActor());
     if(auto* Shelf=Cast<ABotanicusSalesShelfActor>(Hit.GetActor()))Out=Shelf->FindSlotAtPoint(Hit.ImpactPoint);
-    return IsValid(Out) && !Out->ActorHasTag(TEXT("BotanicusPlacementPreview")) && FVector::DistSquared(GetPawn()->GetActorLocation(),Out->GetSalePotPlacementTransform().GetLocation())<=FMath::Square(450.f);
+    return IsValid(Out) && Out->IsDurableSaleDestination() && FVector::DistSquared(GetPawn()->GetActorLocation(),Out->GetSalePotPlacementTransform().GetLocation())<=FMath::Square(450.f);
 }
 bool ABotanicusPlayerController::TryRefreshSalesDepositContext()
 {

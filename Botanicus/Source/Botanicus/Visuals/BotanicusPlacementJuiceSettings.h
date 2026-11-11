@@ -31,6 +31,11 @@ public:
     UPROPERTY(EditAnywhere,Config,Category="Animation",meta=(ClampMin="0",ClampMax="8")) float BounceHeight=2.5f;
     UPROPERTY(EditAnywhere,Config,Category="Animation",meta=(ClampMin="0",ClampMax="20")) float FlightArcHeight=7.f;
     UPROPERTY(EditAnywhere,Config,Category="Animation",meta=(ClampMin="10",ClampMax="100")) float MaximumHandVisualSpan=55.f;
+    UPROPERTY(EditAnywhere,Config,Category="Pickup") bool bPickupPopEnabled=true;
+    UPROPERTY(EditAnywhere,Config,Category="Pickup",meta=(ClampMin="0.05",ClampMax="0.5")) float PickupPopDuration=.20f;
+    UPROPERTY(EditAnywhere,Config,Category="Pickup",meta=(ClampMin="0.1",ClampMax="1.2")) float PickupPopStartScale=1.f;
+    UPROPERTY(EditAnywhere,Config,Category="Pickup",meta=(ClampMin="0",ClampMax="0.2")) float PickupPopEndScale=.05f;
+    UPROPERTY(EditAnywhere,Config,Category="Pickup") TSoftObjectPtr<UCurveFloat> PickupPopCurve;
     UPROPERTY(EditAnywhere,Config,Category="Budget",meta=(ClampMin="0",ClampMax="8")) int32 MaximumSimultaneousAnimations=4;
     UPROPERTY(EditAnywhere,Config,Category="Budget",meta=(ClampMin="1",ClampMax="96")) int32 MaximumMeshesPerAnimation=48;
     UPROPERTY(EditAnywhere,Config,Category="Budget",meta=(ClampMin="1",ClampMax="192")) int32 MaximumVisualComponents=128;

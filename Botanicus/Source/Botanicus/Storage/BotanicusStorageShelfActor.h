@@ -43,6 +43,11 @@ public:
 		FName InItemKey);
 	static int32 GetStorageStackLimit(FName InItemKey);
 
+    bool IsStorageDestination() const;
+    static bool IsStoredWorldItem(const ABotanicusPlaceableItemActor* Item);
+    bool TryBeginStorageDeposit();
+    void EndStorageDeposit() { bStorageDepositInProgress = false; }
+    FTransform GetStorageItemTransform(int32 SlotIndex, const ABotanicusPlaceableItemActor* Item) const;
 	bool IsWallMountedShelf() const;
 	int32 GetStorageSlotCount() const;
 	bool HasStoredItems() const;
@@ -82,6 +87,7 @@ protected:
 	virtual void OnEquipmentDefinitionApplied() override;
 
 private:
+    bool bStorageDepositInProgress = false;
 	bool UsesBlueprintAuthoredSlots() const;
 	void GetOrderedBlueprintSlotMarkers(
 		TArray<UStaticMeshComponent*>& OutMarkers) const;

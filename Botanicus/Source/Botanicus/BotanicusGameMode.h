@@ -38,6 +38,9 @@ public:
 	/** Coalesces inventory mutations into one save on the next server tick. */
 	void ScheduleInventoryAutosave();
 
+	bool IsCatalogDeliveryPending(FGuid OrderId) const;
+	void FinishCatalogDelivery(FGuid OrderId, bool bDelivered);
+
 	UFUNCTION(Exec)
 	void SetTime(float Hour);
 

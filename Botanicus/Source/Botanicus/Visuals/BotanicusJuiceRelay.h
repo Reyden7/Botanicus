@@ -1,6 +1,7 @@
 #pragma once
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Visuals/BotanicusPickupJuiceTypes.h"
 #include "BotanicusJuiceRelay.generated.h"
 class APawn;
 USTRUCT()
@@ -23,6 +24,9 @@ class ABotanicusJuiceRelay : public AActor
 	GENERATED_BODY()
 public:
 	ABotanicusJuiceRelay();
+    void Pickup(APawn* Pawn,FName ItemKey,const FBotanicusPickupVisual& Visual,AActor* CarriedSource);
+    UFUNCTION(NetMulticast,Reliable) void MulticastPickup(uint32 Sequence,APawn* Pawn,FName ItemKey,const FBotanicusPickupVisual& Visual,AActor* CarriedSource);
+    UFUNCTION(NetMulticast,Reliable) void MulticastAbortPickup(AActor* Source);
 	void Placement(AActor* Item,APawn* Placer,FName ItemKey,const FTransform& Final,const FVector& Start,FName AudioId,bool bContentsOnly=false);
     UFUNCTION(NetMulticast,Unreliable) void MulticastPlacementBatch(const TArray<FBotanicusPlacementEvent>& Events);
     virtual void EndPlay(const EEndPlayReason::Type Reason) override;

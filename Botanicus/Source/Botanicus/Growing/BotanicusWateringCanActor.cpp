@@ -16,6 +16,7 @@
 #include "UObject/Package.h"
 #include "NiagaraComponent.h"
 #include "Visuals/BotanicusJuiceSettings.h"
+#include "Visuals/BotanicusJuiceWorldSubsystem.h"
 #include "Net/UnrealNetwork.h"
 
 ABotanicusWateringCanActor::ABotanicusWateringCanActor()
@@ -133,12 +134,14 @@ bool ABotanicusWateringCanActor::TryPickUp(
 		return false;
 	}
 
+    const auto PickupVisual=UBotanicusJuiceWorldSubsystem::CapturePickupVisual(this);
     if(auto* Station=RefillStation.Get())Station->ReleaseCan(this);
 	Carrier = Character;
 	Character->SetHeldWateringCan(this);
 	SetOwner(Character->GetController());
 	ApplyCarrierState();
 	ForceNetUpdate();
+    UBotanicusJuiceWorldSubsystem::PickupSucceeded(GetWorld(),Character,GetItemKey(),PickupVisual,this);
 	return true;
 }
 
@@ -149,6 +152,7 @@ void ABotanicusWateringCanActor::Drop()
 		return;
 	}
 
+    if(auto* J=GetWorld()->GetSubsystem<UBotanicusJuiceWorldSubsystem>())J->AbortPickupSource(this);
 	ABotanicusCharacter* PreviousCarrier = Carrier;
 	FVector DropLocation =
 		PreviousCarrier->GetActorLocation() +
@@ -272,6 +276,7 @@ void ABotanicusWateringCanActor::ApplyCarrierState()
 		SetActorEnableCollision(true);
 	}
     UpdatePresentationPose();
+    if(Carrier)if(auto* J=GetWorld()->GetSubsystem<UBotanicusJuiceWorldSubsystem>())J->MaskPickupHand(Carrier,GetItemKey(),this);
 }
 
 void ABotanicusWateringCanActor::BeginPlay()

@@ -63,3 +63,16 @@ void ABotanicusJuiceRelay::EndPlay(const EEndPlayReason::Type Reason)
 {
     GetWorldTimerManager().ClearAllTimersForObject(this);PendingPlacementEvents.Reset();bPlacementFlushScheduled=false;Super::EndPlay(Reason);
 }
+
+void ABotanicusJuiceRelay::Pickup(APawn* Pawn,FName ItemKey,const FBotanicusPickupVisual& Visual,AActor* CarriedSource)
+{
+    if(HasAuthority())MulticastPickup(++NextSequence,Pawn,ItemKey,Visual,CarriedSource);
+}
+void ABotanicusJuiceRelay::MulticastPickup_Implementation(uint32 Sequence,APawn* Pawn,FName ItemKey,const FBotanicusPickupVisual& Visual,AActor* CarriedSource)
+{
+    if(GetNetMode()!=NM_DedicatedServer)if(auto* J=GetWorld()->GetSubsystem<UBotanicusJuiceWorldSubsystem>())J->ReceivePickup(Sequence,Pawn,ItemKey,Visual,CarriedSource);
+}
+void ABotanicusJuiceRelay::MulticastAbortPickup_Implementation(AActor* Source)
+{
+    if(GetNetMode()!=NM_DedicatedServer)if(auto* J=GetWorld()->GetSubsystem<UBotanicusJuiceWorldSubsystem>())J->ReceiveAbortPickup(Source);
+}

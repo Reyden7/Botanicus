@@ -90,6 +90,7 @@ struct BOTANICUS_API FBotanicusPendingOrder
 UCLASS(abstract, config="Game")
 class BOTANICUS_API ABotanicusPlayerController : public APlayerController
 {
+    friend class UBotanicusDeliveryShipValidation;
 	GENERATED_BODY()
 	
 public:
@@ -328,6 +329,8 @@ public:
 	 * Server-only load hook. DeliveryServerTime in RestoredOrders contains a
 	 * remaining duration and is converted back to server time here.
 	 */
+	void FinishCatalogDelivery(FGuid OrderId, bool bDelivered);
+
 	void RestoreCatalogOrderState(
 		int32 RestoredFunds,
 		const TArray<FBotanicusPendingOrder>& RestoredOrders,
@@ -614,9 +617,7 @@ protected:
 		const AActor* Actor,
 		float DefaultDuration) const;
 	ABotanicusDeliveryZoneActor* FindDeliveryZone();
-	bool DeliverCatalogItem(
-		FName ItemKey,
-		int32 Quantity);
+	bool DeliverCatalogItem(const FBotanicusPendingOrder& Order);
 	void CompleteCatalogOrder(FGuid OrderId);
 	void RefreshOrderCatalog();
 	void SpawnTestLargeEquipment(FName ItemKey);
@@ -840,6 +841,7 @@ protected:
 	UFUNCTION(Client, Reliable)
 	void ClientEndPlaceableItemHold();
 
+    UFUNCTION(Client,Reliable) void ClientCancelPickupPresentation(FName ItemKey);
 	UFUNCTION(Server, Reliable)
 	void ServerCollectStorageItem(
 		ABotanicusPlaceableItemActor* WorldItem,
@@ -1212,3 +1214,4 @@ protected:
 	int32 CollectedItemInspectionRetryCount = 0;
 	FName PendingCollectedItemKey = NAME_None;
 };
+

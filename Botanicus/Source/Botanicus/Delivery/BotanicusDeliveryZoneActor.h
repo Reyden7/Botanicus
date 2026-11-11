@@ -6,6 +6,8 @@
 #include "GameFramework/Actor.h"
 #include "BotanicusDeliveryZoneActor.generated.h"
 
+class ABotanicusDeliveryShip;
+struct FBotanicusPendingOrder;
 class ABotanicusDeliveryParcelActor;
 class USceneComponent;
 class UBoxComponent;
@@ -28,7 +30,30 @@ public:
 	bool StartParcelDelivery(ABotanicusDeliveryParcelActor* Parcel, int32 ParcelIndex,
 		bool& bOutGroundFallback) const;
 
+    /** Unscaled reference based on the mesh receiving surface, not detection bounds. */
+    FTransform GetDeliveryFrame() const;
+    bool EnqueueOrder(const FBotanicusPendingOrder& Order);
+    bool HasQueuedOrders() const { return DeliveryQueue.Num() > 0; }
+    bool DropNextOrder(ABotanicusDeliveryShip* Ship);
+    void OnShipFinished(ABotanicusDeliveryShip* Ship);
+    virtual void EndPlay(const EEndPlayReason::Type Reason) override;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Botanicus|Delivery")
+    TObjectPtr<USceneComponent> DeliveryDropCenter;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Botanicus|Delivery")
+    TSoftClassPtr<ABotanicusDeliveryShip> DeliveryShipClass;
 private:
+    struct FQueuedDelivery
+    {
+        FGuid OrderId;
+        FName ItemKey;
+        int32 Quantity;
+    };
+    TArray<FQueuedDelivery> DeliveryQueue;
+    TSet<FGuid> QueuedOrderIds;
+    UPROPERTY(Transient) TObjectPtr<ABotanicusDeliveryShip> ActiveShip;
+    FTimerHandle ShipRestartTimer;
+    void StartNextShip();
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Botanicus|Delivery",
 		meta=(AllowPrivateAccess="true", ClampMin="0.0", Units="cm"))
 	float DeliverySpawnHeight = 2000.0f;

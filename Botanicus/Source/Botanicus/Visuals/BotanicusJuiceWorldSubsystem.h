@@ -2,6 +2,7 @@
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "Visuals/BotanicusPlacementJuiceTypes.h"
+#include "Visuals/BotanicusPickupJuiceTypes.h"
 #include "Visuals/BotanicusCheckoutVisualTypes.h"
 #include "BotanicusJuiceWorldSubsystem.generated.h"
 class UBotanicusPlantMotionCatalog;
@@ -74,6 +75,18 @@ public:
 	virtual void Tick(float DeltaTime) override;
 	virtual TStatId GetStatId() const override {RETURN_QUICK_DECLARE_CYCLE_STAT(UBotanicusJuiceWorldSubsystem,STATGROUP_Tickables);}
 	virtual bool IsTickable() const override;
+    static FBotanicusPickupVisual CapturePickupVisual(AActor* Item,bool bContentsOnly=false);
+    static void PickupSucceeded(UWorld* World,APawn* Pawn,FName ItemKey,const FBotanicusPickupVisual& Visual,AActor* CarriedSource=nullptr);
+    void ReceivePickup(uint32 Sequence,APawn* Pawn,FName ItemKey,const FBotanicusPickupVisual& Visual,AActor* CarriedSource);
+    void RequestPickupHand(APawn* Pawn,FName ItemKey);
+    void CancelPickupHand(APawn* Pawn,FName ItemKey);
+    void MaskPickupHand(APawn* Pawn,FName ItemKey,AActor* HandActor,bool bContentsOnly=false);
+    void AbortPickupSource(AActor* Source);
+    void ReceiveAbortPickup(AActor* Source);
+    UFUNCTION(BlueprintPure) int32 GetPickupStartedCount() const {return PickupsStarted;}
+    UFUNCTION(BlueprintPure) int32 GetPickupFinishedCount() const {return PickupsFinished;}
+    UFUNCTION(BlueprintPure) int32 GetPickupCopyCount() const;
+    UFUNCTION(BlueprintPure) FVector GetPickupPhaseSample() const;
     /** Reuses the existing successful placement branches and cosmetic relay. */
     static void PlacementSucceeded(AActor* Item,APawn* Placer,bool bContentsOnly=false);
     static FVector PlacementHandPosition(APawn* Pawn,FName ExpectedItem);
@@ -111,6 +124,15 @@ public:
     UFUNCTION(BlueprintPure,Category="Botanicus|Noctiflore|Diagnostics") int32 GetSporeParticleCount() const;
     UFUNCTION(BlueprintPure,Category="Botanicus|Noctiflore|Diagnostics") int32 GetNoctifloreCandidateCount() const {return NoctifloreCandidates.Num();}
 private:
+    void UpdatePickupJuice();
+    void ClearPickupJuice();
+    UPROPERTY(Transient) TArray<FBotanicusPickupAnimation> PickupAnimations;
+    UPROPERTY(Transient) TArray<FBotanicusPickupHandMask> PickupHandMasks;
+    UPROPERTY(Transient) TObjectPtr<UCurveFloat> PickupCurve;
+    TArray<FBotanicusPickupHandGate> PickupHandGates;
+    uint32 LastPickupSequence=0;
+    int32 PickupsStarted=0,PickupsFinished=0;
+
     void UpdateCheckoutBeams();
     void ClearCheckoutBeams();
     UPROPERTY(Transient) TArray<FBotanicusCheckoutBeam> CheckoutBeams;

@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Sales/BotanicusSalesDisplayActor.h"
+#include "Visuals/BotanicusJuiceWorldSubsystem.h"
 #include "Sales/Checkout/BotanicusCheckoutTypes.h"
 #include "Sales/BotanicusSalesShelfActor.h"
 #include "Components/BoxComponent.h"
@@ -21,6 +22,7 @@
 #include "Engine/GameInstance.h"
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
+#include "HAL/IConsoleManager.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/GameStateBase.h"
 #include "Growing/BotanicusPlantSubsystem.h"
@@ -431,57 +433,127 @@ void ABotanicusSalesDisplayActor::TryPlaceSelectedPlant(
 			"Preparez la plante dans un pot de vente, puis maintenez E pour poser ce pot sur le presentoir."));
 }
 
-bool ABotanicusSalesDisplayActor::TryMountSalePot(
-	ABotanicusSalePotActor* SalePot,
-	ABotanicusPlayerController* Seller, bool bSuppressListed)
+namespace
 {
-	if (!HasAuthority() || !IsEmpty() || !IsValid(SalePot) ||
-		!SalePot->IsReadyForSale() || !IsValid(Seller))
-	{
-		return false;
-	}
-	if (!TryMountSalePotState(
-			SalePot->GetSoilItemKey(),
-			SalePot->GetPlantItemKey(),
-			Seller,
-			SalePot->GetItemKey(),FGuid(),bSuppressListed))
-	{
-		return false;
-	}
-	SalePot->Destroy();
-	return true;
+TAutoConsoleVariable<int32> CVarSalesDepositDebug(TEXT("botanicus.SalesDeposit.Debug"), 0,
+    TEXT("Log sale-pot transfer attempts and final associations (0=off, 1=on)."));
 }
 
-bool ABotanicusSalesDisplayActor::TryMountSalePotState(
-	FName SoilItemKey,
-	FName PlantItemKey,
-	ABotanicusPlayerController* Seller,
-	FName SalePotItemKey, FGuid InstanceId, bool bSuppressListed)
+bool ABotanicusSalesDisplayActor::IsDurableSaleDestination() const
 {
-	if (!HasAuthority() || !IsEmpty() || SoilItemKey.IsNone() ||
-		PlantItemKey.IsNone() || !IsValid(Seller))
-	{
-		return false;
-	}
-    const auto* Catalog=GetGameInstance() ? GetGameInstance()->GetSubsystem<UBotanicusItemCatalogSubsystem>():nullptr;
-    if(!Catalog || !Catalog->FindItem(PlantItemKey))return false;
-	SaleLotId=FGuid::NewGuid();DisplayedPotInstanceId=InstanceId.IsValid() ? InstanceId:FGuid::NewGuid();
-	DisplayedPlantItemKey = PlantItemKey;
-	DisplayedSoilItemKey = SoilItemKey;
-	DisplayedPotItemKey = SalePotItemKey.IsNone()
-		? FName(TEXT("SalePot"))
-		: SalePotItemKey;
-	SellerController = Seller;
-	if(!bSuppressListed)UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Listed"), GetActorLocation());
-	SaleEndServerTime = 0.0f;
-	bVisitorEnRoute = false;
-	bPlantTakenByVisitor = false;
-	RefreshVisuals();
-	ForceNetUpdate();
-	Seller->ClientMessage(
-		TEXT(
-			"Pot installé : un visiteur va venir voir cette plante."));
-	return true;
+    if (IsActorBeingDestroyed() || !GetIsReplicated() ||
+        ActorHasTag(TEXT("BotanicusPlacementPreview")) ||
+        ActorHasTag(TEXT("BotanicusEquippedPreview"))) return false;
+    if (ShelfSlotIndex != INDEX_NONE)
+    {
+        const auto* Shelf = GetSalesShelf();
+        return IsValid(Shelf) && !Shelf->IsActorBeingDestroyed() && Shelf->GetIsReplicated() &&
+            !Shelf->ActorHasTag(TEXT("BotanicusPlacementPreview")) &&
+            !Shelf->ActorHasTag(TEXT("BotanicusEquippedPreview")) && Shelf->GetSlot(ShelfSlotIndex) == this;
+    }
+    return !IsShelfSlot();
+}
+
+void ABotanicusSalesDisplayActor::TraceDeposit(const ABotanicusPlayerController* Seller,
+    const ABotanicusSalesDisplayActor* Destination, FGuid PotId, FName PlantKey,
+    const TCHAR* Phase, const TCHAR* Result)
+{
+    if (!CVarSalesDepositDebug.GetValueOnGameThread()) return;
+    int32 InventoryCopies = 0;
+    if (Seller) if (auto* Character = Cast<ABotanicusCharacter>(Seller->GetPawn()))
+        for (const auto& Slot : Character->GetQuickBarComponent()->GetSlots())
+            if (!Slot.IsEmpty() && Slot.InstanceId == PotId) InventoryCopies += Slot.Quantity;
+    UE_LOG(LogTemp, Display, TEXT("SaleDeposit player=%s pot=%s plant=%s destination=%s slot=%d phase=%s result=%s inventoryCopies=%d destinationPot=%s destinationPlant=%s lot=%s"),
+        *GetNameSafe(Seller), *PotId.ToString(), *PlantKey.ToString(), *GetNameSafe(Destination),
+        Destination ? Destination->ShelfSlotIndex : INDEX_NONE, Phase, Result, InventoryCopies,
+        Destination ? *Destination->DisplayedPotInstanceId.ToString() : TEXT("None"),
+        Destination ? *Destination->DisplayedPlantItemKey.ToString() : TEXT("None"),
+        Destination ? *Destination->SaleLotId.ToString() : TEXT("None"));
+}
+
+bool ABotanicusSalesDisplayActor::AssignSalePotState(FName SoilKey, FName PlantKey,
+    ABotanicusPlayerController* Seller, FName PotKey, FGuid InstanceId)
+{
+    if (!HasAuthority() || !IsDurableSaleDestination() || !IsEmpty() || !IsValid(Seller) ||
+        Seller->GetWorld() != GetWorld() || (PotKey != TEXT("SalePot") && PotKey != TEXT("SalePotSquare"))) return false;
+    const auto* Catalog = GetGameInstance()->GetSubsystem<UBotanicusItemCatalogSubsystem>();
+    const auto* Plant = Catalog ? Catalog->FindItem(PlantKey) : nullptr;
+    const auto* Soil = Catalog ? Catalog->FindItem(SoilKey) : nullptr;
+    if (!Plant || !Plant->bWholePlant || !Soil || !Soil->bSaleSoil || !Catalog->FindItem(PotKey)) return false;
+    const auto* Plants = GetGameInstance()->GetSubsystem<UBotanicusPlantSubsystem>();
+    const auto* Species = Plants ? Plants->FindPlantByHarvestItem(PlantKey) : nullptr;
+    if (Species && Species->CompatibleSaleSoilItemKey != SoilKey) return false;
+    // A stable inventory instance must never be registered in two commercial slots.
+    if (InstanceId.IsValid()) for (TActorIterator<ABotanicusSalesDisplayActor> It(GetWorld()); It; ++It)
+        if (*It != this && !It->IsEmpty() && It->DisplayedPotInstanceId == InstanceId) return false;
+    SaleLotId = FGuid::NewGuid();
+    DisplayedPotInstanceId = InstanceId.IsValid() ? InstanceId : FGuid::NewGuid();
+    DisplayedPlantItemKey = PlantKey; DisplayedSoilItemKey = SoilKey; DisplayedPotItemKey = PotKey;
+    SellerController = Seller; SaleEndServerTime = 0.f; bVisitorEnRoute = false; bPlantTakenByVisitor = false;
+    return true;
+}
+
+void ABotanicusSalesDisplayActor::RollbackSalePotDeposit()
+{
+    DisplayedPlantItemKey = NAME_None; DisplayedSoilItemKey = NAME_None; DisplayedPotItemKey = TEXT("SalePot");
+    DisplayedPotInstanceId.Invalidate(); SaleLotId.Invalidate(); SellerController = nullptr;
+}
+
+void ABotanicusSalesDisplayActor::FinishSalePotDeposit(ABotanicusPlayerController* Seller, bool bSuppressListed)
+{
+    RefreshVisuals(); ForceNetUpdate();
+    if (!bSuppressListed) UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Listed"), GetActorLocation());
+    Seller->ClientMessage(TEXT("Pot installé : un visiteur va venir voir cette plante."));
+}
+
+bool ABotanicusSalesDisplayActor::TryDepositQuickBarSalePot(UBotanicusQuickBarComponent* QuickBar,
+    int32 SlotIndex, FGuid ExpectedInstanceId, ABotanicusPlayerController* Seller, bool bSuppressListed)
+{
+    const auto Slot = QuickBar ? QuickBar->GetSlot(SlotIndex) : FBotanicusQuickBarSlot();
+    const FName Plant = Slot.CarriedState.SalePlantItemKey;
+    TraceDeposit(Seller, this, ExpectedInstanceId, Plant, TEXT("validate"), TEXT("attempt"));
+    if (bSalePotTransferInProgress || !IsValid(Seller) || !QuickBar ||
+        QuickBar->GetOwner() != Seller->GetPawn() || !ExpectedInstanceId.IsValid() ||
+        Slot.IsEmpty() || Slot.Quantity != 1 || Slot.InstanceId != ExpectedInstanceId ||
+        QuickBar->GetSelectedSlotIndex() != SlotIndex || !Slot.CarriedState.bHasSalePotState)
+    { TraceDeposit(Seller, this, ExpectedInstanceId, Plant, TEXT("reject"), TEXT("source_changed_or_busy")); return false; }
+    TGuardValue<bool> Reservation(bSalePotTransferInProgress, true);
+    if (!AssignSalePotState(Slot.CarriedState.SaleSoilItemKey, Plant, Seller, Slot.ItemKey, Slot.InstanceId))
+    { TraceDeposit(Seller, this, ExpectedInstanceId, Plant, TEXT("reject"), TEXT("invalid_or_occupied_destination")); return false; }
+    // No callbacks, sound or cosmetic event before the association and exact source are verified.
+    TraceDeposit(Seller, this, ExpectedInstanceId, Plant, TEXT("transfer"), TEXT("destination_registered"));
+    if (!(QuickBar->GetSlot(SlotIndex) == Slot) || !QuickBar->RemoveQuantity(SlotIndex, 1))
+    {
+        RollbackSalePotDeposit();
+        TraceDeposit(Seller, this, ExpectedInstanceId, Plant, TEXT("rollback"), TEXT("source_not_consumed")); return false;
+    }
+    FinishSalePotDeposit(Seller, bSuppressListed);
+    TraceDeposit(Seller, this, ExpectedInstanceId, Plant, TEXT("commit"), TEXT("inventory_to_slot")); return true;
+}
+
+bool ABotanicusSalesDisplayActor::TryMountSalePot(ABotanicusSalePotActor* SalePot,
+    ABotanicusPlayerController* Seller, bool bSuppressListed)
+{
+    if (bSalePotTransferInProgress || !IsValid(SalePot) || SalePot->IsActorBeingDestroyed() ||
+        !SalePot->GetIsReplicated() || SalePot->GetWorld() != GetWorld() || SalePot->GetQuantity() != 1 ||
+        SalePot->ActorHasTag(TEXT("BotanicusPlacementPreview")) || SalePot->ActorHasTag(TEXT("BotanicusEquippedPreview"))) return false;
+    TGuardValue<bool> Reservation(bSalePotTransferInProgress, true);
+    if (!AssignSalePotState(SalePot->GetSoilItemKey(), SalePot->GetPlantItemKey(), Seller, SalePot->GetItemKey(), FGuid())) return false;
+    const FGuid Id = DisplayedPotInstanceId; const FName Plant = DisplayedPlantItemKey;
+    TraceDeposit(Seller, this, Id, Plant, TEXT("transfer"), TEXT("world_pot_registered"));
+    if (!SalePot->Destroy())
+    { RollbackSalePotDeposit(); TraceDeposit(Seller, this, Id, Plant, TEXT("rollback"), TEXT("source_destroy_refused")); return false; }
+    FinishSalePotDeposit(Seller, bSuppressListed);
+    TraceDeposit(Seller, this, Id, Plant, TEXT("commit"), TEXT("world_to_slot")); return true;
+}
+
+bool ABotanicusSalesDisplayActor::TryMountSalePotState(FName SoilItemKey, FName PlantItemKey,
+    ABotanicusPlayerController* Seller, FName SalePotItemKey, FGuid InstanceId, bool bSuppressListed)
+{
+    if (bSalePotTransferInProgress) return false;
+    TGuardValue<bool> Reservation(bSalePotTransferInProgress, true);
+    if (!AssignSalePotState(SoilItemKey, PlantItemKey, Seller, SalePotItemKey, InstanceId)) return false;
+    FinishSalePotDeposit(Seller, bSuppressListed); return true;
 }
 
 bool ABotanicusSalesDisplayActor::TransferVisitorPayment(ABotanicusVisitorCharacter* Visitor,FBotanicusCheckoutReceipt& Out)
@@ -734,7 +806,7 @@ void ABotanicusSalesDisplayActor::
 bool ABotanicusSalesDisplayActor::TryRetrieveDisplayedSalePot(
 	AActor* Interactor)
 {
-	if (!HasAuthority() ||
+	if (!HasAuthority() || bSalePotTransferInProgress || !IsDurableSaleDestination() ||
 		!CanRetrieveDisplayedSalePot() ||
 		!IsDisplayedSalePotTargeted(Interactor))
 	{
@@ -750,12 +822,15 @@ bool ABotanicusSalesDisplayActor::TryRetrieveDisplayedSalePot(
 		return false;
 	}
 
+	TGuardValue<bool> Reservation(bSalePotTransferInProgress, true);
 	FBotanicusCarriedItemState State;
 	State.bHasSalePotState = true;
 	State.SaleSoilItemKey = DisplayedSoilItemKey.IsNone()
 		? FName(TEXT("PottingSoil"))
 		: DisplayedSoilItemKey;
 	State.SalePlantItemKey = DisplayedPlantItemKey;
+    const auto PickupVisual=UBotanicusJuiceWorldSubsystem::CapturePickupVisual(this,true);
+    const FName PickupKey=DisplayedPotItemKey;
 	int32 AddedSlotIndex = INDEX_NONE;
 	if (!QuickBar->AddUniqueItem(
 			DisplayedPotItemKey.IsNone()
@@ -777,6 +852,7 @@ bool ABotanicusSalesDisplayActor::TryRetrieveDisplayedSalePot(
 		ReservedVisitor->BeginDeparture(false);
 	}
 
+    UBotanicusJuiceWorldSubsystem::PickupSucceeded(GetWorld(),Character,PickupKey,PickupVisual);
 	DisplayedPlantItemKey = NAME_None;
 	DisplayedSoilItemKey = NAME_None;
 	DisplayedPotItemKey = TEXT("SalePot");

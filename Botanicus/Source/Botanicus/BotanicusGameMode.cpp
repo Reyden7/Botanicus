@@ -682,7 +682,14 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		if (!IsValid(*ItemIt) ||
 			ItemIt->IsActorBeingDestroyed() ||
 			ItemIt->IsA<ABotanicusCashRegisterActor>() ||
-            (Cast<ABotanicusSalesDisplayActor>(*ItemIt) && Cast<ABotanicusSalesDisplayActor>(*ItemIt)->IsShelfSlot()) ||
+            (ABotanicusStorageShelfActor::IsCatalogItemCompatible(this,ItemIt->GetItemKey()) &&
+                !ABotanicusStorageShelfActor::IsStoredWorldItem(*ItemIt)) ||
+            // Equipped sale-pot models and display previews are views of existing inventory, never world items.
+            ((ItemIt->IsA<ABotanicusSalePotActor>() || ItemIt->IsA<ABotanicusSalesDisplayActor>()) &&
+                (!ItemIt->GetIsReplicated() || ItemIt->ActorHasTag(TEXT("BotanicusEquippedPreview")))) ||
+            (Cast<ABotanicusSalesDisplayActor>(*ItemIt) &&
+                (Cast<ABotanicusSalesDisplayActor>(*ItemIt)->IsShelfSlot() ||
+                 !Cast<ABotanicusSalesDisplayActor>(*ItemIt)->IsDurableSaleDestination())) ||
 			ItemIt->ActorHasTag(TEXT("BotanicusPlacementPreview")))
 		{
 			continue;
@@ -1953,4 +1960,36 @@ void ABotanicusGameMode::RestorePlayerEconomy(
 		RestoredFunds,
 		RestoredOrders,
 		RestoredBuildingProgressionLevel);
+}
+
+bool ABotanicusGameMode::IsCatalogDeliveryPending(FGuid OrderId) const
+{
+    if (!HasAuthority() || !OrderId.IsValid()) return false;
+    for (auto It=GetWorld()->GetPlayerControllerIterator();It;++It)
+        if (auto* PC=Cast<ABotanicusPlayerController>(It->Get()))
+            if (PC->GetPendingOrders().ContainsByPredicate([&](const auto& O){return O.OrderId==OrderId;})) return true;
+    if (CurrentSaveGame)
+        for (const auto& Economy:CurrentSaveGame->PlayerEconomies)
+            if (Economy.PendingOrders.ContainsByPredicate([&](const auto& O){return O.OrderId==OrderId;})) return true;
+    return false;
+}
+
+void ABotanicusGameMode::FinishCatalogDelivery(FGuid OrderId, bool bDelivered)
+{
+    if (!HasAuthority()) return;
+    bool bOnline=false;
+    for (auto It=GetWorld()->GetPlayerControllerIterator();It;++It)
+        if (auto* PC=Cast<ABotanicusPlayerController>(It->Get()))
+            if (PC->GetPendingOrders().ContainsByPredicate([&](const auto& O){return O.OrderId==OrderId;}))
+            { PC->FinishCatalogDelivery(OrderId,bDelivered); bOnline=true; break; }
+    // Logout caches the same pending order. Remove it there too, so reconnecting
+    // cannot redeliver a carton that the zone dropped while its owner was away.
+    int32 OfflineRefund=0;
+    if (CurrentSaveGame)
+        for (auto& Economy:CurrentSaveGame->PlayerEconomies)
+            Economy.PendingOrders.RemoveAll([&](const auto& O)
+            { if(O.OrderId!=OrderId)return false; OfflineRefund=FMath::Max(OfflineRefund,O.ChargedPrice); return true; });
+    if (!bOnline && !bDelivered)
+        if (auto* State=GetGameState<ABotanicusGameState>()) State->AddSharedFunds(OfflineRefund);
+    ScheduleInventoryAutosave();
 }

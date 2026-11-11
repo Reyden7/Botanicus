@@ -6,6 +6,7 @@
 #include "Delivery/BotanicusPlaceableItemActor.h"
 #include "BotanicusSalesDisplayActor.generated.h"
 
+class UBotanicusQuickBarComponent;
 class UStaticMeshComponent;
 class UBoxComponent;
 class UInstancedStaticMeshComponent;
@@ -59,6 +60,13 @@ public:
     void RestoreDisplayedPotInstanceId(FGuid Id) {if(HasAuthority())DisplayedPotInstanceId=Id;}
 	/** Server-only placement of the selected complete plant. */
 	void TryPlaceSelectedPlant(AActor* Interactor);
+    /** Cosmetic previews have local authority too, but can never own sale inventory. */
+    bool IsDurableSaleDestination() const;
+    bool TryDepositQuickBarSalePot(UBotanicusQuickBarComponent* QuickBar, int32 SlotIndex,
+        FGuid ExpectedInstanceId, ABotanicusPlayerController* Seller, bool bSuppressListed=false);
+    static void TraceDeposit(const ABotanicusPlayerController* Seller,
+        const ABotanicusSalesDisplayActor* Destination, FGuid PotId, FName PlantKey,
+        const TCHAR* Phase, const TCHAR* Result);
 	bool TryMountSalePot(
 		ABotanicusSalePotActor* SalePot,
 		ABotanicusPlayerController* Seller, bool bSuppressListed=false);
@@ -123,6 +131,12 @@ public:
 	float SalePotSlotHeight = 0.0f;
 
 private:
+    // Game-thread reservation spans source consumption and its synchronous inventory delegates.
+    bool bSalePotTransferInProgress = false;
+    bool AssignSalePotState(FName SoilKey, FName PlantKey, ABotanicusPlayerController* Seller,
+        FName PotKey, FGuid InstanceId);
+    void FinishSalePotDeposit(ABotanicusPlayerController* Seller, bool bSuppressListed);
+    void RollbackSalePotDeposit();
     friend class UBotanicusCashRegisterValidation;
     FGuid SaleLotId;
     FGuid DisplayedPotInstanceId;

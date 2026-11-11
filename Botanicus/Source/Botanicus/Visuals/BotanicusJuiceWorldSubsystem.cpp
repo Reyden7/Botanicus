@@ -40,6 +40,7 @@ void UBotanicusJuiceWorldSubsystem::OnWorldBeginPlay(UWorld& World)
     CheckoutBeamMaterial=GetDefault<UBotanicusCheckoutSettings>()->BeamMaterial.LoadSynchronous();
 	const auto* Placement=GetDefault<UBotanicusPlacementJuiceSettings>();
 	PlacementHologramMaterial=Placement->HologramMaterial.LoadSynchronous();
+    PickupCurve=Placement->PickupPopCurve.LoadSynchronous();
 	PlacementFlightCurve=Placement->FlightCurve.LoadSynchronous();PlacementGrowthCurve=Placement->GrowthCurve.LoadSynchronous();PlacementBounceCurve=Placement->BounceCurve.LoadSynchronous();
 	const auto* Settings=GetDefault<UBotanicusJuiceSettings>();
 	MotionCatalog=Settings->MotionCatalog.LoadSynchronous();
@@ -119,7 +120,7 @@ void UBotanicusJuiceWorldSubsystem::SetSoilWetness(UObject* Owner,UMaterialInsta
 }
 bool UBotanicusJuiceWorldSubsystem::IsTickable() const
 {
-	return Super::IsTickable() && GetWorld() && GetWorld()->GetNetMode()!=NM_DedicatedServer && (!Water.IsEmpty() || !Bursts.IsEmpty() || !WetnessTransitions.IsEmpty() || !PlacementHolograms.IsEmpty() || !PlacementAnimations.IsEmpty() || !PendingPlacements.IsEmpty() || !CheckoutBeams.IsEmpty());
+	return Super::IsTickable() && GetWorld() && GetWorld()->GetNetMode()!=NM_DedicatedServer && (!Water.IsEmpty() || !Bursts.IsEmpty() || !WetnessTransitions.IsEmpty() || !PlacementHolograms.IsEmpty() || !PlacementAnimations.IsEmpty() || !PendingPlacements.IsEmpty() || !CheckoutBeams.IsEmpty() || !PickupAnimations.IsEmpty() || !PickupHandGates.IsEmpty() || !PickupHandMasks.IsEmpty());
 }
 void UBotanicusJuiceWorldSubsystem::ReconcileWater()
 {
@@ -208,6 +209,7 @@ void UBotanicusJuiceWorldSubsystem::UpdateWater(float DeltaTime)
 void UBotanicusJuiceWorldSubsystem::Tick(float DeltaTime)
 {
     UpdateCheckoutBeams();
+    UpdatePickupJuice();
 	UpdatePlacementJuice(DeltaTime);
 	UpdateWater(DeltaTime);const double Now=GetWorld()->GetTimeSeconds();
 	for(int32 I=Bursts.Num()-1;I>=0;--I) if(!Bursts[I].Surface.IsValid() || !Bursts[I].Source.IsValid() || Now>=Bursts[I].ExpireAt) {if(Bursts[I].Component) {Bursts[I].Component->DeactivateImmediate();Bursts[I].Component->DestroyComponent();}Bursts.RemoveAtSwap(I);}
@@ -236,6 +238,7 @@ int32 UBotanicusJuiceWorldSubsystem::GetParticleCount() const
 void UBotanicusJuiceWorldSubsystem::Deinitialize()
 {
     ClearCheckoutBeams();
+    ClearPickupJuice();
 	ClearPlacementJuice();
 	GetWorld()->GetTimerManager().ClearTimer(ReconcileTimer);
 	for(auto& Pair:Water) {if(Pair.Value.Drops) {Pair.Value.Drops->DeactivateImmediate();Pair.Value.Drops->DestroyComponent();}if(IsValid(Pair.Value.RemoteCan)) Pair.Value.RemoteCan->Destroy();}

@@ -225,6 +225,32 @@ int32 ABotanicusStorageShelfActor::GetStorageStackLimit(
 	return 0;
 }
 
+bool ABotanicusStorageShelfActor::IsStorageDestination() const
+{
+    return !IsActorBeingDestroyed() && GetIsReplicated() && !IsValid(GetCarrier()) && !IsInPlacementMode() &&
+        !ActorHasTag(TEXT("BotanicusPlacementPreview")) && !ActorHasTag(TEXT("BotanicusEquippedPreview"));
+}
+
+bool ABotanicusStorageShelfActor::IsStoredWorldItem(const ABotanicusPlaceableItemActor* Item)
+{
+    // First-person, inspection and remote juice models have local authority on a listen server too.
+    return IsValid(Item) && !Item->IsActorBeingDestroyed() && Item->GetIsReplicated() &&
+        !Item->ActorHasTag(TEXT("BotanicusPlacementPreview")) &&
+        !Item->ActorHasTag(TEXT("BotanicusEquippedPreview")) &&
+        !Item->ActorHasTag(TEXT("BotanicusJuiceRemotePreview"));
+}
+
+bool ABotanicusStorageShelfActor::TryBeginStorageDeposit()
+{
+    if (!HasAuthority() || !IsStorageDestination() || bStorageDepositInProgress) return false;
+    bStorageDepositInProgress = true; return true;
+}
+
+FTransform ABotanicusStorageShelfActor::GetStorageItemTransform(int32 SlotIndex, const ABotanicusPlaceableItemActor* Item) const
+{
+    return GetStorageSlotTransform(SlotIndex, Item->GetPlacementBoxExtent().GetAbs());
+}
+
 bool ABotanicusStorageShelfActor::IsWallMountedShelf() const
 {
 	if (GetItemKey() == WallShelfSmallKey ||
@@ -658,9 +684,8 @@ FTransform ABotanicusStorageShelfActor::GetStorageSlotTransform(
 int32 ABotanicusStorageShelfActor::FindStorageSlotIndexForItem(
 	const ABotanicusPlaceableItemActor* Item) const
 {
-	if (!IsValid(Item) ||
-		!IsCatalogItemCompatible(this, Item->GetItemKey()) ||
-		Item->ActorHasTag(TEXT("BotanicusPlacementPreview")))
+	if (!IsStoredWorldItem(Item) || !IsStorageDestination() ||
+		!IsCatalogItemCompatible(this, Item->GetItemKey()))
 	{
 		return INDEX_NONE;
 	}
@@ -732,7 +757,7 @@ bool ABotanicusStorageShelfActor::GetStorageSlotPlacement(
 	{
 		*OutExistingStack = nullptr;
 	}
-	if (SlotIndex < 0 || SlotIndex >= GetStorageSlotCount() ||
+	if (!IsStorageDestination() || bStorageDepositInProgress || SlotIndex < 0 || SlotIndex >= GetStorageSlotCount() ||
 		!CanSlotAcceptItem(
 			SlotIndex,
 			InItemKey,
@@ -852,7 +877,7 @@ void ABotanicusStorageShelfActor::ApplyStoredItemTransforms()
 
 void ABotanicusStorageShelfActor::MigrateLegacyCenteredItems()
 {
-	if (!GetWorld() || !UsesBlueprintAuthoredSlots())
+	if (!GetWorld() || !UsesBlueprintAuthoredSlots() || !IsStorageDestination())
 	{
 		return;
 	}
@@ -862,9 +887,8 @@ void ABotanicusStorageShelfActor::MigrateLegacyCenteredItems()
 		 ++It)
 	{
 		ABotanicusPlaceableItemActor* Item = *It;
-		if (!IsValid(Item) ||
-			!IsCatalogItemCompatible(this, Item->GetItemKey()) ||
-			Item->ActorHasTag(TEXT("BotanicusPlacementPreview")))
+		if (!IsStoredWorldItem(Item) ||
+			!IsCatalogItemCompatible(this, Item->GetItemKey()))
 		{
 			continue;
 		}
