@@ -6,33 +6,63 @@
 #include "GameFramework/GameStateBase.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
+#include "Components/SkeletalMeshComponent.h"
+
 
 ABotanicusDeliveryShip::ABotanicusDeliveryShip()
 {
     bReplicates = true;
     bAlwaysRelevant = true;
     SetReplicateMovement(false);
+
     PrimaryActorTick.bCanEverTick = true;
     PrimaryActorTick.bStartWithTickEnabled = false;
+
+    // Racine du vaisseau
     auto* Root = CreateDefaultSubobject<USceneComponent>(TEXT("FlightRoot"));
     SetRootComponent(Root);
+
+    // Ancien Static Mesh conservé pour la compatibilité du Blueprint
     ShipMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ShipMesh"));
     ShipMesh->SetupAttachment(Root);
+    ShipMesh->SetVisibility(false, false);
+    ShipMesh->SetHiddenInGame(true, false);
     ShipMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     ShipMesh->SetGenerateOverlapEvents(false);
     ShipMesh->SetCanEverAffectNavigation(false);
-    CargoDropPoint = CreateDefaultSubobject<USceneComponent>(TEXT("CargoDropPoint"));
+
+    // Nouveau Skeletal Mesh
+    ShipSkeletalMesh = CreateDefaultSubobject<USkeletalMeshComponent>(
+        TEXT("ShipSkeletalMesh")
+    );
+
+    // Hérite de la position et de l'orientation de l'ancien mesh
+    ShipSkeletalMesh->SetupAttachment(ShipMesh);
+    ShipSkeletalMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    ShipSkeletalMesh->SetGenerateOverlapEvents(false);
+    ShipSkeletalMesh->SetCanEverAffectNavigation(false);
+
+    // Point de largage des cartons : inchangé
+    CargoDropPoint = CreateDefaultSubobject<USceneComponent>(
+        TEXT("CargoDropPoint")
+    );
     CargoDropPoint->SetupAttachment(Root);
-    CargoDropPoint->SetRelativeLocation(FVector(0,0,-150));
+    CargoDropPoint->SetRelativeLocation(FVector(0, 0, -150));
+
     SetActorEnableCollision(false);
 }
+
 void ABotanicusDeliveryShip::BeginPlay()
 {
     Super::BeginPlay();
+    ShipMesh->SetVisibility(false, false);
+    ShipMesh->SetHiddenInGame(true, false);
+    ShipMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     // No collision even if the replacement mesh has an authored collision preset.
     SetActorEnableCollision(false);
     UpdateFlight();
 }
+
 void ABotanicusDeliveryShip::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);

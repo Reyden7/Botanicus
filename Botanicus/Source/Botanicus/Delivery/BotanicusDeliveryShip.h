@@ -5,7 +5,7 @@
 #include "BotanicusDeliveryShip.generated.h"
 
 class ABotanicusDeliveryZoneActor;
-class UStaticMeshComponent;
+class USkeletalMeshComponent;
 class UCurveFloat;
 
 UENUM(BlueprintType)
@@ -40,7 +40,7 @@ public:
     void StartDelivery(ABotanicusDeliveryZoneActor* Zone);
     EBotanicusDeliveryShipPhase GetPhase() const { return Flight.Phase; }
     FVector GetCargoLocation() const;
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Delivery") TObjectPtr<UStaticMeshComponent> ShipMesh;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Delivery") TObjectPtr<USkeletalMeshComponent> ShipMesh;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Delivery") TObjectPtr<USceneComponent> CargoDropPoint;
     /** Unscaled local centimetres relative to DeliveryDropCenter + HoverHeight. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Delivery|Flight") FVector ArrivalStartPoint = FVector(-7000,0,1800);
