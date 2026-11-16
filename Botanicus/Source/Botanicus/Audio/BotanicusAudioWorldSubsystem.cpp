@@ -219,9 +219,9 @@ void UBotanicusAudioWorldSubsystem::Deinitialize()
 	WaterVoices.Reset();Super::Deinitialize();
 }
 
-UAudioComponent* UBotanicusAudioWorldSubsystem::PlaySpatialTransition(AActor* Owner,USoundBase* Asset,const FVector& Position,float Volume,float StartAt,USoundAttenuation* OverrideAttenuation)
+UAudioComponent* UBotanicusAudioWorldSubsystem::PlaySpatialTransition(AActor* Owner,USoundBase* Asset,const FVector& Position,float Volume,float StartAt,USoundAttenuation* OverrideAttenuation,float MaximumDistance)
 {
-    if(!Owner || !Asset || GetWorld()->GetNetMode()==NM_DedicatedServer || FVector::DistSquared(ListenerPosition(),Position)>FMath::Square(1800.f))return nullptr;
+    if(!Owner || !Asset || GetWorld()->GetNetMode()==NM_DedicatedServer || FVector::DistSquared(ListenerPosition(),Position)>FMath::Square(FMath::Max(1.f,MaximumDistance)))return nullptr;
     LoadCatalog();
     if(!TransitionConcurrency)
     {

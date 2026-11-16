@@ -196,3 +196,38 @@ bool UBotanicusJuiceAssetTools::BuildNoctifloreSpores(bool bResetPreviewDefaults
     return false;
 #endif
 }
+
+bool UBotanicusJuiceAssetTools::BuildDeliverySmoke()
+{
+#if WITH_EDITOR
+    const FString Path=TEXT("/Game/Botanicus/VFX/Delivery/NS_DeliverySmoke");
+    if(FPackageName::DoesPackageExist(Path))return LoadObject<UNiagaraSystem>(nullptr,*(Path+TEXT(".NS_DeliverySmoke")))!=nullptr;
+    auto* Original=LoadObject<UNiagaraSystem>(nullptr,TEXT("/Game/Botanicus/VFX/Juice/NS_BotanicusJuiceBurst.NS_BotanicusJuiceBurst"));
+    auto* Material=LoadObject<UMaterialInterface>(nullptr,TEXT("/Game/Botanicus/VFX/Delivery/M_DeliverySmoke.M_DeliverySmoke"));
+    if(!Original || !Material)return false;
+    auto* Package=CreatePackage(*Path);
+    auto* System=DuplicateObject<UNiagaraSystem>(Original,Package,TEXT("NS_DeliverySmoke"));
+    System->SetFlags(RF_Public|RF_Standalone);System->ClearFlags(RF_Transient);
+    for(auto& Handle:System->GetEmitterHandles())if(auto* Data=Handle.GetInstance().GetEmitterData())
+    {
+        Data->SimTarget=ENiagaraSimTarget::CPUSim;Data->bLocalSpace=false;
+        for(auto* Renderer:Data->GetRenderers())if(auto* Sprite=Cast<UNiagaraSpriteRendererProperties>(Renderer))Sprite->Material=Material;
+    }
+    auto& Store=System->GetExposedParameters();
+    Store.SetParameterValue(2,FNiagaraVariable(FNiagaraTypeDefinition::GetIntDef(),TEXT("User.BurstCount")),true);
+    Store.SetParameterValue(2.2f,FNiagaraVariable(FNiagaraTypeDefinition::GetFloatDef(),TEXT("User.Lifetime")),true);
+    Store.SetParameterValue(40.f,FNiagaraVariable(FNiagaraTypeDefinition::GetFloatDef(),TEXT("User.Size")),true);
+    Store.SetParameterValue(10.f,FNiagaraVariable(FNiagaraTypeDefinition::GetFloatDef(),TEXT("User.Radius")),true);
+    Store.SetParameterValue(FLinearColor(.6f,.58f,.54f,.3f),FNiagaraVariable(FNiagaraTypeDefinition::GetColorDef(),TEXT("User.Tint")),true);
+    Store.SetParameterValue(FVector3f(-25,0,35),FNiagaraVariable(FNiagaraTypeDefinition::GetVec3Def(),TEXT("User.Velocity")),true);
+    Store.SetParameterValue(FVector3f::ZeroVector,FNiagaraVariable(FNiagaraTypeDefinition::GetVec3Def(),TEXT("User.Gravity")),true);
+    System->SetFixedBounds(FBox(FVector(-500),FVector(500)));System->SetWarmupTime(0);
+    System->RequestCompile(true);System->WaitForCompilationComplete(false,false);
+    if(!System->IsReadyToRun())return false;
+    FAssetRegistryModule::AssetCreated(System);Package->MarkPackageDirty();
+    FSavePackageArgs Args;Args.TopLevelFlags=RF_Public|RF_Standalone;
+    return UPackage::SavePackage(Package,System,*FPackageName::LongPackageNameToFilename(Path,FPackageName::GetAssetPackageExtension()),Args);
+#else
+    return false;
+#endif
+}

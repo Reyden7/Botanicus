@@ -1,6 +1,8 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Growing/BotanicusPlantPotActor.h"
+#include "Growing/BotanicusAutomaticWatering.h"
+#include "Gardening/BotanicusGardeningSubsystem.h"
 #include "UI/BotanicusPlantContextSubsystem.h"
 #include "Visuals/BotanicusJuiceWorldSubsystem.h"
 #include "Audio/BotanicusAudioWorldSubsystem.h"
@@ -406,6 +408,7 @@ bool ABotanicusPlantPotActor::IsPlantElementCompatible() const
 void ABotanicusPlantPotActor::BeginPlay()
 {
 	Super::BeginPlay();
+    if(auto* Robots=GetWorld()->GetSubsystem<UBotanicusGardeningSubsystem>())Robots->Register(this);
 	if (PlantGrowthWidget)
 	{
 		if (UClass* WidgetClass = LoadClass<UUserWidget>(nullptr,
@@ -2313,4 +2316,22 @@ void ABotanicusPlantPotActor::SendInteractorMessage(
 void ABotanicusPlantPotActor::OnRep_GrowingState()
 {
 	RefreshVisuals();
+}
+
+
+bool ABotanicusPlantPotActor::GetAutomaticWateringNeed(int32 Slot,float Ratio,FBotanicusAutomaticWateringNeed& Out) const
+{
+    if(Slot!=0 || !GetIsReplicated() || IsActorBeingDestroyed() || !HasSoil() || PlantKey.IsNone() || bElementalDead ||
+        !IsPlantElementCompatible() || IsHidden() || ActorHasTag(TEXT("BotanicusPlacementPreview")) || ActorHasTag(TEXT("BotanicusEquippedPreview")) || ActorHasTag(TEXT("BotanicusInspectionPreview")))return false;
+    for(const AActor* Parent=GetAttachParentActor();Parent;Parent=Parent->GetAttachParentActor())if(Parent->IsA<APawn>())return false;
+    if(!FBotanicusAutomaticWateringNeed::Read(GetPlantDefinition(),WaterLevel,Ratio,Out))return false;
+    Out.SoilPoint=UBotanicusJuiceWorldSubsystem::SoilSurface(const_cast<ThisClass*>(this),GetActorLocation());return true;
+}
+float ABotanicusPlantPotActor::ApplyAutomaticWater(int32 Slot,float Ratio,float AvailableUnits,bool bFirstPulse)
+{
+    FBotanicusAutomaticWateringNeed N;if(!HasAuthority() || AvailableUnits<=0 || !GetAutomaticWateringNeed(Slot,Ratio,N))return 0;
+    const float Added=FMath::Min(FMath::Max(0.f,N.Target-WaterLevel),AvailableUnits/N.UnitsPerMoisture);
+    if(Added<=0)return 0;
+    WaterLevel=FMath::Min(N.Maximum,WaterLevel+Added);if(bFirstPulse)++WateringCount;
+    RefreshVisuals();ForceNetUpdate();return Added*N.UnitsPerMoisture;
 }

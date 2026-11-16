@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "BotanicusGameMode.h"
+#include "Gardening/BotanicusGardeningRobotBase.h"
 
 #include "Botanicus.h"
 #include "BotanicusCharacter.h"
@@ -653,6 +654,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		SavedItem.ActorClass = FSoftClassPath(EquipmentIt->GetClass());
 		SavedItem.Transform = EquipmentIt->GetActorTransform();
 		SavedItem.ItemKey = EquipmentIt->GetItemKey();
+        if(const auto* Station=Cast<ABotanicusGardeningRobotBase>(*EquipmentIt))SavedItem.GardeningRobot=Station->CaptureRobot();
 		SavedItem.Quantity = 1;
 		if (const ABotanicusPreparationWorkbenchActor* Workbench =
 				Cast<ABotanicusPreparationWorkbenchActor>(
@@ -1384,6 +1386,7 @@ void ABotanicusGameMode::RestoreWorldState()
 			Cast<ABotanicusLargeEquipmentActor>(RestoredItem))
 		{
 			Equipment->InitializeEquipment(RestoredItemKey);
+            if(auto* Station=Cast<ABotanicusGardeningRobotBase>(Equipment))Station->RestoreRobot(SavedItem.GardeningRobot);
 			if (ABotanicusPreparationWorkbenchActor* Workbench =
 					Cast<
 						ABotanicusPreparationWorkbenchActor>(

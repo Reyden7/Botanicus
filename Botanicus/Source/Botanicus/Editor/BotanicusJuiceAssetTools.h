@@ -12,5 +12,6 @@ public:
 	static FString InspectNiagara(const FString& AssetPath);
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Editor|Juice")
 	static bool BuildSpriteSystems();
+    UFUNCTION(BlueprintCallable,Category="Botanicus|Editor|Juice") static bool BuildDeliverySmoke();
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Editor|Juice") static bool BuildNoctifloreSpores(bool bResetPreviewDefaults=false);
 };

@@ -12,6 +12,7 @@ class UTextRenderComponent;
 class UWidgetComponent;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
+struct FBotanicusAutomaticWateringNeed;
 class UChildActorComponent;
 class UBotanicusPlantEnvironmentAlertWidget;
 class UBotanicusPlantEnvironmentDebugWidget;
@@ -23,6 +24,9 @@ class BOTANICUS_API ABotanicusPlantPotActor
 	GENERATED_BODY()
 
 public:
+    virtual int32 GetAutomaticWateringSlotCount() const {return 1;}
+    virtual bool GetAutomaticWateringNeed(int32 Slot,float Ratio,FBotanicusAutomaticWateringNeed& Out) const;
+    virtual float ApplyAutomaticWater(int32 Slot,float Ratio,float AvailableUnits,bool bFirstPulse);
 	ABotanicusPlantPotActor();
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;

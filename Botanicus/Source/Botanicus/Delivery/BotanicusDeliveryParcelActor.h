@@ -7,6 +7,8 @@
 #include "BotanicusDeliveryParcelActor.generated.h"
 
 class UNiagaraSystem;
+class USoundBase;
+class USoundAttenuation;
 class UBoxComponent;
 class UPhysicalMaterial;
 class UTextRenderComponent;
@@ -64,6 +66,15 @@ public:
 	void HandOffOpeningVisual();
 
 private:
+    UPROPERTY(EditAnywhere,Category="Botanicus|Parcel|Impact") TSoftObjectPtr<USoundBase> DeliveryImpactSound;
+    UPROPERTY(EditAnywhere,Category="Botanicus|Parcel|Impact") TSoftObjectPtr<USoundAttenuation> DeliveryImpactAttenuation;
+    UPROPERTY(EditAnywhere,Category="Botanicus|Parcel|Impact",meta=(ClampMin="0",ClampMax="1")) float DeliveryImpactVolume=.55f;
+    UPROPERTY(EditAnywhere,Category="Botanicus|Parcel|Impact",meta=(ClampMin="0",Units="cm/s")) float MinimumDeliveryImpactSpeed=150;
+    bool bDeliveryImpactArmed=false;
+    double DeliveryImpactArmedAt=0;
+    UFUNCTION() void OnDeliveryHit(UPrimitiveComponent* Component,AActor* OtherActor,UPrimitiveComponent* OtherComponent,
+        FVector NormalImpulse,const FHitResult& Hit);
+    UFUNCTION(NetMulticast,Unreliable) void MulticastDeliveryImpact(FVector_NetQuantize Position,float Pitch,double StartedAt);
 	UPROPERTY(Transient) TObjectPtr<UNiagaraSystem> PreloadedConfetti;
 	UPROPERTY(ReplicatedUsing=OnRep_ParcelState) FGuid OpeningVisualId;
 	UPROPERTY(ReplicatedUsing=OnRep_ParcelState) double OpeningStartedAt = -1;

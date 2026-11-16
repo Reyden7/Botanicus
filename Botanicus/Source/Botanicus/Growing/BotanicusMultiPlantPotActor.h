@@ -52,6 +52,9 @@ class BOTANICUS_API ABotanicusMultiPlantPotActor
 	GENERATED_BODY()
 
 public:
+    virtual int32 GetAutomaticWateringSlotCount() const override {return PlantSlots.Num();}
+    virtual bool GetAutomaticWateringNeed(int32 Slot,float Ratio,FBotanicusAutomaticWateringNeed& Out) const override;
+    virtual float ApplyAutomaticWater(int32 Slot,float Ratio,float AvailableUnits,bool bFirstPulse) override;
 	ABotanicusMultiPlantPotActor();
 	virtual void BeginPlay() override;
 

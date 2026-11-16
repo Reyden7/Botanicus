@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Gardening/BotanicusGardeningTypes.h"
 #include "GameFramework/SaveGame.h"
 #include "Growing/BotanicusPlantCatalog.h"
 #include "QuickBar/BotanicusQuickBarComponent.h"
@@ -170,6 +171,7 @@ USTRUCT()
 struct BOTANICUS_API FBotanicusSavedWorldItem
 {
 	GENERATED_BODY()
+    UPROPERTY() FBotanicusGardeningSave GardeningRobot;
     UPROPERTY() TArray<FBotanicusSavedSalesShelfSlot> SalesShelfSlots;
     UPROPERTY() FGuid DisplayedPotInstanceId;
 

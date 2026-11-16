@@ -5,6 +5,10 @@
 #include "Delivery/BotanicusParcelOpeningSettings.h"
 #include "Delivery/BotanicusParcelOpeningVisualActor.h"
 #include "NiagaraSystem.h"
+#include "Audio/BotanicusAudioWorldSubsystem.h"
+#include "Sound/SoundBase.h"
+#include "Sound/SoundAttenuation.h"
+#include "Components/AudioComponent.h"
 #include "GameFramework/GameStateBase.h"
 #include "EngineUtils.h"
 #include "BotanicusCharacter.h"
@@ -33,6 +37,8 @@
 
 ABotanicusDeliveryParcelActor::ABotanicusDeliveryParcelActor()
 {
+    DeliveryImpactSound=TSoftObjectPtr<USoundBase>(FSoftObjectPath(TEXT("/Game/Botanicus/Audio/Delivery/SW_DeliveryImpact.SW_DeliveryImpact")));
+    DeliveryImpactAttenuation=TSoftObjectPtr<USoundAttenuation>(FSoftObjectPath(TEXT("/Game/Botanicus/Audio/Delivery/SA_DeliveryImpact.SA_DeliveryImpact")));
 	bAlwaysRelevant = true;
 	SetReplicateMovement(true);
 	PrimaryActorTick.bCanEverTick = true;
@@ -49,6 +55,8 @@ ABotanicusDeliveryParcelActor::ABotanicusDeliveryParcelActor()
 	DeliveryBody->SetMassOverrideInKg(NAME_None, 3.0f);
 	DeliveryBody->SetLinearDamping(0.1f);
 	DeliveryBody->SetAngularDamping(1.5f);
+    DeliveryBody->SetNotifyRigidBodyCollision(true);
+    DeliveryBody->OnComponentHit.AddDynamic(this,&ThisClass::OnDeliveryHit);
 	DeliveryBody->OnComponentSleep.AddDynamic(this, &ThisClass::OnDeliveryBodySleep);
 	DeliveryBody->OnComponentWake.AddDynamic(this, &ThisClass::OnDeliveryBodyWake);
 	DeliveryPhysicalMaterial = CreateDefaultSubobject<UPhysicalMaterial>(TEXT("Delivery Cardboard Physics"));
@@ -294,6 +302,7 @@ void ABotanicusDeliveryParcelActor::StartDeliveryPhysics(bool bAddInitialSpin)
 	DeliveryBody->SetSimulatePhysics(true);
 	if (bAddInitialSpin)
 	{
+        bDeliveryImpactArmed=true; DeliveryImpactArmedAt=GetWorld()->GetTimeSeconds();
 		DeliveryBody->SetPhysicsAngularVelocityInDegrees(FVector(1.5f, 2.0f, 8.0f));
 	}
 	DeliveryBody->WakeAllRigidBodies();
@@ -852,4 +861,24 @@ void ABotanicusDeliveryParcelActor::HandOffOpeningVisual()
 	SkeletalMeshVisual->SetVisibility(false);
 	SkeletalMeshVisual->SetComponentTickEnabled(false);
 	for (UStaticMeshComponent* Segment : TapeSegments) Segment->SetVisibility(false);
+}
+
+void ABotanicusDeliveryParcelActor::OnDeliveryHit(UPrimitiveComponent* Component,AActor* OtherActor,
+    UPrimitiveComponent* OtherComponent,FVector NormalImpulse,const FHitResult& Hit)
+{
+    if (!HasAuthority() || !bDeliveryImpactArmed || GetWorld()->GetTimeSeconds()-DeliveryImpactArmedAt<.15) return;
+    const float ImpactSpeed=NormalImpulse.Size()/FMath::Max(1.f,DeliveryBody->GetMass());
+    if (ImpactSpeed<MinimumDeliveryImpactSpeed) return;
+    bDeliveryImpactArmed=false;
+    const auto* State=GetWorld()->GetGameState();
+    MulticastDeliveryImpact(Hit.ImpactPoint,FMath::FRandRange(.98f,1.02f),State ? State->GetServerWorldTimeSeconds():GetWorld()->GetTimeSeconds());
+}
+void ABotanicusDeliveryParcelActor::MulticastDeliveryImpact_Implementation(FVector_NetQuantize Position,float Pitch,double StartedAt)
+{
+    if(GetNetMode()==NM_DedicatedServer)return;
+    const auto* State=GetWorld()->GetGameState();
+    if(State && State->GetServerWorldTimeSeconds()-StartedAt>.5)return;
+    if(auto* Audio=GetWorld()->GetSubsystem<UBotanicusAudioWorldSubsystem>())
+        if(auto* Voice=Audio->PlaySpatialTransition(this,DeliveryImpactSound.LoadSynchronous(),Position,DeliveryImpactVolume,0,DeliveryImpactAttenuation.LoadSynchronous(),2500))
+            Voice->SetPitchMultiplier(Pitch);
 }

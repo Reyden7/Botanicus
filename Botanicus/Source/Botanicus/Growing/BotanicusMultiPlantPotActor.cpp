@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Growing/BotanicusMultiPlantPotActor.h"
+#include "Growing/BotanicusAutomaticWatering.h"
 #include "UI/BotanicusPlantContextSubsystem.h"
 #include "Visuals/BotanicusJuiceWorldSubsystem.h"
 #include "Audio/BotanicusAudioWorldSubsystem.h"
@@ -1451,4 +1452,22 @@ void ABotanicusMultiPlantPotActor::ConfigureAsLocalPreview(
 	{
 		MultiStatusText->SetVisibility(false);
 	}
+}
+
+
+bool ABotanicusMultiPlantPotActor::GetAutomaticWateringNeed(int32 Index,float Ratio,FBotanicusAutomaticWateringNeed& Out) const
+{
+    if(!GetIsReplicated() || IsActorBeingDestroyed() || SoilUnits<=0 || IsHidden() || !PlantSlots.IsValidIndex(Index) || ActorHasTag(TEXT("BotanicusPlacementPreview")) || ActorHasTag(TEXT("BotanicusEquippedPreview")) || ActorHasTag(TEXT("BotanicusInspectionPreview")))return false;
+    for(const AActor* P=GetAttachParentActor();P;P=P->GetAttachParentActor())if(P->IsA<APawn>())return false;
+    const auto& S=PlantSlots[Index];if(S.bElementalDead || S.PlantKey.IsNone())return false;
+    const auto* D=FindPlant(S.PlantKey);if(D && GetPotElement()!=EBotanicusPlantElement::Normal && D->Element!=GetPotElement())return false;
+    if(!FBotanicusAutomaticWateringNeed::Read(D,S.WaterLevel,Ratio,Out))return false;
+    Out.SoilPoint=GetActorTransform().TransformPosition(GetSlotLocalLocation(Index));return true;
+}
+float ABotanicusMultiPlantPotActor::ApplyAutomaticWater(int32 Index,float Ratio,float AvailableUnits,bool bFirstPulse)
+{
+    FBotanicusAutomaticWateringNeed N;if(!HasAuthority() || AvailableUnits<=0 || !GetAutomaticWateringNeed(Index,Ratio,N))return 0;
+    auto& S=PlantSlots[Index];const float Added=FMath::Min(FMath::Max(0.f,N.Target-S.WaterLevel),AvailableUnits/N.UnitsPerMoisture);
+    if(Added<=0)return 0;S.WaterLevel=FMath::Min(N.Maximum,S.WaterLevel+Added);if(bFirstPulse)++S.WateringCount;
+    RefreshVisuals();ForceNetUpdate();return Added*N.UnitsPerMoisture;
 }

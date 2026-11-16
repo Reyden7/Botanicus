@@ -49,7 +49,7 @@ public:
 	UFUNCTION(BlueprintPure, Category="Botanicus|Audio|Diagnostics") int32 GetActiveAmbienceVoiceCount() const;
     UAudioComponent* StartRefillLoop(AActor* Owner,const FVector& Position);
     /** Local, already synchronized presentation; no extra network event. Caller may fade/stop the voice. */
-    UAudioComponent* PlaySpatialTransition(AActor* Owner,USoundBase* Asset,const FVector& Position,float Volume,float StartAt=0.f,USoundAttenuation* OverrideAttenuation=nullptr);
+    UAudioComponent* PlaySpatialTransition(AActor* Owner,USoundBase* Asset,const FVector& Position,float Volume,float StartAt=0.f,USoundAttenuation* OverrideAttenuation=nullptr,float MaximumDistance=1800.f);
 	ABotanicusAudioRelay* GetRelay();
 private:
 	void UpdateLocalAudio();

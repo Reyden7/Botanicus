@@ -1660,7 +1660,7 @@ bool ABotanicusPlayerController::IsFurnitureActor(
 		ItemKey.ToString().StartsWith(TEXT("WorkSurface")) ||
 		ItemKey.ToString().StartsWith(TEXT("StorageShelf")) ||
         ABotanicusSalesShelfActor::CapacityForKey(ItemKey)>0 ||
-		ItemKey.ToString().StartsWith(TEXT("Climate"));
+		ItemKey.ToString().StartsWith(TEXT("Climate")) || ItemKey==TEXT("GardeningRobot_L1");
 }
 
 void ABotanicusPlayerController::SetFurnitureActorHighlighted(
