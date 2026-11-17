@@ -1,4 +1,5 @@
 #include "Gardening/BotanicusGardeningRobot.h"
+#include "Visuals/BotanicusReservoirVisualComponent.h"
 #include "Gardening/BotanicusGardeningRobotBase.h"
 #include "Gardening/BotanicusGardeningSubsystem.h"
 #include "Growing/BotanicusPlantPotActor.h"
@@ -35,6 +36,7 @@ ABotanicusGardeningRobot::ABotanicusGardeningRobot()
     if(Shape.Succeeded())Body->SetStaticMesh(Shape.Object);
     Body->SetRelativeScale3D(FVector(.4f,.4f,.55f));Body->SetRelativeLocation(FVector(0,0,-12.5f));
     Body->SetCollisionEnabled(ECollisionEnabled::NoCollision);Body->SetCanEverAffectNavigation(false);
+    ReservoirVisual=CreateDefaultSubobject<UBotanicusReservoirVisualComponent>(TEXT("ReservoirVisual"));ReservoirVisual->SetupAttachment(Body);
     WaterOutlet=CreateDefaultSubobject<USceneComponent>(TEXT("WaterOutlet"));WaterOutlet->SetupAttachment(GetRootComponent());
     WaterOutlet->SetRelativeLocation(FVector(25,0,20));
     Stream=CreateDefaultSubobject<UNiagaraComponent>(TEXT("WaterStream"));Stream->SetupAttachment(WaterOutlet);
@@ -45,9 +47,11 @@ ABotanicusGardeningRobot::ABotanicusGardeningRobot()
     static ConstructorHelpers::FObjectFinder<UNiagaraSystem> Burst(TEXT("/Game/Botanicus/VFX/Juice/NS_BotanicusJuiceBurst.NS_BotanicusJuiceBurst"));
     if(Drops.Succeeded())Stream->SetAsset(Drops.Object);if(Burst.Succeeded())Splash->SetAsset(Burst.Object);
 }
+void ABotanicusGardeningRobot::OnConstruction(const FTransform& Transform)
+{Super::OnConstruction(Transform);ReservoirVisual->Configure(Body,false);ReservoirVisual->SetFillFraction(CurrentWater/FMath::Max(.001f,Config.WaterCapacity));}
 void ABotanicusGardeningRobot::BeginPlay()
 {
-    Super::BeginPlay();GetCharacterMovement()->MaxWalkSpeed=Config.MovementSpeed;
+    Super::BeginPlay();ReservoirVisual->Configure(Body,false);OnRep_Water();GetCharacterMovement()->MaxWalkSpeed=Config.MovementSpeed;
     if(HasAuthority() && !GetController())SpawnDefaultController();
     if(auto* Clock=GetWorld()->GetGameState<ABotanicusGameState>())LastClock=Clock->GetDayTimeMinutes();
     LastUpdate=GetWorld()->GetTimeSeconds();
@@ -287,9 +291,12 @@ void ABotanicusGardeningRobot::UpdateRobot()
     else if(Now>=NextSearch){State=EBotanicusGardeningState::SearchingPlant;Search();}
     UpdateCosmetics();
 }
+void ABotanicusGardeningRobot::OnRep_Water()
+{if(ReservoirVisual)ReservoirVisual->SetFillFraction(CurrentWater/FMath::Max(.001f,Config.WaterCapacity));}
 void ABotanicusGardeningRobot::UpdateCosmetics()
 {
     if(GetNetMode()==NM_DedicatedServer)return;
+    ReservoirVisual->SetFillFraction(CurrentWater/FMath::Max(.001f,Config.WaterCapacity));
     const bool bWater=State==EBotanicusGardeningState::Watering && IsValid(Target) && !Carrier && CurrentWater>0;
     if(!bWater){if(Stream->IsActive())Stream->DeactivateImmediate();if(Splash->IsActive())Splash->DeactivateImmediate();return;}
     const FVector Nozzle=WaterOutlet->GetComponentLocation();

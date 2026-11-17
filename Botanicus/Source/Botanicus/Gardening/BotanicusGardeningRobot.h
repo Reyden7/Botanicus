@@ -9,12 +9,15 @@ class ABotanicusPlantPotActor;
 class UNiagaraComponent;
 class UStaticMeshComponent;
 struct FBotanicusAutomaticWateringNeed;
+class UBotanicusReservoirVisualComponent;
 UCLASS()
 class BOTANICUS_API ABotanicusGardeningRobot : public ACharacter, public IBotanicusInteractable
 {
     GENERATED_BODY()
 public:
     ABotanicusGardeningRobot();
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Reservoir") TObjectPtr<UBotanicusReservoirVisualComponent> ReservoirVisual;
+    virtual void OnConstruction(const FTransform& Transform) override;
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type Reason) override;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out) const override;
@@ -32,7 +35,7 @@ public:
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Replicated,Category="Robot") FGuid RobotId;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Replicated,Category="Robot") TObjectPtr<ABotanicusGardeningRobotBase> Base;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Replicated,Category="Robot") float Battery=1;
-    UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Replicated,Category="Robot") float CurrentWater=1;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly,ReplicatedUsing=OnRep_Water,Category="Robot") float CurrentWater=1;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Replicated,Category="Robot") bool bEnabled=true;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Replicated,Category="Robot") EBotanicusGardeningState State=EBotanicusGardeningState::Inactive;
 private:
@@ -48,6 +51,7 @@ private:
     void AccountResources(float Minutes,float Seconds);
     void FailMove();
     void UpdateCosmetics();
+    UFUNCTION() void OnRep_Water();
     bool DropCarriedRobot();
     UFUNCTION() void OnRep_Carrier();
     UPROPERTY(Replicated) TObjectPtr<ABotanicusPlantPotActor> Target;

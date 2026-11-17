@@ -1,4 +1,5 @@
 #include "Growing/BotanicusWaterReserveActor.h"
+#include "Visuals/BotanicusReservoirVisualComponent.h"
 #include "Growing/BotanicusWateringCanActor.h"
 #include "BotanicusPlayerController.h"
 #include "BotanicusGameMode.h"
@@ -21,6 +22,7 @@
 
 ABotanicusWaterReserveActor::ABotanicusWaterReserveActor()
 {
+    ReservoirVisual=CreateDefaultSubobject<UBotanicusReservoirVisualComponent>(TEXT("ReservoirVisual"));ReservoirVisual->SetupAttachment(SceneRoot);
     ReserveText=CreateDefaultSubobject<UTextRenderComponent>(TEXT("Reserve Label"));ReserveText->SetupAttachment(SceneRoot);
     ReserveText->SetVisibility(false);ReserveText->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     FillZone=CreateDefaultSubobject<UBoxComponent>(TEXT("Refill Zone"));FillZone->SetupAttachment(SceneRoot);
@@ -77,6 +79,9 @@ void ABotanicusWaterReserveActor::ApplyItemDefinition()
 {
     Super::ApplyItemDefinition();
     if(FillZone)BuildZone();
+    if(ReservoirVisual && Mesh && Mesh->GetStaticMesh() && Mesh->GetStaticMesh()->GetPathName()==TEXT("/Game/Botanicus/Items/itemsMesh/ReservoirEau/cuve_d_eau.cuve_d_eau"))
+    {ReservoirVisual->Configure(Mesh,true);ReservoirVisual->SetFillFraction(1);}
+    else if(ReservoirVisual)ReservoirVisual->SetReservoirVisible(false);
 }
 void ABotanicusWaterReserveActor::OnConstruction(const FTransform& Transform){Super::OnConstruction(Transform);BuildZone();}
 bool ABotanicusWaterReserveActor::IsRealStation() const
@@ -244,7 +249,7 @@ void ABotanicusWaterReserveActor::StopCosmetics()
 }
 void ABotanicusWaterReserveActor::ConfigureAsLocalPreview(bool bIsValid)
 {
-    GetWorldTimerManager().ClearTimer(StationTimer);
+    GetWorldTimerManager().ClearTimer(StationTimer);ReservoirVisual->SetReservoirVisible(false);
     Super::ConfigureAsLocalPreview(bIsValid);ReserveText->SetVisibility(false);ZoneFloor->SetVisibility(false);for(UStaticMeshComponent* C:ZoneBorder)C->SetVisibility(false);
     FaucetInteraction->SetCollisionEnabled(ECollisionEnabled::NoCollision);StopCosmetics();
 }

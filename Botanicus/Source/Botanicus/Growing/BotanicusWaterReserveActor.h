@@ -9,6 +9,7 @@ class UTextRenderComponent;
 class UNiagaraComponent;
 class UAudioComponent;
 class UMaterialInstanceDynamic;
+class UBotanicusReservoirVisualComponent;
 USTRUCT()
 struct FBotanicusRefillStationState
 {
@@ -25,6 +26,7 @@ class BOTANICUS_API ABotanicusWaterReserveActor : public ABotanicusPlaceableItem
 public:
     friend class UBotanicusRefillValidation;
     ABotanicusWaterReserveActor();
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Reservoir") TObjectPtr<UBotanicusReservoirVisualComponent> ReservoirVisual;
     virtual void OnConstruction(const FTransform& Transform) override;
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type Reason) override;
