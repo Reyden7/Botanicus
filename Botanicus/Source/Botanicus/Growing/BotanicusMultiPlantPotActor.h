@@ -53,6 +53,7 @@ class BOTANICUS_API ABotanicusMultiPlantPotActor
 
 public:
     virtual int32 GetAutomaticWateringSlotCount() const override {return PlantSlots.Num();}
+    virtual bool IsAutomaticWateringMature(int32 Slot) const override {return IsMature(Slot);}
     virtual bool GetAutomaticWateringNeed(int32 Slot,float Ratio,FBotanicusAutomaticWateringNeed& Out) const override;
     virtual float ApplyAutomaticWater(int32 Slot,float Ratio,float AvailableUnits,bool bFirstPulse) override;
 	ABotanicusMultiPlantPotActor();

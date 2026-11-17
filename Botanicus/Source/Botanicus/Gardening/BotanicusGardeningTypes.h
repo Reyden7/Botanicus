@@ -45,3 +45,20 @@ struct BOTANICUS_API FBotanicusGardeningSave
     UPROPERTY() bool bAwaitFullCharge=false;
     UPROPERTY() EBotanicusGardeningState State=EBotanicusGardeningState::Inactive;
 };
+
+/** Transient activity gates; intentionally absent from the save schema. */
+UENUM(BlueprintType)
+enum class EBotanicusRobotActivity : uint8
+{
+    None, StoppingForWater, AimingAtPlant, PreparingWater, Watering, FinishingWater,
+    ApproachingDock, StoppingAtDock, TurningAtDock, ReversingToDock, Docked, LeavingDock
+};
+USTRUCT(BlueprintType)
+struct FBotanicusRobotPresentation
+{
+    GENERATED_BODY()
+    UPROPERTY(BlueprintReadOnly) EBotanicusRobotActivity Activity=EBotanicusRobotActivity::None;
+    UPROPERTY(BlueprintReadOnly) double StartedAt=0;
+    UPROPERTY(BlueprintReadOnly) float Duration=0;
+    UPROPERTY(BlueprintReadOnly) float AnimationStart=0;
+};

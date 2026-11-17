@@ -1,6 +1,11 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "IllegalTrade/BotanicusIllegalPlanterActor.h"
+#include "Gardening/BotanicusGardeningSubsystem.h"
+#include "Growing/BotanicusAutomaticWatering.h"
+#include "Environment/BotanicusClandestineDoor.h"
+#include "BotanicusGameState.h"
+#include "EngineUtils.h"
 #include "UI/BotanicusPlantContextSubsystem.h"
 #include "Visuals/BotanicusJuiceWorldSubsystem.h"
 #include "Audio/BotanicusAudioWorldSubsystem.h"
@@ -162,6 +167,7 @@ void ABotanicusIllegalPlanterActor::BeginPlay()
 	RefreshVisuals();
 
     if(auto* Context=GetWorld()->GetSubsystem<UBotanicusPlantContextSubsystem>()) Context->RegisterPlant(this);
+    if(auto* Robots=GetWorld()->GetSubsystem<UBotanicusGardeningSubsystem>())Robots->Register(this);
 }
 
 void ABotanicusIllegalPlanterActor::ApplyItemDefinition()
@@ -925,4 +931,49 @@ void ABotanicusIllegalPlanterActor::GetLifetimeReplicatedProps(
 	DOREPLIFETIME(ABotanicusIllegalPlanterActor, PlanterLevel);
 	DOREPLIFETIME(ABotanicusIllegalPlanterActor, SoilUnits);
 	DOREPLIFETIME(ABotanicusIllegalPlanterActor, PlantSlots);
+}
+
+
+bool ABotanicusIllegalPlanterActor::IsAutomaticWateringMature(int32 Slot) const
+{
+    return !PlantSlots.IsValidIndex(Slot) || PlantSlots[Slot].GrowthProgress>=1.f;
+}
+bool ABotanicusIllegalPlanterActor::IsAutomaticWateringAllowed() const
+{
+    const auto* Clock=GetWorld()?GetWorld()->GetGameState<ABotanicusGameState>():nullptr;
+    if(!Clock || !Clock->IsIllegalTradeActive())return false;
+    auto* Door=AutomaticWateringDoor.Get();
+    if(!IsValid(Door) || !Door->ContainsRearLocation(GetActorLocation()))
+    {
+        AutomaticWateringDoor.Reset();
+        for(TActorIterator<ABotanicusClandestineDoor> I(GetWorld());I;++I)
+            if(I->ContainsRearLocation(GetActorLocation())){AutomaticWateringDoor=*I;break;}
+        Door=AutomaticWateringDoor.Get();
+    }
+    return IsValid(Door) && Door->IsRobotAccessOpen();
+}
+bool ABotanicusIllegalPlanterActor::GetAutomaticWateringNeed(int32 Slot,float Ratio,FBotanicusAutomaticWateringNeed& Out) const
+{
+    if(!GetIsReplicated() || IsActorBeingDestroyed() || IsHidden() || !PlantSlots.IsValidIndex(Slot) ||
+        IsAutomaticWateringMature(Slot) || !IsAutomaticWateringAllowed() ||
+        ActorHasTag(TEXT("BotanicusPlacementPreview")) || ActorHasTag(TEXT("BotanicusEquippedPreview")) || ActorHasTag(TEXT("BotanicusInspectionPreview")))return false;
+    for(const AActor* Parent=GetAttachParentActor();Parent;Parent=Parent->GetAttachParentActor())if(Parent->IsA<APawn>())return false;
+    const auto* Settings=GetDefault<UBotanicusIllegalTradeSettings>();const auto& Level=Settings->GetPlanterLevel(PlanterLevel);
+    const auto& Plant=PlantSlots[Slot];
+    if(SoilUnits<Level.RequiredSoilUnits || Plant.PlantId.IsNone() || !Settings->FindPlant(Plant.PlantId) || Level.MaximumWater<=KINDA_SMALL_NUMBER)return false;
+    Out.Current=FMath::Clamp(Plant.WaterAmount/Level.MaximumWater,0.f,1.f);
+    Out.Minimum=.5f; // Designer rule: start below 50% of this slot's existing reserve.
+    Out.Maximum=1.f;Out.Target=FMath::Lerp(Out.Minimum,Out.Maximum,FMath::Clamp(Ratio,0.f,1.f));
+    Out.UnitsPerMoisture=Level.MaximumWater; // Illegal water already uses watering-can reservoir units directly.
+    const float X=(Slot-.5f*(PlantSlots.Num()-1))*GetPlantSlotSpacing();
+    Out.SoilPoint=GetActorTransform().TransformPosition(FVector(X,0,SoilBottomHeight+SoilVolumeHeight));
+    return true;
+}
+float ABotanicusIllegalPlanterActor::ApplyAutomaticWater(int32 Slot,float Ratio,float AvailableUnits,bool bFirstPulse)
+{
+    FBotanicusAutomaticWateringNeed Need;
+    if(!HasAuthority() || AvailableUnits<=0 || !GetAutomaticWateringNeed(Slot,Ratio,Need))return 0;
+    const float Used=FMath::Min(AvailableUnits,Need.UnitsNeeded());if(Used<=0)return 0;
+    auto& Plant=PlantSlots[Slot];Plant.WaterAmount=FMath::Min(Need.Maximum*Need.UnitsPerMoisture,Plant.WaterAmount+Used);
+    RefreshVisuals();ForceNetUpdate();ScheduleAutosave();return Used;
 }

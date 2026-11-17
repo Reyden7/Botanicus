@@ -87,6 +87,9 @@ public:
     UFUNCTION(BlueprintPure,Category="Door") bool IsWaitingForExit() const {return Presentation.bWaitingForExit;}
     UFUNCTION(BlueprintPure,Category="Door") bool IsPresentationReady() const {return Presentation.bReady;}
     const FBotanicusDoorPresentation& GetPresentation() const {return Presentation;}
+    /** Physical access only; callers also check the existing clandestine schedule. */
+    bool IsRobotAccessOpen() const;
+    bool ContainsRearLocation(const FVector& Location) const;
     UBoxComponent* GetBlocker() const {return PassageBlocker;}
     const TArray<TObjectPtr<UStaticMeshComponent>>& GetSections() const {return Sections;}
     /** Shared server-state refresh, also used by the opt-in integration test. */
@@ -101,7 +104,7 @@ private:
     void Publish();
     bool PortalOccupied() const;
     bool RearOccupied() const;
-    bool HasPawnInBox(const FBox& Box,bool bPlayersOnly) const;
+    bool HasPawnInBox(const FBox& Box,bool bRearOccupantsOnly) const;
     void SetBlocked(bool bBlocked);
     double ServerNow() const;
     FVector TrackPoint(float Distance,float& Pitch) const;

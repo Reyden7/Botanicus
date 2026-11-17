@@ -2,6 +2,7 @@
 #include "Environment/BotanicusAmbienceDirector.h"
 #include "Audio/BotanicusAudioWorldSubsystem.h"
 #include "BotanicusCharacter.h"
+#include "Gardening/BotanicusGardeningRobot.h"
 #include "BotanicusGameState.h"
 #include "Components/BoxComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -145,21 +146,33 @@ void ABotanicusClandestineDoor::BeginPlay()
     ApplyAccess();ApplyPanels();UpdateLocalEffects();
     if(HasAuthority())GetWorldTimerManager().SetTimer(AuthorityTimer,this,&ThisClass::RefreshAuthority,.1f,true);
 }
-bool ABotanicusClandestineDoor::HasPawnInBox(const FBox& Box,bool bPlayersOnly) const
+bool ABotanicusClandestineDoor::HasPawnInBox(const FBox& Box,bool bRearOccupantsOnly) const
 {
     TArray<FOverlapResult> Hits;FCollisionObjectQueryParams Objects(ECC_Pawn);FCollisionQueryParams Query(SCENE_QUERY_STAT(DoorSafety),false,this);
     GetWorld()->OverlapMultiByObjectType(Hits,GetActorTransform().TransformPosition(Box.GetCenter()),GetActorQuat(),Objects,FCollisionShape::MakeBox(Box.GetExtent()*GetActorScale3D().GetAbs()),Query);
     for(const auto& Hit:Hits)
     {
         const APawn* Pawn=Cast<APawn>(Hit.GetActor());
-        if(!Pawn || (bPlayersOnly && !Pawn->IsA<ABotanicusCharacter>()))continue;
+        if(!Pawn || (bRearOccupantsOnly && !Pawn->IsA<ABotanicusCharacter>() && !Pawn->IsA<ABotanicusGardeningRobot>()))continue;
         // Cosmetic body/hand collision must not grant emergency access through a closed door.
         if(const ACharacter* Character=Cast<ACharacter>(Pawn); Character && Hit.GetComponent()!=Character->GetCapsuleComponent())continue;
-        // The portal overlap protects straddling characters. Rear-room escape is only for a player whose capsule centre is actually inside.
-        if(bPlayersOnly && !Box.IsInsideOrOn(GetActorTransform().InverseTransformPosition(Pawn->GetActorLocation())))continue;
+        // The portal overlap protects straddling characters. Rear-room escape is only for a player or gardening robot whose capsule centre is actually inside.
+        if(bRearOccupantsOnly && !Box.IsInsideOrOn(GetActorTransform().InverseTransformPosition(Pawn->GetActorLocation())))continue;
         return true;
     }
     return false;
+}
+bool ABotanicusClandestineDoor::ContainsRearLocation(const FVector& Location) const
+{
+    const FVector Local=GetActorTransform().InverseTransformPosition(Location);
+    for(const FBox& Box:RearSafetyBoxes)if(Box.IsValid && Box.IsInsideOrOn(Local))return true;
+    return false;
+}
+bool ABotanicusClandestineDoor::IsRobotAccessOpen() const
+{
+    return Presentation.bReady && Presentation.bTargetOpen && !Presentation.bPassageBlocked &&
+        Presentation.MotionDuration<=0 && GetOpenFraction()>=1.f-KINDA_SMALL_NUMBER &&
+        PassageBlocker->GetCollisionEnabled()==ECollisionEnabled::NoCollision;
 }
 bool ABotanicusClandestineDoor::PortalOccupied() const{return HasPawnInBox(FBox(FVector(-85,-Width*.5f-35,-10),FVector(85,Width*.5f+35,Height+50)),false);}
 bool ABotanicusClandestineDoor::RearOccupied() const{for(const FBox& B:RearSafetyBoxes)if(B.IsValid && HasPawnInBox(B,true))return true;return false;}

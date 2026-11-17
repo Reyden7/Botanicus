@@ -2,7 +2,7 @@
 #include "CoreMinimal.h"
 #include "Growing/BotanicusPlantCatalog.h"
 
-/** Read-only species-specific request. Units use the existing .12 reservoir/second conversion. */
+/** Read-only per-slot request. UnitsPerMoisture converts normalized moisture to existing reservoir units. */
 struct FBotanicusAutomaticWateringNeed
 {
     float Current=0, Minimum=0, Target=0, Maximum=0, UnitsPerMoisture=0;
@@ -19,3 +19,13 @@ struct FBotanicusAutomaticWateringNeed
         return true;
     }
 };
+
+/** Dispatch only: normal pots retain their existing virtual watering implementation. */
+namespace BotanicusAutomaticWatering
+{
+    int32 SlotCount(const AActor* Target);
+    bool IsMature(const AActor* Target,int32 Slot);
+    bool CanAccess(const AActor* Target);
+    bool Read(const AActor* Target,int32 Slot,float Ratio,FBotanicusAutomaticWateringNeed& Out);
+    float Apply(AActor* Target,int32 Slot,float Ratio,float AvailableUnits,bool bFirstPulse);
+}

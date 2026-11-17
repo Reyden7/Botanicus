@@ -2321,7 +2321,7 @@ void ABotanicusPlantPotActor::OnRep_GrowingState()
 
 bool ABotanicusPlantPotActor::GetAutomaticWateringNeed(int32 Slot,float Ratio,FBotanicusAutomaticWateringNeed& Out) const
 {
-    if(Slot!=0 || !GetIsReplicated() || IsActorBeingDestroyed() || !HasSoil() || PlantKey.IsNone() || bElementalDead ||
+    if(IsAutomaticWateringMature(Slot) || Slot!=0 || !GetIsReplicated() || IsActorBeingDestroyed() || !HasSoil() || PlantKey.IsNone() || bElementalDead ||
         !IsPlantElementCompatible() || IsHidden() || ActorHasTag(TEXT("BotanicusPlacementPreview")) || ActorHasTag(TEXT("BotanicusEquippedPreview")) || ActorHasTag(TEXT("BotanicusInspectionPreview")))return false;
     for(const AActor* Parent=GetAttachParentActor();Parent;Parent=Parent->GetAttachParentActor())if(Parent->IsA<APawn>())return false;
     if(!FBotanicusAutomaticWateringNeed::Read(GetPlantDefinition(),WaterLevel,Ratio,Out))return false;

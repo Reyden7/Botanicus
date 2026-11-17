@@ -41,6 +41,7 @@ public:
     FVector2D GetSloshSlope() const{return Slosh;}
 private:
     bool CanAnimate() const;
+    void ContainerTransformUpdated(USceneComponent* Component,EUpdateTransformFlags Flags,ETeleportType Teleport);
     void WriteSlosh();
     UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> ContainerMesh;
     UPROPERTY(Transient) TObjectPtr<UStaticMesh> BuiltMesh;

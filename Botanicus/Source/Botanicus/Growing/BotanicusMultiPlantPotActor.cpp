@@ -1457,7 +1457,7 @@ void ABotanicusMultiPlantPotActor::ConfigureAsLocalPreview(
 
 bool ABotanicusMultiPlantPotActor::GetAutomaticWateringNeed(int32 Index,float Ratio,FBotanicusAutomaticWateringNeed& Out) const
 {
-    if(!GetIsReplicated() || IsActorBeingDestroyed() || SoilUnits<=0 || IsHidden() || !PlantSlots.IsValidIndex(Index) || ActorHasTag(TEXT("BotanicusPlacementPreview")) || ActorHasTag(TEXT("BotanicusEquippedPreview")) || ActorHasTag(TEXT("BotanicusInspectionPreview")))return false;
+    if(IsAutomaticWateringMature(Index) || !GetIsReplicated() || IsActorBeingDestroyed() || SoilUnits<=0 || IsHidden() || !PlantSlots.IsValidIndex(Index) || ActorHasTag(TEXT("BotanicusPlacementPreview")) || ActorHasTag(TEXT("BotanicusEquippedPreview")) || ActorHasTag(TEXT("BotanicusInspectionPreview")))return false;
     for(const AActor* P=GetAttachParentActor();P;P=P->GetAttachParentActor())if(P->IsA<APawn>())return false;
     const auto& S=PlantSlots[Index];if(S.bElementalDead || S.PlantKey.IsNone())return false;
     const auto* D=FindPlant(S.PlantKey);if(D && GetPotElement()!=EBotanicusPlantElement::Normal && D->Element!=GetPotElement())return false;

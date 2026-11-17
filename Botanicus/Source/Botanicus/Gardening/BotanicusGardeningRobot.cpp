@@ -1,5 +1,6 @@
 #include "Gardening/BotanicusGardeningRobot.h"
 #include "Visuals/BotanicusReservoirVisualComponent.h"
+#include "Gardening/BotanicusRobotAudioComponent.h"
 #include "Gardening/BotanicusGardeningRobotBase.h"
 #include "Gardening/BotanicusGardeningSubsystem.h"
 #include "Growing/BotanicusPlantPotActor.h"
@@ -19,11 +20,23 @@
 #include "NiagaraSystem.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
+#include "Engine/SkeletalMesh.h"
+#include "Animation/AnimSequence.h"
+#include "Animation/AnimInstance.h"
 
 ABotanicusGardeningRobot::ABotanicusGardeningRobot()
 {
     bReplicates=true;SetReplicateMovement(true);SetNetUpdateFrequency(10);
-    PrimaryActorTick.bCanEverTick=false;
+    PrimaryActorTick.bCanEverTick=true;PrimaryActorTick.bStartWithTickEnabled=false;
+    RobotSkeletalMesh=TSoftObjectPtr<USkeletalMesh>(FSoftObjectPath(TEXT("/Game/Botanicus/Items/robot_aroseur/rig.rig")));
+    RobotAnimationBlueprint=TSoftClassPtr<UAnimInstance>(FSoftObjectPath(TEXT("/Game/Botanicus/Items/robot_aroseur/animations/ABP_BotanicusGardeningRobot.ABP_BotanicusGardeningRobot_C")));
+    const FString AnimRoot=TEXT("/Game/Botanicus/Items/robot_aroseur/animations/");
+    StartRunAnimation=TSoftObjectPtr<UAnimSequence>(FSoftObjectPath(AnimRoot+TEXT("start_Run.start_Run")));
+    StopRunAnimation=TSoftObjectPtr<UAnimSequence>(FSoftObjectPath(AnimRoot+TEXT("stop_Run.stop_Run")));
+    ArmAnimation=TSoftObjectPtr<UAnimSequence>(FSoftObjectPath(AnimRoot+TEXT("retract___deploy.retract___deploy")));
+    WaterAnimation=TSoftObjectPtr<UAnimSequence>(FSoftObjectPath(AnimRoot+TEXT("Arosage.Arosage")));
+    RunAnimation=TSoftObjectPtr<UAnimSequence>(FSoftObjectPath(AnimRoot+TEXT("Run.Run")));
+    bUseControllerRotationYaw=false;
     AutoPossessAI=EAutoPossessAI::PlacedInWorldOrSpawned;AIControllerClass=AAIController::StaticClass();
     GetCapsuleComponent()->InitCapsuleSize(22,40);
     GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Visibility,ECR_Block);
@@ -31,10 +44,14 @@ ABotanicusGardeningRobot::ABotanicusGardeningRobot()
     GetCharacterMovement()->MaxWalkSpeed=180;GetCharacterMovement()->bOrientRotationToMovement=true;
     GetCharacterMovement()->RotationRate=FRotator(0,200,0);GetCharacterMovement()->bUseRVOAvoidance=true;
     GetCharacterMovement()->AvoidanceConsiderationRadius=160;
-    Body=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("RobotBody"));Body->SetupAttachment(GetRootComponent());
+    WaterTankMount=CreateDefaultSubobject<USceneComponent>(TEXT("WaterTankMount"));WaterTankMount->SetupAttachment(GetMesh(),ReservoirSocket);
+    WaterTankPivot=CreateDefaultSubobject<USceneComponent>(TEXT("WaterTankPivot"));WaterTankPivot->SetupAttachment(WaterTankMount);
+    WaterTankPivot->SetRelativeLocation(ReservoirMeshSpaceCenter);WaterTankPivot->SetRelativeScale3D(ReservoirScale);WaterTankPivot->bEditableWhenInherited=true;
+    Body=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("RobotBody"));Body->SetupAttachment(WaterTankPivot);
+    RobotAudio=CreateDefaultSubobject<UBotanicusRobotAudioComponent>(TEXT("RobotAudio"));
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Shape(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
     if(Shape.Succeeded())Body->SetStaticMesh(Shape.Object);
-    Body->SetRelativeScale3D(FVector(.4f,.4f,.55f));Body->SetRelativeLocation(FVector(0,0,-12.5f));
+    Body->SetRelativeTransform(FTransform::Identity);
     Body->SetCollisionEnabled(ECollisionEnabled::NoCollision);Body->SetCanEverAffectNavigation(false);
     ReservoirVisual=CreateDefaultSubobject<UBotanicusReservoirVisualComponent>(TEXT("ReservoirVisual"));ReservoirVisual->SetupAttachment(Body);
     WaterOutlet=CreateDefaultSubobject<USceneComponent>(TEXT("WaterOutlet"));WaterOutlet->SetupAttachment(GetRootComponent());
@@ -48,10 +65,12 @@ ABotanicusGardeningRobot::ABotanicusGardeningRobot()
     if(Drops.Succeeded())Stream->SetAsset(Drops.Object);if(Burst.Succeeded())Splash->SetAsset(Burst.Object);
 }
 void ABotanicusGardeningRobot::OnConstruction(const FTransform& Transform)
-{Super::OnConstruction(Transform);ReservoirVisual->Configure(Body,false);ReservoirVisual->SetFillFraction(CurrentWater/FMath::Max(.001f,Config.WaterCapacity));}
+{Super::OnConstruction(Transform);SetupAnimatedVisual();ReservoirVisual->SetFillFraction(CurrentWater/FMath::Max(.001f,Config.WaterCapacity));}
 void ABotanicusGardeningRobot::BeginPlay()
 {
-    Super::BeginPlay();ReservoirVisual->Configure(Body,false);OnRep_Water();GetCharacterMovement()->MaxWalkSpeed=Config.MovementSpeed;
+    Super::BeginPlay();
+    if(HasAuthority() && Base && Presentation.Activity==EBotanicusRobotActivity::Docked)SetActorRotation(FRotator(0,Base->DockForward().Rotation().Yaw,0));
+    SetupAnimatedVisual();OnRep_Water();GetCharacterMovement()->MaxWalkSpeed=Config.MovementSpeed;
     if(HasAuthority() && !GetController())SpawnDefaultController();
     if(auto* Clock=GetWorld()->GetGameState<ABotanicusGameState>())LastClock=Clock->GetDayTimeMinutes();
     LastUpdate=GetWorld()->GetTimeSeconds();
@@ -66,10 +85,10 @@ void ABotanicusGardeningRobot::EndPlay(const EEndPlayReason::Type R)
 void ABotanicusGardeningRobot::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-    DOREPLIFETIME(ThisClass,Config);DOREPLIFETIME(ThisClass,RobotId);DOREPLIFETIME(ThisClass,Base);
+    DOREPLIFETIME(ThisClass,bAwaitFullCharge);DOREPLIFETIME(ThisClass,bTaskPowerLimited);DOREPLIFETIME(ThisClass,StopRunPlayRate);DOREPLIFETIME(ThisClass,Config);DOREPLIFETIME(ThisClass,RobotId);DOREPLIFETIME(ThisClass,Base);
     DOREPLIFETIME(ThisClass,Battery);DOREPLIFETIME(ThisClass,CurrentWater);DOREPLIFETIME(ThisClass,bEnabled);
     DOREPLIFETIME(ThisClass,State);DOREPLIFETIME(ThisClass,Target);DOREPLIFETIME(ThisClass,TargetSlot);
-    DOREPLIFETIME(ThisClass,WaterTarget);DOREPLIFETIME(ThisClass,Carrier);
+    DOREPLIFETIME(ThisClass,WaterTarget);DOREPLIFETIME(ThisClass,Carrier);DOREPLIFETIME(ThisClass,Presentation);
 }
 void ABotanicusGardeningRobot::InitializeRobot(ABotanicusGardeningRobotBase* B,const FBotanicusGardeningSave& S)
 {
@@ -79,6 +98,8 @@ void ABotanicusGardeningRobot::InitializeRobot(ABotanicusGardeningRobotBase* B,c
     bEnabled=S.bEnabled;bAwaitFullCharge=S.bAwaitFullCharge;
     // No saved target is trusted. Navigation and demand are re-evaluated after all actors restore.
     State=bEnabled?EBotanicusGardeningState::SearchingPlant:EBotanicusGardeningState::Inactive;
+    if(Base && FVector::Dist2D(S.RobotTransform.GetLocation(),Base->DockLocation())<=Config.DockingDistance && FMath::Abs(S.RobotTransform.GetLocation().Z-40-Base->DockLocation().Z)<25)
+    {SetActorRotation(FRotator(0,Base->DockForward().Rotation().Yaw,0));SetActivity(EBotanicusRobotActivity::Docked);}
 }
 FBotanicusGardeningSave ABotanicusGardeningRobot::Capture() const
 {
@@ -90,7 +111,7 @@ FBotanicusGardeningSave ABotanicusGardeningRobot::Capture() const
 }
 bool ABotanicusGardeningRobot::IsDocked() const
 {
-    return IsValid(Base) && Base->IsStationAvailable() && !Carrier &&
+    return Presentation.Activity==EBotanicusRobotActivity::Docked && IsValid(Base) && Base->IsStationAvailable() && !Carrier &&
         FVector::Dist2D(GetActorLocation(),Base->DockLocation())<=Config.DockingDistance &&
         FMath::Abs(GetActorLocation().Z-40-Base->DockLocation().Z)<25;
 }
@@ -102,6 +123,7 @@ void ABotanicusGardeningRobot::ReleaseTarget()
 void ABotanicusGardeningRobot::SetEnabled(bool bValue)
 {
     if(!HasAuthority())return;
+    if(Presentation.Activity==EBotanicusRobotActivity::Watering || Presentation.Activity==EBotanicusRobotActivity::PreparingWater)FinishWatering();
     bEnabled=bValue;ReleaseTarget();if(auto* AI=Cast<AAIController>(GetController()))AI->StopMovement();
     State=bEnabled?EBotanicusGardeningState::SearchingPlant:EBotanicusGardeningState::Inactive;NextSearch=0;ForceNetUpdate();
     if(auto* GM=GetWorld()->GetAuthGameMode<ABotanicusGameMode>())GM->ScheduleInventoryAutosave();
@@ -131,10 +153,10 @@ bool ABotanicusGardeningRobot::HasWaterLine(const FVector& Soil) const
     FHitResult H;FCollisionQueryParams Q(SCENE_QUERY_STAT(RobotWater),false,this);if(Base)Q.AddIgnoredActor(Base);
     return !GetWorld()->LineTraceSingleByChannel(H,WaterOutlet->GetComponentLocation(),Soil,ECC_Visibility,Q) || H.GetActor()==Target;
 }
-bool ABotanicusGardeningRobot::Approach(ABotanicusPlantPotActor* Pot,int32 Slot,FVector& Point,float& Length) const
+bool ABotanicusGardeningRobot::Approach(AActor* Pot,int32 Slot,FVector& Point,float& Length) const
 {
     auto* Nav=FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());if(!Nav)return false;
-    FBotanicusAutomaticWateringNeed N;if(!Pot->GetAutomaticWateringNeed(Slot,Config.TargetWaterRatio,N))return false;
+    FBotanicusAutomaticWateringNeed N;if(!BotanicusAutomaticWatering::Read(Pot,Slot,1.f /* species maximum */,N))return false;
     bool bFound=false;Length=TNumericLimits<float>::Max();
     // Test adjacent points, never the pot centre. Navigation must reach the complete path.
     for(int32 I=0;I<8;++I)
@@ -157,32 +179,45 @@ bool ABotanicusGardeningRobot::CanAfford(float Distance,float Water) const
 bool ABotanicusGardeningRobot::Navigate(const FVector& Point,EBotanicusGardeningState NextState)
 {
     auto* AI=Cast<AAIController>(GetController());if(!AI)return false;
-    const float Acceptance=NextState==EBotanicusGardeningState::ReturningToBase?FMath::Max(2.f,Config.DockingDistance*.5f):8.f;
-    auto Result=AI->MoveToLocation(Point,Acceptance,false,true,false,false,nullptr,false);
+    FVector MovePoint=Point;
+    if(NextState==EBotanicusGardeningState::ReturningToBase && !GetDockApproach(MovePoint))return false;
+    if(IsDocked() && NextState!=EBotanicusGardeningState::ReturningToBase)
+    {
+        FVector Approach;if(!GetDockApproach(Approach))return false;
+        DockDestination=Approach+FVector(0,0,GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+        if(!DockLaneClear(DockDestination))return false;
+        PendingDestination=Point;PendingState=NextState;State=NextState;
+        AI->StopMovement();SetActivity(EBotanicusRobotActivity::LeavingDock,12);return true;
+    }
+    const float Acceptance=NextState==EBotanicusGardeningState::ReturningToBase?5.f:8.f;
+    auto Result=AI->MoveToLocation(MovePoint,Acceptance,false,true,false,false,nullptr,false);
     if(Result==EPathFollowingRequestResult::Failed)return false;
-    Destination=Point;State=NextState;MoveStarted=LastProgress=GetWorld()->GetTimeSeconds();LastProgressLocation=GetActorLocation();return true;
+    SetActivity(NextState==EBotanicusGardeningState::ReturningToBase?EBotanicusRobotActivity::ApproachingDock:EBotanicusRobotActivity::None);
+    Destination=MovePoint;State=NextState;MoveStarted=LastProgress=GetWorld()->GetTimeSeconds();LastProgressLocation=GetActorLocation();return true;
 }
 void ABotanicusGardeningRobot::Search()
 {
     NextSearch=GetWorld()->GetTimeSeconds()+FMath::Max(.5f,Config.PlantSearchInterval);
     for(auto I=RetryAfter.CreateIterator();I;++I)if(!I.Key().IsValid() || I.Value()<=GetWorld()->GetTimeSeconds())I.RemoveCurrent();
     if(!Base || !Base->IsStationAvailable()){State=EBotanicusGardeningState::Blocked;return;}
+    if(IsDocked() && CurrentWater<Config.WaterCapacity){State=EBotanicusGardeningState::RefillingWater;return;}
     if(Battery<=Config.BatteryReturnThreshold || CurrentWater<=KINDA_SMALL_NUMBER){ReturnToBase(Battery<=Config.BatteryReturnThreshold);return;}
+    bTaskPowerLimited=false;
     auto* Registry=GetWorld()->GetSubsystem<UBotanicusGardeningSubsystem>();if(!Registry)return;
-    struct FCandidate {ABotanicusPlantPotActor* Pot;int32 Slot;float Deficit,Distance,Water;};
+    struct FCandidate {AActor* Pot;int32 Slot;float Deficit,Distance,Water;};
     TArray<FCandidate> Candidates;
     for(auto& Weak:Registry->GetPots())
     {
         auto* P=Weak.Get();if(!P || FVector::DistSquared(P->GetActorLocation(),Base->DockLocation())>FMath::Square(Config.PlantSearchRadius) || RetryAfter.FindRef(P)>GetWorld()->GetTimeSeconds())continue;
-        for(int32 I=0;I<P->GetAutomaticWateringSlotCount();++I)
+        for(int32 I=0;I<BotanicusAutomaticWatering::SlotCount(P);++I)
         {
             FBotanicusAutomaticWateringNeed N;
-            if(!P->GetAutomaticWateringNeed(I,Config.TargetWaterRatio,N) || N.Current>=N.Minimum-KINDA_SMALL_NUMBER || !Registry->IsAvailable(P,I,this))continue;
+            if(!BotanicusAutomaticWatering::Read(P,I,1.f /* species maximum */,N) || N.Current>=N.Minimum-KINDA_SMALL_NUMBER || !Registry->IsAvailable(P,I,this))continue;
             Candidates.Add({P,I,(N.Minimum-N.Current)/FMath::Max(.01f,N.Minimum),static_cast<float>(FVector::Dist2D(GetActorLocation(),N.SoilPoint)),N.UnitsNeeded()});
         }
     }
     Candidates.Sort([](const FCandidate& A,const FCandidate& B){return A.Deficit==B.Deficit?A.Distance<B.Distance:A.Deficit>B.Deficit;});
-    ABotanicusPlantPotActor* Best=nullptr;int32 Slot=0;FVector Point;
+    AActor* Best=nullptr;int32 Slot=0;FVector Point;
     // Bound costly navigation work. Unreachable candidates enter cooldown, allowing later candidates next search.
     const int32 Count=FMath::Min(8,Candidates.Num());
     for(int32 I=0;I<Count;++I)
@@ -190,7 +225,8 @@ void ABotanicusGardeningRobot::Search()
         const auto& C=Candidates[I];FVector At;float Distance=0,Back=0;
         if(!Approach(C.Pot,C.Slot,At,Distance) || !Path(At,Base->DockLocation(),Back))
         {RetryAfter.Add(C.Pot,GetWorld()->GetTimeSeconds()+Config.UnreachableRetrySeconds);continue;}
-        if(!CanAfford(Distance+Back,FMath::Min(CurrentWater,C.Water)))continue;
+        if(!CanAfford(Distance+Back,FMath::Min(CurrentWater,C.Water))){bTaskPowerLimited=true;continue;}
+        bTaskPowerLimited=false;
         Best=C.Pot;Slot=C.Slot;Point=At;break;
     }
     if(Best && Registry->Reserve(Best,Slot,this))
@@ -231,37 +267,54 @@ void ABotanicusGardeningRobot::UpdateRobot()
     // Attachment parent may have disappeared between updates; restore physical recovery at current location.
     if(GetCharacterMovement()->MovementMode==MOVE_None && !Carrier)OnRep_Carrier();
     AccountResources(Minutes,Seconds);
+    // Clandestine access can expire during approach, arm preparation or watering.
+    // Finish the current arm phase normally, then use the existing return navigation.
+    if(IsValid(Target) && !BotanicusAutomaticWatering::CanAccess(Target))
+    {
+        if(auto* AI=Cast<AAIController>(GetController()))AI->StopMovement();
+        const auto Activity=Presentation.Activity;
+        if(Activity==EBotanicusRobotActivity::Watering || Activity==EBotanicusRobotActivity::PreparingWater ||
+            Activity==EBotanicusRobotActivity::StoppingForWater || Activity==EBotanicusRobotActivity::AimingAtPlant)
+            FinishWatering(true);
+        else ReturnToBase();
+        UpdateCosmetics();return;
+    }
+    if(UpdateActivity(Now)){UpdateCosmetics();return;}
     if(!IsValid(Base) || !bEnabled || Battery<=0)
     {
+        if(Presentation.Activity==EBotanicusRobotActivity::Watering)FinishWatering();
         if(auto* AI=Cast<AAIController>(GetController()))AI->StopMovement();ReleaseTarget();
         State=Battery<=0?EBotanicusGardeningState::Blocked:EBotanicusGardeningState::Inactive;UpdateCosmetics();return;
     }
-    if(!Base->IsStationAvailable()){if(auto* AI=Cast<AAIController>(GetController()))AI->StopMovement();ReleaseTarget();State=EBotanicusGardeningState::Blocked;NextSearch=Now+1;UpdateCosmetics();return;}
+    if(!Base->IsStationAvailable()){if(Presentation.Activity==EBotanicusRobotActivity::Watering)FinishWatering();if(auto* AI=Cast<AAIController>(GetController()))AI->StopMovement();ReleaseTarget();State=EBotanicusGardeningState::Blocked;NextSearch=Now+1;UpdateCosmetics();return;}
     if(IsDocked() && State!=EBotanicusGardeningState::MovingToPlant && State!=EBotanicusGardeningState::Watering)
     {
         if(auto* AI=Cast<AAIController>(GetController()))AI->StopMovement();MoveFailures=0;
-        const FVector Dock=Base->DockLocation();
-        if(FVector::Dist2D(GetActorLocation(),Dock)>.5f)SetActorLocation(FVector(Dock.X,Dock.Y,GetActorLocation().Z),true);
-        SetActorRotation(FRotator(0,Base->GetActorRotation().Yaw,0));
         if(Battery<=Config.BatteryReturnThreshold)bAwaitFullCharge=true;
         if(bAwaitFullCharge)State=EBotanicusGardeningState::Charging;
-        else if(CurrentWater<Config.WaterCapacity-KINDA_SMALL_NUMBER)State=EBotanicusGardeningState::RefillingWater;
+        else if(CurrentWater<Config.WaterCapacity)State=EBotanicusGardeningState::RefillingWater;
         else if(Now>=NextSearch){State=EBotanicusGardeningState::SearchingPlant;Search();}
+        else State=CurrentWater<Config.WaterCapacity-KINDA_SMALL_NUMBER?EBotanicusGardeningState::RefillingWater:EBotanicusGardeningState::IdleAtBase;
     }
     else if(State==EBotanicusGardeningState::Watering)
     {
         FBotanicusAutomaticWateringNeed N;bool bReturnPath=true;
         if(Now>=NextReturnPathCheck){NextReturnPathCheck=Now+1;bReturnPath=Path(GetActorLocation(),Base->DockLocation(),ReturnPathLength);}
-        if(!IsValid(Target) || !Target->GetAutomaticWateringNeed(TargetSlot,Config.TargetWaterRatio,N) || N.UnitsNeeded()<=KINDA_SMALL_NUMBER)
-        {ReleaseTarget();State=EBotanicusGardeningState::SearchingPlant;NextSearch=Now;}
-        else if(!bReturnPath || !CanAfford(ReturnPathLength,0))ReturnToBase(true);
-        else if(CurrentWater<=KINDA_SMALL_NUMBER)ReturnToBase();
-        else if(FVector::Dist2D(GetActorLocation(),N.SoilPoint)>Config.WateringDistance+45 || !HasWaterLine(N.SoilPoint))FailMove();
+        if(!IsValid(Target) || !BotanicusAutomaticWatering::Read(Target,TargetSlot,1.f /* species maximum */,N) || N.Current>=N.Target-KINDA_SMALL_NUMBER)
+        {FinishWatering();}
+        else if(!bReturnPath || !CanAfford(ReturnPathLength,0))FinishWatering(true,true);
+        else if(CurrentWater<=KINDA_SMALL_NUMBER)FinishWatering(true);
+        else if(FVector::Dist2D(GetActorLocation(),N.SoilPoint)>Config.WateringDistance+45 || !HasWaterLine(N.SoilPoint))
+        {if(Target)RetryAfter.Add(Target,Now+Config.UnreachableRetrySeconds);FinishWatering(true);}
         else
         {
             WaterTarget=N.SoilPoint;SetActorRotation(FRotator(0,(N.SoilPoint-GetActorLocation()).Rotation().Yaw,0));
-            const float Used=Target->ApplyAutomaticWater(TargetSlot,Config.TargetWaterRatio,FMath::Min(CurrentWater,FMath::Min(.12f,Config.WateringRate)*Seconds),bFirstWaterPulse);
+            const float Used=BotanicusAutomaticWatering::Apply(Target,TargetSlot,1.f /* species maximum */,FMath::Min(CurrentWater,FMath::Min(.12f,Config.WateringRate)*Seconds),bFirstWaterPulse);
             CurrentWater=FMath::Max(0.f,CurrentWater-Used);if(Used>0)bFirstWaterPulse=false;
+            // Finish on the accepted transfer, before natural drying can lower the plant again next tick.
+            const float RemainingMoisture=FMath::Max(0.f,N.Target-N.Current-Used/N.UnitsPerMoisture);
+            if(Used>0 && (RemainingMoisture<=KINDA_SMALL_NUMBER || CurrentWater<=KINDA_SMALL_NUMBER))
+                FinishWatering(CurrentWater<=KINDA_SMALL_NUMBER);
         }
     }
     else if(State==EBotanicusGardeningState::MovingToPlant || State==EBotanicusGardeningState::ReturningToBase)
@@ -270,17 +323,21 @@ void ABotanicusGardeningRobot::UpdateRobot()
         if(State==EBotanicusGardeningState::MovingToPlant)
         {
             FBotanicusAutomaticWateringNeed N;
-            if(!IsValid(Target) || !Target->GetAutomaticWateringNeed(TargetSlot,Config.TargetWaterRatio,N) || N.Current>=N.Minimum-KINDA_SMALL_NUMBER)
+            if(!IsValid(Target) || !BotanicusAutomaticWatering::Read(Target,TargetSlot,1.f /* species maximum */,N) || N.Current>=N.Target-KINDA_SMALL_NUMBER)
             {if(AI)AI->StopMovement();ReleaseTarget();State=EBotanicusGardeningState::SearchingPlant;NextSearch=Now;}
             else if(Battery<=Config.BatteryReturnThreshold)ReturnToBase(true);
             else if(AI && AI->GetMoveStatus()==EPathFollowingStatus::Idle)
             {
                 WaterTarget=N.SoilPoint;
-                if(FVector::Dist2D(GetActorLocation(),Destination)<35 && HasWaterLine(N.SoilPoint))State=EBotanicusGardeningState::Watering;
+                if(FVector::Dist2D(GetActorLocation(),Destination)<35 && HasWaterLine(N.SoilPoint))BeginWaterPreparation();
                 else FailMove();
             }
         }
-        else if(AI && AI->GetMoveStatus()==EPathFollowingStatus::Idle && !IsDocked())FailMove();
+        else if(AI && AI->GetMoveStatus()==EPathFollowingStatus::Idle && !IsDocked())
+        {
+            if(FVector::Dist2D(GetActorLocation(),Destination)<25){GetCharacterMovement()->StopMovementImmediately();SetActivity(EBotanicusRobotActivity::StoppingAtDock,StopRunDuration());}
+            else FailMove();
+        }
         if(FVector::DistSquared(GetActorLocation(),LastProgressLocation)>FMath::Square(8.f)){LastProgress=Now;LastProgressLocation=GetActorLocation();}
         if((State==EBotanicusGardeningState::MovingToPlant || State==EBotanicusGardeningState::ReturningToBase) && (Now-LastProgress>5 || Now-MoveStarted>60))
         {
@@ -297,7 +354,8 @@ void ABotanicusGardeningRobot::UpdateCosmetics()
 {
     if(GetNetMode()==NM_DedicatedServer)return;
     ReservoirVisual->SetFillFraction(CurrentWater/FMath::Max(.001f,Config.WaterCapacity));
-    const bool bWater=State==EBotanicusGardeningState::Watering && IsValid(Target) && !Carrier && CurrentWater>0;
+    if(RobotAudio)RobotAudio->UpdatePresentation();
+    const bool bWater=State==EBotanicusGardeningState::Watering && Presentation.Activity==EBotanicusRobotActivity::Watering && IsValid(Target) && !BotanicusAutomaticWatering::IsMature(Target,TargetSlot) && BotanicusAutomaticWatering::CanAccess(Target) && !Carrier && CurrentWater>0;
     if(!bWater){if(Stream->IsActive())Stream->DeactivateImmediate();if(Splash->IsActive())Splash->DeactivateImmediate();return;}
     const FVector Nozzle=WaterOutlet->GetComponentLocation();
     const float Flight=FMath::Clamp(FVector::Distance(Nozzle,WaterTarget)/450.f,.1f,.6f);
@@ -341,7 +399,7 @@ void ABotanicusGardeningRobot::Interact_Implementation(AActor* I)
     if(!HasAuthority() || !CanInteract_Implementation(I))return;
     if(Carrier){DropCarriedRobot();return;}
     if(bEnabled && Battery>0){SetEnabled(false);return;}
-    ReleaseTarget();if(auto* AI=Cast<AAIController>(GetController()))AI->StopMovement();
+    SetActivity(EBotanicusRobotActivity::None);ReleaseTarget();if(auto* AI=Cast<AAIController>(GetController()))AI->StopMovement();
     bEnabled=false;State=EBotanicusGardeningState::Inactive;Carrier=Cast<ACharacter>(I);OnRep_Carrier();ForceNetUpdate();
 }
 void ABotanicusGardeningRobot::OnRep_Carrier()
@@ -382,6 +440,23 @@ bool ABotanicusGardeningRobot::DropCarriedRobot()
     if(GetWorld()->SweepSingleByChannel(Obstruction,GetActorLocation(),Position,FQuat::Identity,ECC_Pawn,Shape,Q))return false;
     // A deliberate player drop within reach of the dock, never an automatic return teleport.
     Carrier=nullptr;OnRep_Carrier();SetActorLocation(Position,false,nullptr,ETeleportType::TeleportPhysics);
-    if(bDockDrop)SetActorRotation(FRotator(0,Base->GetActorRotation().Yaw,0));ForceNetUpdate();
+    if(bDockDrop){SetActorRotation(FRotator(0,Base->DockForward().Rotation().Yaw,0));SetActivity(EBotanicusRobotActivity::Docked);}else SetActivity(EBotanicusRobotActivity::None);ForceNetUpdate();
     if(auto* GM=GetWorld()->GetAuthGameMode<ABotanicusGameMode>())GM->ScheduleInventoryAutosave();return true;
+}
+
+bool ABotanicusGardeningRobot::HasPowerForTask() const
+{
+    return IsValid(Base) && Base->IsStationAvailable() && !Carrier && bEnabled && Battery>0 &&
+        !bAwaitFullCharge && !bTaskPowerLimited && State!=EBotanicusGardeningState::Charging && CanAfford(0,0);
+}
+bool ABotanicusGardeningRobot::CanLaunchRound() const
+{
+    return HasPowerForTask() && IsDocked() && CurrentWater>=Config.WaterCapacity &&
+        State!=EBotanicusGardeningState::MovingToPlant && State!=EBotanicusGardeningState::Watering && !IsValid(Target);
+}
+bool ABotanicusGardeningRobot::LaunchRound()
+{
+    if(!HasAuthority() || !CanLaunchRound())return false;
+    // Search owns reservations and checks the real outbound + return route and water cost.
+    State=EBotanicusGardeningState::SearchingPlant;NextSearch=0;Search();ForceNetUpdate();return true;
 }

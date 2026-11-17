@@ -48,7 +48,12 @@ void UBotanicusReservoirVisualComponent::Configure(UStaticMeshComponent* Contain
     const FVector Center=bGauge?GaugeCenter:ContainerBounds.GetCenter();
     const FVector Half=bGauge?GaugeHalfSize:ContainerBounds.GetExtent()*FMath::Clamp(InteriorScale,.5f,.99f);
     const bool bRebuild=!bConfigured || bIsGauge!=bGauge || BuiltMesh!=Container->GetStaticMesh() || !BuiltCenter.Equals(Center) || !BuiltHalfSize.Equals(Half) || (bGauge && !FMath::IsNearlyEqual(BuiltGlassGap,GlassGap));
-    bIsGauge=bGauge;ContainerMesh=Container;
+    bIsGauge=bGauge;
+    if(ContainerMesh!=Container)
+    {
+        if(ContainerMesh)ContainerMesh->TransformUpdated.RemoveAll(this);
+        ContainerMesh=Container;ContainerMesh->TransformUpdated.AddUObject(this,&ThisClass::ContainerTransformUpdated);
+    }
     if(GetAttachParent()!=Container)AttachToComponent(Container,FAttachmentTransformRules::SnapToTargetIncludingScale);
     // Mesh-local coordinates; both the liquid and glass follow authored mesh transforms.
     SetRelativeTransform(FTransform::Identity);
@@ -137,7 +142,9 @@ void UBotanicusReservoirVisualComponent::WriteSlosh()
     if(!WaterMID)return;
     FVector Scale=ContainerMesh?ContainerMesh->GetComponentScale().GetAbs():FVector::OneVector;
     const bool bUseSlosh=!bIsGauge && bSloshEnabled;
-    const FVector2D MaterialSlope(Slosh.X*Scale.X/FMath::Max(.001,Scale.Z),Slosh.Y*Scale.Y/FMath::Max(.001,Scale.Z));
+    const FVector Up=ContainerMesh?ContainerMesh->GetComponentTransform().InverseTransformVectorNoScale(FVector::UpVector):FVector::UpVector;
+    const FVector2D GravitySlope=!bIsGauge && Up.Z>.25?FVector2D(-Up.X/Up.Z,-Up.Y/Up.Z):FVector2D::ZeroVector;
+    const FVector2D MaterialSlope((Slosh.X+GravitySlope.X)*Scale.X/FMath::Max(.001,Scale.Z),(Slosh.Y+GravitySlope.Y)*Scale.Y/FMath::Max(.001,Scale.Z));
     if(!bSloshWritten || bLastSloshEnabled!=bUseSlosh)WaterMID->SetScalarParameterValue(TEXT("SloshEnabled"),bUseSlosh?1:0);
     if(!bSloshWritten || !LastWrittenSlosh.Equals(MaterialSlope,1.e-6))
     {WaterMID->SetScalarParameterValue(TEXT("SloshTiltX"),MaterialSlope.X);WaterMID->SetScalarParameterValue(TEXT("SloshTiltY"),MaterialSlope.Y);}
@@ -164,4 +171,9 @@ void UBotanicusReservoirVisualComponent::TickComponent(float Dt,ELevelTick Type,
     if(Velocity.IsNearlyZero(1) && Slosh.SizeSquared()<1.e-7f && SloshVelocity.SizeSquared()<1.e-7f)
     {Slosh=SloshVelocity=FilteredAcceleration=FVector2D::ZeroVector;SetComponentTickEnabled(false);}
     WriteSlosh();
+}
+
+void UBotanicusReservoirVisualComponent::ContainerTransformUpdated(USceneComponent* Component,EUpdateTransformFlags Flags,ETeleportType Teleport)
+{
+    if(bConfigured && !bIsGauge && bDisplay && FillFraction>0 && FillFraction<1 && ContainerMesh && ContainerMesh->WasRecentlyRendered(.4f))WriteSlosh();
 }

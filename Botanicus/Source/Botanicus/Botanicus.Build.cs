@@ -21,6 +21,7 @@ public class Botanicus : ModuleRules
 			"OnlineSubsystem",
 			"OnlineSubsystemUtils",
 			"AIModule",
+            "AnimGraphRuntime",
 			"NavigationSystem",
 			"StateTreeModule",
 			"GameplayStateTreeModule",
@@ -43,6 +44,8 @@ public class Botanicus : ModuleRules
                 "NiagaraEditor",
 				"Kismet",
 				"UnrealEd",
+                "AnimGraph",
+                "BlueprintGraph",
 				"UMGEditor"
 			});
 		}

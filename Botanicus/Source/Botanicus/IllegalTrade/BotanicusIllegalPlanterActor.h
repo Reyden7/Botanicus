@@ -11,6 +11,8 @@ class UStaticMeshComponent;
 class UTextRenderComponent;
 class UWidgetComponent;
 class ABotanicusCharacter;
+class ABotanicusClandestineDoor;
+struct FBotanicusAutomaticWateringNeed;
 
 USTRUCT(BlueprintType)
 struct BOTANICUS_API FBotanicusIllegalPlantSlotState
@@ -36,6 +38,11 @@ class BOTANICUS_API ABotanicusIllegalPlanterActor
 	GENERATED_BODY()
 
 public:
+    int32 GetAutomaticWateringSlotCount() const {return PlantSlots.Num();}
+    bool IsAutomaticWateringMature(int32 Slot) const;
+    bool IsAutomaticWateringAllowed() const;
+    bool GetAutomaticWateringNeed(int32 Slot,float Ratio,FBotanicusAutomaticWateringNeed& Out) const;
+    float ApplyAutomaticWater(int32 Slot,float Ratio,float AvailableUnits,bool bFirstPulse);
 	ABotanicusIllegalPlanterActor();
 
 	virtual void BeginPlay() override;
@@ -74,6 +81,7 @@ protected:
 
 private:
     friend class UBotanicusPlantContextSubsystem;
+    mutable TWeakObjectPtr<ABotanicusClandestineDoor> AutomaticWateringDoor;
 	enum class EPrimaryUseMode : uint8
 	{
 		None,

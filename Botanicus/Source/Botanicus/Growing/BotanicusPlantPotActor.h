@@ -25,6 +25,7 @@ class BOTANICUS_API ABotanicusPlantPotActor
 
 public:
     virtual int32 GetAutomaticWateringSlotCount() const {return 1;}
+    virtual bool IsAutomaticWateringMature(int32 Slot) const {return Slot==0 && IsMature();}
     virtual bool GetAutomaticWateringNeed(int32 Slot,float Ratio,FBotanicusAutomaticWateringNeed& Out) const;
     virtual float ApplyAutomaticWater(int32 Slot,float Ratio,float AvailableUnits,bool bFirstPulse);
 	ABotanicusPlantPotActor();
