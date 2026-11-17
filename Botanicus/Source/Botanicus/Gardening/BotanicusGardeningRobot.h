@@ -38,9 +38,9 @@ public:
     UPROPERTY(EditAnywhere,Category="Robot|Animation") TSoftObjectPtr<UAnimSequence> ArmAnimation;
     UPROPERTY(EditAnywhere,Category="Robot|Animation") TSoftObjectPtr<UAnimSequence> WaterAnimation;
     UPROPERTY(EditAnywhere,Category="Robot|Animation") TSoftObjectPtr<UAnimSequence> RunAnimation;
-    UPROPERTY(EditAnywhere,Category="Robot|Appearance") FVector VisualScale=FVector(.11f);
-    UPROPERTY(EditAnywhere,Category="Robot|Appearance") FRotator VisualRotation=FRotator(0,-90,0);
-    UPROPERTY(EditAnywhere,Category="Robot|Appearance") FVector VisualOffset=FVector(0,0,-41.4888f);
+    UPROPERTY() FVector VisualScale=FVector(.11f);
+    UPROPERTY() FRotator VisualRotation=FRotator(0,-90,0);
+    UPROPERTY() FVector VisualOffset=FVector(0,0,-41.4888f);
     UPROPERTY(EditAnywhere,Category="Robot|Reservoir") FName ReservoirSocket=TEXT("corps");
     UPROPERTY(EditAnywhere,Category="Robot|Reservoir") FVector ReservoirMeshSpaceCenter=FVector(0,-290,470);
     UPROPERTY(EditAnywhere,Category="Robot|Appearance") FVector OutletMeshSpacePosition=FVector(-275,414,340);
@@ -96,6 +96,7 @@ private:
     bool Path(const FVector& Start,const FVector& End,float& Length) const;
     bool Approach(AActor* Pot,int32 Slot,FVector& Point,float& Length) const;
     bool HasWaterLine(const FVector& Soil) const;
+    float WateringApproachDistance() const;
     bool CanAfford(float Distance,float Water) const;
     void AccountResources(float Minutes,float Seconds);
     void FailMove();

@@ -1,5 +1,6 @@
 #include "Gardening/BotanicusRobotAudioComponent.h"
 #include "Gardening/BotanicusGardeningRobot.h"
+#include "Audio/BotanicusAudioCatalog.h"
 #include "Components/AudioComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Sound/SoundBase.h"
@@ -24,13 +25,22 @@ void UBotanicusRobotAudioComponent::BeginPlay()
     Super::BeginPlay();if(GetNetMode()==NM_DedicatedServer)return;
     LoadedSounds={PowerOnSound.LoadSynchronous(),PowerDownSound.LoadSynchronous(),RunSound.LoadSynchronous(),DeploySound.LoadSynchronous(),RetractSound.LoadSynchronous()};
     Motor=MakeVoice(TEXT("RobotMotorAudio"));Arm=MakeVoice(TEXT("RobotArmAudio"));Power=MakeVoice(TEXT("RobotPowerAudio"));Motor->SetSound(LoadedSounds[2]);
+    WaterCatalog=GetDefault<UBotanicusAudioSettings>()->Catalog.LoadSynchronous();
+    if(auto* R=Cast<ABotanicusGardeningRobot>(GetOwner()); R && WaterCatalog && WaterCatalog->WaterLoop)
+    {
+        Water=MakeVoice(TEXT("RobotWaterAudio"));
+        Water->AttachToComponent(R->WaterOutlet,FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+        Water->bOverrideAttenuation=false;Water->AttenuationSettings=WaterCatalog->InteractionAttenuation;
+        // One local voice per robot; do not consume the four-player manual watering concurrency group.
+        Water->SetSound(WaterCatalog->WaterLoop);
+    }
     // Initial replication/restore never replays an old departure or docking cue.
     if(auto* R=Cast<ABotanicusGardeningRobot>(GetOwner())){LastActivity=R->GetPresentation().Activity;LastStartedAt=R->GetPresentation().StartedAt;bInitialized=true;}
 }
 void UBotanicusRobotAudioComponent::EndPlay(const EEndPlayReason::Type Reason)
 {
-    for(auto* Voice:{Motor.Get(),Arm.Get(),Power.Get()})if(Voice){Voice->Stop();Voice->DestroyComponent();}
-    Motor=nullptr;Arm=nullptr;Power=nullptr;Super::EndPlay(Reason);
+    for(auto* Voice:{Motor.Get(),Arm.Get(),Power.Get(),Water.Get()})if(Voice){Voice->Stop();Voice->DestroyComponent();}
+    Motor=nullptr;Arm=nullptr;Power=nullptr;Water=nullptr;bWaterWanted=false;Super::EndPlay(Reason);
 }
 void UBotanicusRobotAudioComponent::PlayAction(UAudioComponent* Voice,USoundBase* Sound,float Volume,float Age)
 {
@@ -98,4 +108,12 @@ void UBotanicusRobotAudioComponent::ObserveEvaluatedArmMotion()
     if(Now<CueAt)return;
     PlayAction(Arm,LoadedSounds[bDeploy?3:4],bDeploy?DeployVolume:RetractVolume,FMath::Max(0.f,float(Now-CueAt)));
     bArmPending=false;
+}
+
+void UBotanicusRobotAudioComponent::SetWaterActive(bool bActive)
+{
+    if(!Water || !WaterCatalog || bWaterWanted==bActive)return;
+    bWaterWanted=bActive;
+    if(bActive)Water->FadeIn(FMath::Max(.01f,WaterFadeSeconds),WaterCatalog->WaterVolume*FMath::Clamp(WaterVolumeMultiplier,0.f,2.f));
+    else if(Water->IsPlaying())Water->FadeOut(FMath::Max(.01f,WaterFadeSeconds),0.f);
 }

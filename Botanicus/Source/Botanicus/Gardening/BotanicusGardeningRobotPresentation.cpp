@@ -19,7 +19,12 @@ void ABotanicusGardeningRobot::SetupAnimatedVisual()
 {
     auto* Asset=RobotSkeletalMesh.LoadSynchronous();if(!Asset)return;
     auto* Visual=GetMesh();if(Visual->GetSkeletalMeshAsset()!=Asset)Visual->SetSkeletalMesh(Asset);
-    Visual->SetRelativeTransform(FTransform(VisualRotation,VisualOffset,VisualScale));
+    // Preserve the component transform authored in the Blueprint, including network smoothing's base offset.
+    // A simulated proxy may already include an initial smoothing displacement in BeginPlay.
+    const auto* Authored=GetLocalRole()==ROLE_SimulatedProxy ? GetClass()->GetDefaultObject<ABotanicusGardeningRobot>()->GetMesh() : Visual;
+    CacheInitialMeshOffset(Authored->GetRelativeLocation(),Authored->GetRelativeRotation());
+    GetCharacterMovement()->SetUpdateNavAgentWithOwnersCollisions(true);
+    GetCharacterMovement()->UpdateNavAgent(*GetCapsuleComponent());
     Visual->SetCollisionEnabled(ECollisionEnabled::NoCollision);Visual->SetGenerateOverlapEvents(false);Visual->SetCanEverAffectNavigation(false);
     Visual->SetVisibility(true);Visual->SetHiddenInGame(false);Visual->SetSimulatePhysics(false);
     Visual->VisibilityBasedAnimTickOption=EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;

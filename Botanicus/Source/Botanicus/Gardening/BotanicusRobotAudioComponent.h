@@ -5,6 +5,7 @@
 #include "BotanicusRobotAudioComponent.generated.h"
 class UAudioComponent;
 class USoundBase;
+class UBotanicusAudioCatalog;
 /** Local audio driven by existing replicated activity + visible movement; no audio RPC or component tick. */
 UCLASS(ClassGroup=(Botanicus),meta=(BlueprintSpawnableComponent))
 class BOTANICUS_API UBotanicusRobotAudioComponent : public UActorComponent
@@ -15,6 +16,9 @@ public:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type Reason) override;
     void UpdatePresentation();
+    void SetWaterActive(bool bActive);
+    UPROPERTY(EditAnywhere,Category="Robot|Audio",meta=(ClampMin="0",ClampMax="2")) float WaterVolumeMultiplier=1;
+    UPROPERTY(EditAnywhere,Category="Robot|Audio",meta=(ClampMin="0.01",ClampMax="0.15",Units="s")) float WaterFadeSeconds=.06f;
     void ObserveEvaluatedArmMotion();
     UPROPERTY(EditAnywhere,Category="Robot|Audio",meta=(ClampMin="0",UIMax="0.3",Units="s")) float DeploySoundOffset=0;
     UPROPERTY(EditAnywhere,Category="Robot|Audio",meta=(ClampMin="0",UIMax="0.3",Units="s")) float RetractSoundOffset=0;
@@ -38,6 +42,9 @@ private:
     UPROPERTY(Transient) TObjectPtr<UAudioComponent> Arm;
     UPROPERTY(Transient) TObjectPtr<UAudioComponent> Power;
     UPROPERTY(Transient) TArray<TObjectPtr<USoundBase>> LoadedSounds;
+    UPROPERTY(Transient) TObjectPtr<UAudioComponent> Water;
+    UPROPERTY(Transient) TObjectPtr<UBotanicusAudioCatalog> WaterCatalog;
+    bool bWaterWanted=false;
     bool bInitialized=false,bMotorWanted=false;
     EBotanicusRobotActivity LastActivity=EBotanicusRobotActivity::None;
     double LastStartedAt=-1,QuietSince=-1;

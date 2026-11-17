@@ -92,13 +92,14 @@ void ABotanicusGardeningRobotBase::EnsureRobot()
     if(!RobotClass || GetWorld()->GetTimeSeconds()<NextSpawnAttempt)return;
     NextSpawnAttempt=GetWorld()->GetTimeSeconds()+5;
     FBotanicusGardeningSave Saved=PendingSave;Saved.bInstalled=true;Saved.BaseId=BaseId;
+    UClass* Class=Saved.RobotClass.IsValid()?Saved.RobotClass.TryLoadClass<ABotanicusGardeningRobot>():RobotClass.Get();
+    if(!Class || !Class->IsChildOf(ABotanicusGardeningRobot::StaticClass()))return;
     if(!Saved.RobotId.IsValid())
     {
         Saved.RobotId=FGuid::NewGuid();Saved.Water=Config.WaterCapacity;
-        Saved.RobotTransform=FTransform(GetActorRotation(),DockLocation()+FVector(0,0,40));
+        const float HalfHeight=Class->GetDefaultObject<ABotanicusGardeningRobot>()->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+        Saved.RobotTransform=FTransform(GetActorRotation(),DockLocation()+FVector(0,0,HalfHeight));
     }
-    UClass* Class=Saved.RobotClass.IsValid()?Saved.RobotClass.TryLoadClass<ABotanicusGardeningRobot>():RobotClass.Get();
-    if(!Class || !Class->IsChildOf(ABotanicusGardeningRobot::StaticClass()))return;
     Robot=GetWorld()->SpawnActorDeferred<ABotanicusGardeningRobot>(Class,Saved.RobotTransform,this,nullptr,ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButDontSpawnIfColliding);
     if(Robot)
     {

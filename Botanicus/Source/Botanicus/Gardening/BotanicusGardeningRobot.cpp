@@ -38,7 +38,9 @@ ABotanicusGardeningRobot::ABotanicusGardeningRobot()
     RunAnimation=TSoftObjectPtr<UAnimSequence>(FSoftObjectPath(AnimRoot+TEXT("Run.Run")));
     bUseControllerRotationYaw=false;
     AutoPossessAI=EAutoPossessAI::PlacedInWorldOrSpawned;AIControllerClass=AAIController::StaticClass();
-    GetCapsuleComponent()->InitCapsuleSize(22,40);
+    GetCapsuleComponent()->InitCapsuleSize(22,40);GetCapsuleComponent()->bEditableWhenInherited=true;
+    // Native defaults only; Blueprint component overrides remain authoritative.
+    GetMesh()->SetRelativeTransform(FTransform(VisualRotation,VisualOffset,VisualScale));GetMesh()->bEditableWhenInherited=true;
     GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Visibility,ECR_Block);
     GetCapsuleComponent()->SetCanEverAffectNavigation(false);
     GetCharacterMovement()->MaxWalkSpeed=180;GetCharacterMovement()->bOrientRotationToMovement=true;
@@ -98,7 +100,7 @@ void ABotanicusGardeningRobot::InitializeRobot(ABotanicusGardeningRobotBase* B,c
     bEnabled=S.bEnabled;bAwaitFullCharge=S.bAwaitFullCharge;
     // No saved target is trusted. Navigation and demand are re-evaluated after all actors restore.
     State=bEnabled?EBotanicusGardeningState::SearchingPlant:EBotanicusGardeningState::Inactive;
-    if(Base && FVector::Dist2D(S.RobotTransform.GetLocation(),Base->DockLocation())<=Config.DockingDistance && FMath::Abs(S.RobotTransform.GetLocation().Z-40-Base->DockLocation().Z)<25)
+    if(Base && FVector::Dist2D(S.RobotTransform.GetLocation(),Base->DockLocation())<=Config.DockingDistance && FMath::Abs(S.RobotTransform.GetLocation().Z-GetCapsuleComponent()->GetScaledCapsuleHalfHeight()-Base->DockLocation().Z)<25)
     {SetActorRotation(FRotator(0,Base->DockForward().Rotation().Yaw,0));SetActivity(EBotanicusRobotActivity::Docked);}
 }
 FBotanicusGardeningSave ABotanicusGardeningRobot::Capture() const
@@ -113,7 +115,7 @@ bool ABotanicusGardeningRobot::IsDocked() const
 {
     return Presentation.Activity==EBotanicusRobotActivity::Docked && IsValid(Base) && Base->IsStationAvailable() && !Carrier &&
         FVector::Dist2D(GetActorLocation(),Base->DockLocation())<=Config.DockingDistance &&
-        FMath::Abs(GetActorLocation().Z-40-Base->DockLocation().Z)<25;
+        FMath::Abs(GetActorLocation().Z-GetCapsuleComponent()->GetScaledCapsuleHalfHeight()-Base->DockLocation().Z)<25;
 }
 void ABotanicusGardeningRobot::ReleaseTarget()
 {
@@ -153,17 +155,23 @@ bool ABotanicusGardeningRobot::HasWaterLine(const FVector& Soil) const
     FHitResult H;FCollisionQueryParams Q(SCENE_QUERY_STAT(RobotWater),false,this);if(Base)Q.AddIgnoredActor(Base);
     return !GetWorld()->LineTraceSingleByChannel(H,WaterOutlet->GetComponentLocation(),Soil,ECC_Visibility,Q) || H.GetActor()==Target;
 }
+float ABotanicusGardeningRobot::WateringApproachDistance() const
+{
+    // Retain the existing reach, adding only extra capsule radius above the original 22 cm.
+    return Config.WateringDistance+FMath::Max(0.f,GetCapsuleComponent()->GetScaledCapsuleRadius()-22.f);
+}
 bool ABotanicusGardeningRobot::Approach(AActor* Pot,int32 Slot,FVector& Point,float& Length) const
 {
     auto* Nav=FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());if(!Nav)return false;
     FBotanicusAutomaticWateringNeed N;if(!BotanicusAutomaticWatering::Read(Pot,Slot,1.f /* species maximum */,N))return false;
+    const float Reach=WateringApproachDistance();const float MinimumDistance=FMath::Max(55.f,GetCapsuleComponent()->GetScaledCapsuleRadius()+33.f);
     bool bFound=false;Length=TNumericLimits<float>::Max();
     // Test adjacent points, never the pot centre. Navigation must reach the complete path.
     for(int32 I=0;I<8;++I)
     {
-        const float A=I*PI/4;FVector Candidate=N.SoilPoint+FVector(FMath::Cos(A),FMath::Sin(A),0)*Config.WateringDistance;
+        const float A=I*PI/4;FVector Candidate=N.SoilPoint+FVector(FMath::Cos(A),FMath::Sin(A),0)*Reach;
         FNavLocation Projected;if(!Nav->ProjectPointToNavigation(Candidate,Projected,FVector(45,45,160)))continue;
-        if(FVector::Dist2D(Projected.Location,N.SoilPoint)<55 || FVector::Dist2D(Projected.Location,N.SoilPoint)>Config.WateringDistance+35)continue;
+        if(FVector::Dist2D(Projected.Location,N.SoilPoint)<MinimumDistance || FVector::Dist2D(Projected.Location,N.SoilPoint)>Reach+35)continue;
         FHitResult Hit;FCollisionQueryParams Q(SCENE_QUERY_STAT(RobotApproach),false,this);Q.AddIgnoredActor(Pot);if(Base)Q.AddIgnoredActor(Base);
         if(GetWorld()->LineTraceSingleByChannel(Hit,Projected.Location+FVector(0,0,60),N.SoilPoint,ECC_Visibility,Q))continue;
         float L=0;if(Path(GetActorLocation(),Projected.Location,L) && L<Length){Length=L;Point=Projected.Location;bFound=true;}
@@ -304,7 +312,7 @@ void ABotanicusGardeningRobot::UpdateRobot()
         {FinishWatering();}
         else if(!bReturnPath || !CanAfford(ReturnPathLength,0))FinishWatering(true,true);
         else if(CurrentWater<=KINDA_SMALL_NUMBER)FinishWatering(true);
-        else if(FVector::Dist2D(GetActorLocation(),N.SoilPoint)>Config.WateringDistance+45 || !HasWaterLine(N.SoilPoint))
+        else if(FVector::Dist2D(GetActorLocation(),N.SoilPoint)>WateringApproachDistance()+45 || !HasWaterLine(N.SoilPoint))
         {if(Target)RetryAfter.Add(Target,Now+Config.UnreachableRetrySeconds);FinishWatering(true);}
         else
         {
@@ -356,6 +364,7 @@ void ABotanicusGardeningRobot::UpdateCosmetics()
     ReservoirVisual->SetFillFraction(CurrentWater/FMath::Max(.001f,Config.WaterCapacity));
     if(RobotAudio)RobotAudio->UpdatePresentation();
     const bool bWater=State==EBotanicusGardeningState::Watering && Presentation.Activity==EBotanicusRobotActivity::Watering && IsValid(Target) && !BotanicusAutomaticWatering::IsMature(Target,TargetSlot) && BotanicusAutomaticWatering::CanAccess(Target) && !Carrier && CurrentWater>0;
+    if(RobotAudio)RobotAudio->SetWaterActive(bWater);
     if(!bWater){if(Stream->IsActive())Stream->DeactivateImmediate();if(Splash->IsActive())Splash->DeactivateImmediate();return;}
     const FVector Nozzle=WaterOutlet->GetComponentLocation();
     const float Flight=FMath::Clamp(FVector::Distance(Nozzle,WaterTarget)/450.f,.1f,.6f);
