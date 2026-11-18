@@ -3,6 +3,15 @@
 #include "Components/ActorComponent.h"
 #include "Gardening/BotanicusGardeningTypes.h"
 #include "BotanicusRobotAudioComponent.generated.h"
+UENUM(BlueprintType)
+enum class EBotanicusRobotReaction:uint8 {Start,PlantFound,Watering,Success,NoWater,LowBattery,Charging,Charged,Blocked,Ouch};
+USTRUCT(BlueprintType)
+struct FBotanicusRobotVoiceSet
+{
+    GENERATED_BODY()
+    UPROPERTY(EditAnywhere,BlueprintReadWrite) TArray<TSoftObjectPtr<class USoundBase>> Sounds;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,meta=(ClampMin="0",ClampMax="2")) float VolumeMultiplier=1;
+};
 class UAudioComponent;
 class USoundBase;
 class UBotanicusAudioCatalog;
@@ -17,6 +26,10 @@ public:
     virtual void EndPlay(const EEndPlayReason::Type Reason) override;
     void UpdatePresentation();
     void SetWaterActive(bool bActive);
+    bool PlayRobotReaction(EBotanicusRobotReaction Reaction,float Age=0);
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Robot|Voice",meta=(ClampMin="0",ClampMax="4")) float RobotVoiceVolume=.65f;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Robot|Voice",meta=(ClampMin="0",Units="s")) float OrdinaryVoiceCooldown=1.2f;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Robot|Voice") TMap<EBotanicusRobotReaction,FBotanicusRobotVoiceSet> RobotVoices;
     UPROPERTY(EditAnywhere,Category="Robot|Audio",meta=(ClampMin="0",ClampMax="2")) float WaterVolumeMultiplier=1;
     UPROPERTY(EditAnywhere,Category="Robot|Audio",meta=(ClampMin="0.01",ClampMax="0.15",Units="s")) float WaterFadeSeconds=.06f;
     void ObserveEvaluatedArmMotion();
@@ -36,6 +49,18 @@ public:
     UPROPERTY(EditAnywhere,Category="Robot|Audio",meta=(ClampMin="1")) float FalloffDistance=900;
     UPROPERTY(EditAnywhere,Category="Robot|Audio",meta=(ClampMin="0.01")) float MotorFadeSeconds=.08f;
 private:
+    void InitializeVoice();
+    void UpdateVoice();
+    void ObserveVoiceWater(bool bActive);
+    UPROPERTY(Transient) TObjectPtr<UAudioComponent> Expression;
+    UPROPERTY(Transient) TArray<TObjectPtr<USoundBase>> LoadedVoices;
+    TMap<EBotanicusRobotReaction,int32> LastVoiceIndex;
+    TWeakObjectPtr<AActor> VoiceTarget;
+    int32 VoiceTargetSlot=INDEX_NONE,CurrentVoicePriority=0;
+    EBotanicusGardeningState VoiceState=EBotanicusGardeningState::Inactive;
+    EBotanicusRobotActivity VoiceActivity=EBotanicusRobotActivity::None;
+    double NextOrdinaryVoice=0,VoiceCompleted=-1;
+    bool bVoiceInitialized=false,bVoiceNoWater=false,bVoiceLowBattery=false,bVoiceCharging=false,bVoiceFull=false,bVoiceWatering=false;
     UAudioComponent* MakeVoice(FName Name);
     void PlayAction(UAudioComponent* Voice,USoundBase* Sound,float Volume,float Age);
     UPROPERTY(Transient) TObjectPtr<UAudioComponent> Motor;

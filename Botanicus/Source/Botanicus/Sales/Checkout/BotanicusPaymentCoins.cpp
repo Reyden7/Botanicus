@@ -54,12 +54,12 @@ bool ABotanicusPaymentCoins::HasFloatingMotion() const
 FVector ABotanicusPaymentCoins::FloatingPosition(int32 Index,double Time) const
 {
     FVector Position=CounterPosition(Index);const auto* S=GetDefault<UBotanicusCheckoutSettings>();
-    if(HasFloatingMotion()) Position.Z+=FMath::Clamp(S->CoinFloatAmplitude,0.f,5.f)*FMath::Sin(2*PI*(Time-Register->GetReceipt().OpenedAt)/FMath::Max(.5f,S->CoinFloatPeriod)+Index*.35f);
+    if(HasFloatingMotion()) Position.Z+=FMath::Clamp(S->CoinFloatAmplitude,0.f,5.f)*FMath::Sin(2*PI*(Time-(Register->GetReceipt().FloatStartedAt>0 ? Register->GetReceipt().FloatStartedAt : Register->GetReceipt().OpenedAt))/FMath::Max(.5f,S->CoinFloatPeriod)+Index*.35f);
     return Position;
 }
 FVector ABotanicusPaymentCoins::DepositPosition(int32 Index,double Time) const
 {
-    const auto& R=Register->GetReceipt();const float U=FMath::Clamp(static_cast<float>((Time-R.OpenedAt)/R.DepositSeconds),0.f,1.f);
+    const auto& R=Register->GetReceipt();if(Index<R.PreviouslyDepositedGoldCoins)return FloatingPosition(Index,Time);const float U=FMath::Clamp(static_cast<float>((Time-R.OpenedAt)/R.DepositSeconds),0.f,1.f);
     const FVector End=FloatingPosition(Index,Time);return FMath::Lerp(R.CustomerHand,End,U*U*(3-2*U))+FVector(0,0,FMath::Sin(PI*U)*FMath::Clamp(GetDefault<UBotanicusCheckoutSettings>()->CoinDepositArcHeight,0.f,15.f));
 }
 void ABotanicusPaymentCoins::RefreshFromReceipt()
@@ -77,25 +77,25 @@ void ABotanicusPaymentCoins::RefreshFromReceipt()
         if(GetNetMode()!=NM_DedicatedServer)
         {
             GoldCoins->ClearInstances();ArrivalPlayed.Init(false,R.VisualCount());
-            const bool bShow=R.Phase==EBotanicusCheckoutPhase::AwaitingCollection || R.Phase==EBotanicusCheckoutPhase::Collecting;
-            if(bShow) for(int32 I=0;I<R.VisibleGoldCoins;++I) GoldCoins->AddInstance(FTransform(FRotator::ZeroRotator,CounterPosition(I),FVector(.03f,.03f,.004f)*Size),true);
+            const bool bShow=R.Phase==EBotanicusCheckoutPhase::AwaitingCollection || R.Phase==EBotanicusCheckoutPhase::Collecting || (R.Phase==EBotanicusCheckoutPhase::Opening && R.PendingSaleCount>1);
+            if(bShow) for(int32 I=0;I<(R.Phase==EBotanicusCheckoutPhase::Opening ? R.PreviouslyDepositedGoldCoins : R.VisibleGoldCoins);++I) GoldCoins->AddInstance(FTransform(FRotator::ZeroRotator,CounterPosition(I),FVector(.03f,.03f,.004f)*Size),true);
             CreditVoucher->SetVisibility(bShow && R.VoucherCredits>0);VoucherLabel->SetVisibility(bShow && R.VoucherCredits>0);
             VoucherLabel->SetText(FText::FromString(FString::Printf(TEXT("%d cr"),R.VoucherCredits)));
         }
     }
-    const bool bAnimate=R.Phase==EBotanicusCheckoutPhase::Collecting || (R.Phase==EBotanicusCheckoutPhase::AwaitingCollection && (Register->CheckoutServerTime()<R.OpenedAt+R.DepositSeconds || HasFloatingMotion()));
+    const bool bAnimate=(R.Phase==EBotanicusCheckoutPhase::Opening && R.PendingSaleCount>1) || R.Phase==EBotanicusCheckoutPhase::Collecting || (R.Phase==EBotanicusCheckoutPhase::AwaitingCollection && (Register->CheckoutServerTime()<R.OpenedAt+R.DepositSeconds || HasFloatingMotion()));
     SetActorTickInterval(0);SetActorTickEnabled(bAnimate && GetNetMode()!=NM_DedicatedServer);UpdatePresentation();
 }
 void ABotanicusPaymentCoins::UpdatePresentation()
 {
     if(!Register || GetNetMode()==NM_DedicatedServer) return;const auto& R=Register->GetReceipt();const double Now=Register->CheckoutServerTime();
     const auto* S=GetDefault<UBotanicusCheckoutSettings>();const float VisualScale=FMath::Clamp(S->CoinVisualScale,.25f,4.f);const bool bMotion=S->bAnimationsEnabled && (!S->bDisableMotionOnLowQuality || Scalability::GetQualityLevels().EffectsQuality>0);
-    if(R.Phase!=EBotanicusCheckoutPhase::AwaitingCollection && R.Phase!=EBotanicusCheckoutPhase::Collecting) return;
-    for(int32 I=0;I<R.VisualCount();++I)
+    if(R.Phase!=EBotanicusCheckoutPhase::AwaitingCollection && R.Phase!=EBotanicusCheckoutPhase::Collecting && R.Phase!=EBotanicusCheckoutPhase::Opening) return;
+    for(int32 I=0;I<(R.Phase==EBotanicusCheckoutPhase::Opening ? R.PreviouslyDepositedGoldCoins : R.VisualCount());++I)
     {
         FVector Position=bMotion ? DepositPosition(I,Now) : CounterPosition(I);float Scale=1;
         const double PoseTime=R.Phase==EBotanicusCheckoutPhase::Collecting ? R.CollectedAt : Now;
-        FRotator Rotation(0,I*47.f+(HasFloatingMotion() ? FMath::Fmod((PoseTime-R.OpenedAt)*FMath::Clamp(S->CoinFloatRotationSpeed,0.f,30.f),360.) : 0),0);
+        FRotator Rotation(0,I*47.f+(HasFloatingMotion() ? FMath::Fmod((PoseTime-(R.FloatStartedAt>0 ? R.FloatStartedAt : R.OpenedAt))*FMath::Clamp(S->CoinFloatRotationSpeed,0.f,30.f),360.) : 0),0);
         if(R.Phase==EBotanicusCheckoutPhase::Collecting)
         {
             const double Departure=R.CollectedAt+I*R.CoinIntervalSeconds;

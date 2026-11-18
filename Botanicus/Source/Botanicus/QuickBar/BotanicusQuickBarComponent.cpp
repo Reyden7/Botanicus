@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "QuickBar/BotanicusQuickBarComponent.h"
+#include "Tools/BotanicusMultiToolComponent.h"
 
 #include "BotanicusPlayerController.h"
 #include "BotanicusGameMode.h"
@@ -155,6 +156,9 @@ bool UBotanicusQuickBarComponent::AddItem(
 		return false;
 	}
 
+    if(ItemKey==TEXT("BoxCutter") || ItemKey==TEXT("GardenTrowel"))ItemKey=UBotanicusMultiToolComponent::ItemKey();
+    if(ItemKey==UBotanicusMultiToolComponent::ItemKey())
+        for(int32 I=0;I<Slots.Num();++I)if(!Slots[I].IsEmpty() && Slots[I].ItemKey==ItemKey){OutSlotIndex=I;return true;}
 	int32 MaximumStack = 1;
 	if (UGameInstance* GameInstance = GetWorld()->GetGameInstance())
 	{
@@ -265,6 +269,9 @@ bool UBotanicusQuickBarComponent::AddUniqueItem(
 		return false;
 	}
 
+    if(ItemKey==TEXT("BoxCutter") || ItemKey==TEXT("GardenTrowel"))ItemKey=UBotanicusMultiToolComponent::ItemKey();
+    if(ItemKey==UBotanicusMultiToolComponent::ItemKey())
+        for(int32 I=0;I<Slots.Num();++I)if(!Slots[I].IsEmpty() && Slots[I].ItemKey==ItemKey){OutSlotIndex=I;return true;}
 	if(PreservedInstanceId.IsValid() && Slots.ContainsByPredicate([&](const auto& S){return !S.IsEmpty() && S.InstanceId==PreservedInstanceId;}))return false;
 	for (int32 SlotIndex = 0; SlotIndex < Slots.Num(); ++SlotIndex)
 	{
@@ -547,6 +554,7 @@ void UBotanicusQuickBarComponent::ApplySavedState(
 		SavedSelectedSlotIndex,
 		0,
 		SlotCount - 1);
+    NormalizeMultiToolSlots();
 	OnQuickBarChanged.Broadcast();
 	BroadcastSelection();
 }
@@ -567,6 +575,7 @@ void UBotanicusQuickBarComponent::SelectSlot(int32 SlotIndex)
 		return;
 	}
 
+	if(auto* Tool=GetOwner()->FindComponentByClass<UBotanicusMultiToolComponent>())Tool->NotifyManualSelection();
 	SetSelectedSlotInternal(SlotIndex);
 
 	if (GetOwner() && !GetOwner()->HasAuthority())
@@ -881,6 +890,7 @@ void UBotanicusQuickBarComponent::ServerSelectSlot_Implementation(int32 SlotInde
 		(!BotanicusController ||
 		 !BotanicusController->IsMovingWorldItemOutsideInventory()))
 	{
+		if(auto* Tool=GetOwner()->FindComponentByClass<UBotanicusMultiToolComponent>())Tool->NotifyManualSelection();
 		SetSelectedSlotInternal(SlotIndex);
 	}
 }
@@ -895,4 +905,33 @@ void UBotanicusQuickBarComponent::ServerSwapSlots_Implementation(
 	int32 TargetSlotIndex)
 {
 	SwapSlotsAuthoritative(SourceSlotIndex, TargetSlotIndex);
+}
+
+bool UBotanicusQuickBarComponent::NormalizeMultiToolSlots()
+{
+    if(!GetOwner() || !GetOwner()->HasAuthority())return false;
+    const FName Key=UBotanicusMultiToolComponent::ItemKey();
+    int32 Tool=INDEX_NONE,Replacement=INDEX_NONE;bool bChanged=false,bSelectedLegacy=false;
+    for(int32 I=0;I<Slots.Num();++I)
+        if(!Slots[I].IsEmpty() && Slots[I].ItemKey==Key && Tool==INDEX_NONE)Tool=I;
+    for(int32 I=0;I<Slots.Num();++I)
+    {
+        auto& S=Slots[I];if(S.IsEmpty())continue;
+        const bool bLegacy=S.ItemKey==TEXT("BoxCutter") || S.ItemKey==TEXT("GardenTrowel");
+        if(bLegacy || (S.ItemKey==Key && I!=Tool))
+        {
+            bSelectedLegacy|=SelectedSlotIndex==I;
+            if(Replacement==INDEX_NONE)Replacement=I;
+            S=FBotanicusQuickBarSlot();bChanged=true;
+        }
+    }
+    if(Tool==INDEX_NONE)
+    {
+        if(Replacement==INDEX_NONE)for(int32 I=0;I<Slots.Num();++I)if(Slots[I].IsEmpty()){Replacement=I;break;}
+        if(Replacement!=INDEX_NONE && IsItemKeyValid(Key))
+        {auto& S=Slots[Replacement];S.ItemKey=Key;S.Quantity=1;S.InstanceId=FGuid::NewGuid();Tool=Replacement;bChanged=true;}
+    }
+    if(Tool!=INDEX_NONE && bSelectedLegacy)SelectedSlotIndex=Tool;
+    if(bChanged){OnQuickBarChanged.Broadcast();BroadcastSelection();GetOwner()->ForceNetUpdate();}
+    return Tool!=INDEX_NONE;
 }

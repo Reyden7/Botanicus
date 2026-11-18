@@ -6,6 +6,7 @@
 #include "Delivery/BotanicusPlaceableItemActor.h"
 #include "BotanicusIllegalPlanterActor.generated.h"
 
+class UBotanicusSoilPourComponent;
 class UChildActorComponent;
 class UStaticMeshComponent;
 class UTextRenderComponent;
@@ -46,12 +47,15 @@ public:
 	ABotanicusIllegalPlanterActor();
 
 	virtual void BeginPlay() override;
+    virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual FBotanicusInteractionPrompt GetInteractionPrompt_Implementation(AActor* Interactor) const override;
 	virtual bool CanInteract_Implementation(AActor* Interactor) const override;
 	virtual void Interact_Implementation(AActor* Interactor) override;
 	void BeginPrimaryUse(AActor* Interactor);
+    bool ResolveHarvestTarget(const AActor* Interactor, int32& Slot) const;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Botanicus|Soil") TObjectPtr<UBotanicusSoilPourComponent> SoilPour;
 	void EndPrimaryUse(AActor* Interactor);
 
 	UFUNCTION(BlueprintPure, Category="Botanicus|Illegal Trade")
@@ -59,6 +63,18 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="Botanicus|Illegal Trade")
 	int32 GetSoilUnits() const { return SoilUnits; }
+    TArray<float> GetSoilLevels() const { return SlotSoilLevels; }
+    void RestoreSoilLevels(const TArray<float>& Levels);
+    UFUNCTION(BlueprintPure, Category="Botanicus|Soil") float GetSoilFillRatio() const;
+    UFUNCTION(BlueprintPure, Category="Botanicus|Soil") float GetSoilVisualHeight() const;
+    FVector GetSoilPourTarget(const APawn* Source) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Botanicus|Soil", meta=(Units="cm", ToolTip="Hauteur locale du fond visuel, sans changer les emplacements logiques."))
+    float SoilVisualMinHeight = 15.f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Botanicus|Soil", meta=(Units="cm", ToolTip="Hauteur locale maximale du terreau. Choisir une valeur à l'intérieur des parois; ne change ni leur taille ni la quantité stockée."))
+    float SoilVisualMaxHeight = 80.f;
+    UPROPERTY(EditAnywhere, Category="Botanicus|Soil|Editor Preview", meta=(ClampMin="0",ClampMax="1",ToolTip="Prévisualisation dans l'éditeur uniquement. En jeu, la quantité réelle est utilisée."))
+    float SoilVisualPreviewFillRatio = 1.f;
+    FVector GetSoilSurfaceForSlot(int32 Slot) const;
 
 	UFUNCTION(BlueprintPure, Category="Botanicus|Illegal Trade")
 	/** Total water retained for legacy saves and aggregate status displays. */
@@ -149,13 +165,17 @@ private:
 
 	UPROPERTY(ReplicatedUsing=OnRep_PlanterState)
 	int32 SoilUnits = 0;
+    UPROPERTY(ReplicatedUsing=OnRep_PlanterState) TArray<float> SlotSoilLevels;
+    UPROPERTY(VisibleAnywhere, Category="Botanicus|Soil") TArray<TObjectPtr<UChildActorComponent>> SlotSoilVisuals;
+    bool IsSlotSoilFull(int32 Slot) const { return SlotSoilLevels.IsValidIndex(Slot) && SlotSoilLevels[Slot]>=1.f; }
+    float SoilReplicationElapsed=0;
+    void RefreshSlotSoil();
 
 	UPROPERTY(ReplicatedUsing=OnRep_PlanterState)
 	TArray<FBotanicusIllegalPlantSlotState> PlantSlots;
 
 	TWeakObjectPtr<ABotanicusCharacter> ActivePrimaryUser;
 	EPrimaryUseMode ActivePrimaryUseMode = EPrimaryUseMode::None;
-	float ActiveSoilFillProgress = 0.0f;
 	int32 ActiveWaterSlotIndex = INDEX_NONE;
 
 	int32 LastReplicatedGrowthBucket = INDEX_NONE;

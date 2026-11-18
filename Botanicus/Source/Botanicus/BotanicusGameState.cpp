@@ -62,6 +62,7 @@ void ABotanicusGameState::GetLifetimeReplicatedProps(
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(ABotanicusGameState, SharedFunds);
+    DOREPLIFETIME(ABotanicusGameState,bElectricWhipUnlocked);
 	DOREPLIFETIME(ABotanicusGameState, MainShopLevel);
 	DOREPLIFETIME(ABotanicusGameState, bMainShopOpen);
 	DOREPLIFETIME(ABotanicusGameState, CurrentDayNumber);
@@ -818,4 +819,10 @@ void ABotanicusGameState::OnRep_IllegalTradeState()
 void ABotanicusGameState::NotifyFundsChanged()
 {
 	ForceNetUpdate();
+}
+
+void ABotanicusGameState::UnlockElectricWhip()
+{
+    if(!HasAuthority() || bElectricWhipUnlocked)return;
+    bElectricWhipUnlocked=true;ForceNetUpdate();
 }

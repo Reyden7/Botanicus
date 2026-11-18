@@ -1,4 +1,5 @@
 #include "Gardening/BotanicusGardeningRobot.h"
+#include "Gardening/BotanicusRobotFaceComponent.h"
 #include "Gardening/BotanicusGardeningRobotBase.h"
 #include "Growing/BotanicusPlantPotActor.h"
 #include "Growing/BotanicusAutomaticWatering.h"
@@ -51,6 +52,7 @@ void ABotanicusGardeningRobot::SetupAnimatedVisual()
     else {Body->SetVisibility(false,false);Body->SetHiddenInGame(true,false);ReservoirVisual->SetReservoirVisible(false);}
     if(Visual->DoesSocketExist(OutletSocket))
     {WaterOutlet->AttachToComponent(Visual,FAttachmentTransformRules::SnapToTargetIncludingScale,OutletSocket);WaterOutlet->SetRelativeTransform(Attachment(OutletSocket,OutletMeshSpacePosition,FVector::OneVector));}
+    if(RobotFace)RobotFace->Configure(Visual);
     OnRep_Water();
 }
 double ABotanicusGardeningRobot::PresentationNow() const
@@ -70,7 +72,7 @@ void ABotanicusGardeningRobot::SetActivity(EBotanicusRobotActivity Activity,floa
 void ABotanicusGardeningRobot::OnRep_Activity()
 {
     const auto A=Presentation.Activity;
-    const bool bControlled=A==EBotanicusRobotActivity::TurningAtDock || A==EBotanicusRobotActivity::ReversingToDock || A==EBotanicusRobotActivity::LeavingDock || A==EBotanicusRobotActivity::AimingAtPlant;
+    const bool bControlled=A==EBotanicusRobotActivity::WhipBump || A==EBotanicusRobotActivity::TurningAtDock || A==EBotanicusRobotActivity::ReversingToDock || A==EBotanicusRobotActivity::LeavingDock || A==EBotanicusRobotActivity::AimingAtPlant;
     SetActorTickEnabled(HasAuthority() && bControlled);
     if(HasAuthority())
     {
@@ -103,6 +105,7 @@ void ABotanicusGardeningRobot::FailDocking()
 }
 void ABotanicusGardeningRobot::BeginWaterPreparation()
 {
+    Presentation.WateringCompletedAt=-1;
     if(auto* AI=Cast<AAIController>(GetController()))AI->StopMovement();GetCharacterMovement()->StopMovementImmediately();
     SetActivity(EBotanicusRobotActivity::StoppingForWater,StopRunDuration());
 }
@@ -154,7 +157,9 @@ bool ABotanicusGardeningRobot::UpdateActivity(double Now)
 }
 void ABotanicusGardeningRobot::Tick(float Dt)
 {
-    Super::Tick(Dt);if(!HasAuthority() || !Base || !Base->IsStationAvailable() || Carrier)return;
+    Super::Tick(Dt);
+    if(HasAuthority() && Presentation.Activity==EBotanicusRobotActivity::WhipBump){UpdateWhipBump();return;}
+    if(!HasAuthority() || !Base || !Base->IsStationAvailable() || Carrier)return;
     const auto A=Presentation.Activity;
     if(A==EBotanicusRobotActivity::AimingAtPlant)
     {

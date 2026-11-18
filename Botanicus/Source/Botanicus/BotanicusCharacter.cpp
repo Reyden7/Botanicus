@@ -14,6 +14,7 @@
 #include "Interaction/BotanicusInteractionComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "QuickBar/BotanicusQuickBarComponent.h"
+#include "Tools/BotanicusMultiToolComponent.h"
 
 ABotanicusCharacter::ABotanicusCharacter()
 {
@@ -47,6 +48,7 @@ ABotanicusCharacter::ABotanicusCharacter()
 	BotanicusInteractionComponent = CreateDefaultSubobject<UBotanicusInteractionComponent>(
 		TEXT("Botanicus Interaction Component"));
 	QuickBarComponent = CreateDefaultSubobject<UBotanicusQuickBarComponent>(TEXT("Quick Bar Component"));
+	MultiToolComponent=CreateDefaultSubobject<UBotanicusMultiToolComponent>(TEXT("MultiTool"));
 
 	// configure the character comps
 	// The owner sees the world-space body in true first person. The local head

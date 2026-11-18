@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "BotanicusGameMode.h"
+#include "Tools/BotanicusMultiToolComponent.h"
 #include "Gardening/BotanicusGardeningRobotBase.h"
 
 #include "Botanicus.h"
@@ -526,10 +527,11 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 
 	CurrentSaveGame->MapName =
 		UGameplayStatics::GetCurrentLevelName(this, true);
-	CurrentSaveGame->SaveVersion = 34;
+	CurrentSaveGame->SaveVersion = 37;
 	if (const ABotanicusGameState* BotanicusGameState =
 		World->GetGameState<ABotanicusGameState>())
 	{
+		CurrentSaveGame->bElectricWhipUnlocked=BotanicusGameState->IsElectricWhipUnlocked();
 		CurrentSaveGame->SharedFunds =
 			BotanicusGameState->GetSharedFunds();
 		CurrentSaveGame->MainShopLevel =
@@ -706,6 +708,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		if (const ABotanicusIllegalPlanterActor* IllegalPlanter =
 			Cast<ABotanicusIllegalPlanterActor>(*ItemIt))
 		{
+			SavedItem.SoilFillLevels = IllegalPlanter->GetSoilLevels();
 			SavedItem.IllegalPlanterLevel = IllegalPlanter->GetPlanterLevel();
 			SavedItem.IllegalPlanterSoilUnits = IllegalPlanter->GetSoilUnits();
 			SavedItem.IllegalPlanterWaterAmount = IllegalPlanter->GetWaterAmount();
@@ -719,6 +722,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		else if (const ABotanicusMultiPlantPotActor* MultiPlanter =
 			Cast<ABotanicusMultiPlantPotActor>(*ItemIt))
 		{
+			SavedItem.SoilFillLevels = MultiPlanter->GetSoilLevels();
 			SavedItem.MultiPlanterSoilUnits =
 				MultiPlanter->GetSoilUnits();
 			for (const FBotanicusMultiPlantSlotState& Slot :
@@ -742,6 +746,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		else if (const ABotanicusPlantPotActor* PlantPot =
 			Cast<ABotanicusPlantPotActor>(*ItemIt))
 		{
+			SavedItem.SoilFillLevels = PlantPot->GetSoilLevels();
 			SavedItem.bPlantPotHasSoil = PlantPot->HasSoil();
 			SavedItem.PlantKey = PlantPot->GetPlantKey();
 			SavedItem.PlantWaterLevel = PlantPot->GetWaterLevel();
@@ -942,6 +947,16 @@ void ABotanicusGameMode::InitializeSharedEconomy()
 		return;
 	}
 
+    bool bUnlockWhip=CurrentSaveGame->bElectricWhipUnlocked;
+    // Old worlds lack the flag. Accepted pending orders, delivered cartons, owned stations
+    // and installed robots are durable purchase evidence; no spawn/delivery is required.
+    for(const auto& Item:CurrentSaveGame->WorldItems)
+        bUnlockWhip|=Item.GardeningRobot.bInstalled || UBotanicusMultiToolComponent::IsRobotItem(this,Item.ItemKey);
+    for(const auto& Economy:CurrentSaveGame->PlayerEconomies)
+        for(const auto& Order:Economy.PendingOrders)bUnlockWhip|=UBotanicusMultiToolComponent::IsRobotItem(this,Order.ItemKey);
+    for(const auto& Inventory:CurrentSaveGame->PlayerInventories)
+        for(const auto& Slot:Inventory.Slots)if(!Slot.IsEmpty())bUnlockWhip|=UBotanicusMultiToolComponent::IsRobotItem(this,Slot.ItemKey);
+    if(bUnlockWhip)BotanicusGameState->UnlockElectricWhip();
 	int32 RestoredSharedFunds = 2000;
 	if (CurrentSaveGame->SaveVersion >= 10 &&
 		CurrentSaveGame->SharedFunds >= 0)
@@ -1222,6 +1237,14 @@ void ABotanicusGameMode::RestoreWorldState()
 				ItemClass = ShelfBlueprintClass;
 			}
 		}
+        // Older saves used the shared native class; select the editable variant without altering state.
+        if(ItemClass==ABotanicusMultiPlantPotActor::StaticClass())
+        {
+            const auto* Catalog=World->GetGameInstance()->GetSubsystem<UBotanicusItemCatalogSubsystem>();
+            const auto* Definition=Catalog?Catalog->FindItem(RestoredItemKey):nullptr;
+            UClass* Variant=Definition?Definition->WorldActorClass.LoadSynchronous():nullptr;
+            if(Variant && Variant->IsChildOf(ABotanicusMultiPlantPotActor::StaticClass()))ItemClass=Variant;
+        }
 		if (!ItemClass ||
 			(!ItemClass->IsChildOf(
 				 ABotanicusDeliveryParcelActor::StaticClass()) &&
@@ -1284,6 +1307,7 @@ void ABotanicusGameMode::RestoreWorldState()
 					SavedItem.IllegalPlanterSoilUnits,
 					SavedItem.IllegalPlanterWaterAmount,
 					Slots);
+                IllegalPlanter->RestoreSoilLevels(SavedItem.SoilFillLevels);
 			}
 			else if (ABotanicusMultiPlantPotActor* MultiPlanter =
 				Cast<ABotanicusMultiPlantPotActor>(PlacedItem))
@@ -1337,6 +1361,7 @@ void ABotanicusGameMode::RestoreWorldState()
 				MultiPlanter->RestoreMultiPlantState(
 					SavedItem.MultiPlanterSoilUnits,
 					Slots);
+                MultiPlanter->RestoreSoilLevels(SavedItem.SoilFillLevels);
 			}
 			else if (ABotanicusPlantPotActor* PlantPot =
 				Cast<ABotanicusPlantPotActor>(PlacedItem))
@@ -1351,6 +1376,7 @@ void ABotanicusGameMode::RestoreWorldState()
 					CurrentSaveGame->SaveVersion >= 31
 						? SavedItem.PlantDiseaseState
 						: FBotanicusPlantDiseaseState());
+                PlantPot->RestoreSoilLevels(SavedItem.SoilFillLevels);
 				PlantPot->RestoreWateringCount(
 					SavedItem.PlantWateringCount);
 			}
@@ -1614,41 +1640,7 @@ void ABotanicusGameMode::RestorePlayerInventory(AController* Controller)
 	{
 		return;
 	}
-	const auto GrantStarterCutter =
-		[QuickBar]()
-		{
-			const bool bAlreadyHasCutter =
-				QuickBar->GetSlots().ContainsByPredicate(
-					[](const FBotanicusQuickBarSlot& Slot)
-					{
-						return !Slot.IsEmpty() &&
-							Slot.ItemKey == TEXT("BoxCutter");
-					});
-			if (!bAlreadyHasCutter)
-			{
-				int32 CutterSlot = INDEX_NONE;
-				if (QuickBar->AddItem(
-					TEXT("BoxCutter"),
-					1,
-					CutterSlot))
-				{
-					UE_LOG(
-						LogBotanicus,
-						Display,
-						TEXT(
-							"Added the starter cutter to quickbar slot %d."),
-						CutterSlot + 1);
-				}
-				else
-				{
-					UE_LOG(
-						LogBotanicus,
-						Warning,
-						TEXT(
-							"Could not add the starter cutter: the quickbar has no free slot."));
-				}
-			}
-		};
+    const auto GrantStarterMultiTool=[QuickBar](){QuickBar->NormalizeMultiToolSlots();};
 	const auto GrantStarterComputer =
 		[this, Controller, QuickBar]()
 		{
@@ -1742,7 +1734,7 @@ void ABotanicusGameMode::RestorePlayerInventory(AController* Controller)
 			});
 	if (!SavedInventory)
 	{
-		GrantStarterCutter();
+		GrantStarterMultiTool();
 		GrantStarterComputer();
 		return;
 	}
@@ -1772,7 +1764,7 @@ void ABotanicusGameMode::RestorePlayerInventory(AController* Controller)
 	// Always ensure that every player owns the cutter required to open
 	// delivery cartons. This also repairs version-16 saves made before the
 	// cutter could be inserted into an available quickbar slot.
-	GrantStarterCutter();
+	GrantStarterMultiTool();
 	GrantStarterComputer();
 
 	int32 RestoredSlotCount = 0;

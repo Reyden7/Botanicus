@@ -29,6 +29,11 @@ struct BOTANICUS_API FBotanicusCheckoutReceipt
     UPROPERTY() float CollectionSeconds=.26f;
     UPROPERTY() int32 VisibleGoldCoins=0;
     UPROPERTY() int32 VoucherCredits=0;
+    // Presentation of the accumulated pile. Individual economic receipts remain server-side.
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 PendingSaleCount=1;
+    UPROPERTY() int32 PreviouslyDepositedGoldCoins=0;
+    UPROPERTY() double FloatStartedAt=0;
+    UPROPERTY() bool bDrawerAlreadyOpen=false;
     UPROPERTY() FVector ScanOrigin=FVector::ZeroVector;
     UPROPERTY() FVector ScanTarget=FVector::ZeroVector;
     UPROPERTY() FVector CustomerHand=FVector::ZeroVector;
@@ -47,4 +52,6 @@ struct BOTANICUS_API FBotanicusSavedCashRegister
     UPROPERTY() FTransform Transform;
     UPROPERTY() FGuid RegisterId;
     UPROPERTY() FBotanicusCheckoutReceipt Receipt;
+    /** Empty in legacy saves, which migrate their one unpaid receipt on restoration. */
+    UPROPERTY() TArray<FBotanicusCheckoutReceipt> PendingPayments;
 };

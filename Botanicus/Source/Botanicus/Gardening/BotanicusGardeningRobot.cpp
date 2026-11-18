@@ -1,6 +1,8 @@
 #include "Gardening/BotanicusGardeningRobot.h"
 #include "Visuals/BotanicusReservoirVisualComponent.h"
 #include "Gardening/BotanicusRobotAudioComponent.h"
+#include "Gardening/BotanicusRobotContactSurface.h"
+#include "Gardening/BotanicusRobotFaceComponent.h"
 #include "Gardening/BotanicusGardeningRobotBase.h"
 #include "Gardening/BotanicusGardeningSubsystem.h"
 #include "Growing/BotanicusPlantPotActor.h"
@@ -26,6 +28,9 @@
 
 ABotanicusGardeningRobot::ABotanicusGardeningRobot()
 {
+    WhipImpactSound=TSoftObjectPtr<USoundBase>(FSoftObjectPath(TEXT("/Game/Botanicus/Audio/Sounds/S_MultiToolElectricWhip.S_MultiToolElectricWhip")));
+    WhipSparks=TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(TEXT("/Game/Botanicus/Items/robot_aroseur/VFX/NS_Robot_WhipImpact.NS_Robot_WhipImpact")));
+    WhipContactSurface=TSoftObjectPtr<UBotanicusRobotContactSurface>(FSoftObjectPath(TEXT("/Game/Botanicus/Items/robot_aroseur/VFX/DA_RobotWhipContactSurface.DA_RobotWhipContactSurface")));
     bReplicates=true;SetReplicateMovement(true);SetNetUpdateFrequency(10);
     PrimaryActorTick.bCanEverTick=true;PrimaryActorTick.bStartWithTickEnabled=false;
     RobotSkeletalMesh=TSoftObjectPtr<USkeletalMesh>(FSoftObjectPath(TEXT("/Game/Botanicus/Items/robot_aroseur/rig.rig")));
@@ -51,6 +56,7 @@ ABotanicusGardeningRobot::ABotanicusGardeningRobot()
     WaterTankPivot->SetRelativeLocation(ReservoirMeshSpaceCenter);WaterTankPivot->SetRelativeScale3D(ReservoirScale);WaterTankPivot->bEditableWhenInherited=true;
     Body=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("RobotBody"));Body->SetupAttachment(WaterTankPivot);
     RobotAudio=CreateDefaultSubobject<UBotanicusRobotAudioComponent>(TEXT("RobotAudio"));
+    RobotFace=CreateDefaultSubobject<UBotanicusRobotFaceComponent>(TEXT("RobotFace"));
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Shape(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
     if(Shape.Succeeded())Body->SetStaticMesh(Shape.Object);
     Body->SetRelativeTransform(FTransform::Identity);
@@ -73,6 +79,8 @@ void ABotanicusGardeningRobot::BeginPlay()
     Super::BeginPlay();
     if(HasAuthority() && Base && Presentation.Activity==EBotanicusRobotActivity::Docked)SetActorRotation(FRotator(0,Base->DockForward().Rotation().Yaw,0));
     SetupAnimatedVisual();OnRep_Water();GetCharacterMovement()->MaxWalkSpeed=Config.MovementSpeed;
+    if(HasAuthority())WhipContactSurface.LoadSynchronous();
+    if(GetNetMode()!=NM_DedicatedServer)if(auto* Impact=WhipSparks.LoadSynchronous())Impact->PrecacheAssetPSOs();
     if(HasAuthority() && !GetController())SpawnDefaultController();
     if(auto* Clock=GetWorld()->GetGameState<ABotanicusGameState>())LastClock=Clock->GetDayTimeMinutes();
     LastUpdate=GetWorld()->GetTimeSeconds();
@@ -287,6 +295,7 @@ void ABotanicusGardeningRobot::UpdateRobot()
         else ReturnToBase();
         UpdateCosmetics();return;
     }
+    if(Presentation.Activity==EBotanicusRobotActivity::WhipBump){UpdateCosmetics();return;}
     if(UpdateActivity(Now)){UpdateCosmetics();return;}
     if(!IsValid(Base) || !bEnabled || Battery<=0)
     {
@@ -322,7 +331,12 @@ void ABotanicusGardeningRobot::UpdateRobot()
             // Finish on the accepted transfer, before natural drying can lower the plant again next tick.
             const float RemainingMoisture=FMath::Max(0.f,N.Target-N.Current-Used/N.UnitsPerMoisture);
             if(Used>0 && (RemainingMoisture<=KINDA_SMALL_NUMBER || CurrentWater<=KINDA_SMALL_NUMBER))
+            {
+                // Cosmetic success belongs to this accepted transfer, never a cancellation or an empty tank.
+                if(RemainingMoisture<=KINDA_SMALL_NUMBER && CurrentWater>KINDA_SMALL_NUMBER)
+                    Presentation.WateringCompletedAt=PresentationNow();
                 FinishWatering(CurrentWater<=KINDA_SMALL_NUMBER);
+            }
         }
     }
     else if(State==EBotanicusGardeningState::MovingToPlant || State==EBotanicusGardeningState::ReturningToBase)
@@ -365,6 +379,7 @@ void ABotanicusGardeningRobot::UpdateCosmetics()
     if(RobotAudio)RobotAudio->UpdatePresentation();
     const bool bWater=State==EBotanicusGardeningState::Watering && Presentation.Activity==EBotanicusRobotActivity::Watering && IsValid(Target) && !BotanicusAutomaticWatering::IsMature(Target,TargetSlot) && BotanicusAutomaticWatering::CanAccess(Target) && !Carrier && CurrentWater>0;
     if(RobotAudio)RobotAudio->SetWaterActive(bWater);
+    if(RobotFace)RobotFace->UpdatePresentation(bWater);
     if(!bWater){if(Stream->IsActive())Stream->DeactivateImmediate();if(Splash->IsActive())Splash->DeactivateImmediate();return;}
     const FVector Nozzle=WaterOutlet->GetComponentLocation();
     const float Flight=FMath::Clamp(FVector::Distance(Nozzle,WaterTarget)/450.f,.1f,.6f);

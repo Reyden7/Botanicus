@@ -416,8 +416,8 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 				0.3f);
 			Planter.CollisionHalfExtentOverride =
 				Planter.WorldScale * 50.0f;
-			Planter.WorldActorClass =
-				ABotanicusMultiPlantPotActor::StaticClass();
+            const FString Blueprint=FString::Printf(TEXT("/Game/Botanicus/blueprints/Planters/BP_Item_PreparationPlanter%d.BP_Item_PreparationPlanter%d_C"),Capacity,Capacity);
+            Planter.WorldActorClass=TSoftClassPtr<AActor>(FSoftObjectPath(Blueprint));
 			Planter.MaximumStack = 1;
 			Planter.WeightClass =
 				EBotanicusItemWeightClass::Hotbar;
@@ -632,6 +632,14 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	BoxCutter.DeliveryQuantity = 1;
 	BoxCutter.DeliveryDelaySeconds = 1.5f;
 	BoxCutter.AllowedPlacementSurfaces = 0;
+
+	FBotanicusItemDefinition MultiTool=BoxCutter;
+	MultiTool.ItemKey=TEXT("MultiTool_L1");MultiTool.DisplayName=NSLOCTEXT("BotanicusCatalog","MultiTool_L1","Multioutil intelligent");
+	MultiTool.Icon=TSoftObjectPtr<UTexture2D>(FSoftObjectPath(TEXT("/Game/Botanicus/Icons/cutter.cutter")));
+	MultiTool.Price=0;MultiTool.WorldMesh=TSoftObjectPtr<UStaticMesh>(FSoftObjectPath(TEXT("/Game/Botanicus/Items/itemsMesh/cutter/cutter.cutter")));
+	MultiTool.WorldScale=FVector(.4f);
+	MultiTool.WorldActorClass=TSoftClassPtr<AActor>(FSoftObjectPath(TEXT("/Game/Botanicus/blueprints/BP_Item_MultiTool_L1.BP_Item_MultiTool_L1_C")));
+	NativeFallbackItems.Add(MoveTemp(MultiTool));
 
 	const auto AddHarvestDefinition =
 		[this](

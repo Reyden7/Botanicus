@@ -23,6 +23,8 @@ class BOTANICUS_API ABotanicusGameState : public AGameStateBase
 
 public:
 	ABotanicusGameState();
+    UFUNCTION(BlueprintPure,Category="Botanicus|MultiTool") bool IsElectricWhipUnlocked() const {return bElectricWhipUnlocked;}
+    void UnlockElectricWhip();
 
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(
@@ -265,6 +267,7 @@ public:
 	bool TryUpgradeMainShop();
 
 private:
+    UPROPERTY(Replicated) bool bElectricWhipUnlocked=false;
 	UFUNCTION()
 	void OnRep_SharedFunds();
 

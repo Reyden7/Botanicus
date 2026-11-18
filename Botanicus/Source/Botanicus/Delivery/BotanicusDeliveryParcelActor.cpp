@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Delivery/BotanicusDeliveryParcelActor.h"
+#include "Tools/BotanicusMultiToolComponent.h"
 
 #include "Delivery/BotanicusParcelOpeningSettings.h"
 #include "Delivery/BotanicusParcelOpeningVisualActor.h"
@@ -350,7 +351,7 @@ void ABotanicusDeliveryParcelActor::BeginCutting(AActor* Interactor)
 		Character ? Character->GetQuickBarComponent() : nullptr;
 	if (!Character ||
 		!QuickBar ||
-		QuickBar->GetSelectedSlot().ItemKey != TEXT("BoxCutter"))
+		!UBotanicusMultiToolComponent::HasTool(Character,TEXT("BoxCutter"),this))
 	{
 		SendInteractorMessage(
 			Interactor,
@@ -388,7 +389,7 @@ void ABotanicusDeliveryParcelActor::UpdateCutterTrace()
 	if (!Character ||
 		!QuickBar ||
 		!Controller ||
-		QuickBar->GetSelectedSlot().ItemKey != TEXT("BoxCutter") ||
+		!UBotanicusMultiToolComponent::HasTool(Character,TEXT("BoxCutter"),this) ||
 		FVector::DistSquared(
 			Character->GetActorLocation(),
 			GetActorLocation()) > FMath::Square(450.0f))
@@ -437,12 +438,7 @@ void ABotanicusDeliveryParcelActor::UpdateCutterTrace()
 	const FVector LocalHit =
 		GetActorTransform().InverseTransformPosition(Hit.ImpactPoint);
 	const float TapeHalfLength = ParcelHalfExtent.X * 0.92f;
-	const float VisibleTapeWidth =
-		FMath::Clamp(ParcelHalfExtent.Y * 0.24f, 8.0f, 16.0f);
-	const float TapeHalfWidth = VisibleTapeWidth * 0.5f + 1.0f;
-	if (FMath::Abs(LocalHit.X) > TapeHalfLength + 4.0f ||
-		FMath::Abs(LocalHit.Y) > TapeHalfWidth ||
-		FMath::Abs(LocalHit.Z - ParcelHalfExtent.Z) > 18.0f)
+	if (!IsCuttingAreaHit(Hit))
 	{
 		bHasLastCutSample = false;
 		return;
@@ -882,3 +878,14 @@ void ABotanicusDeliveryParcelActor::MulticastDeliveryImpact_Implementation(FVect
         if(auto* Voice=Audio->PlaySpatialTransition(this,DeliveryImpactSound.LoadSynchronous(),Position,DeliveryImpactVolume,0,DeliveryImpactAttenuation.LoadSynchronous(),2500))
             Voice->SetPitchMultiplier(Pitch);
 }
+
+bool ABotanicusDeliveryParcelActor::IsCuttingAreaHit(const FHitResult& Hit) const
+{
+    if(bOpened || Hit.GetActor()!=this)return false;
+    const FVector P=GetActorTransform().InverseTransformPosition(Hit.ImpactPoint);
+    const float HalfLength=ParcelHalfExtent.X*.92f;
+    const float HalfWidth=FMath::Clamp(ParcelHalfExtent.Y*.24f,8.f,16.f)*.5f+1.f;
+    return FMath::Abs(P.X)<=HalfLength+4 && FMath::Abs(P.Y)<=HalfWidth && FMath::Abs(P.Z-ParcelHalfExtent.Z)<=18;
+}
+
+bool ABotanicusDeliveryParcelActor::IsBeingCutBy(const AActor* User) const {return !bOpened && ActiveCutter.Get()==User;}

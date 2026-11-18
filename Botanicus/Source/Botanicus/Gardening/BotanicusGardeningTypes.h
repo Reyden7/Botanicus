@@ -51,7 +51,7 @@ UENUM(BlueprintType)
 enum class EBotanicusRobotActivity : uint8
 {
     None, StoppingForWater, AimingAtPlant, PreparingWater, Watering, FinishingWater,
-    ApproachingDock, StoppingAtDock, TurningAtDock, ReversingToDock, Docked, LeavingDock
+    ApproachingDock, StoppingAtDock, TurningAtDock, ReversingToDock, Docked, LeavingDock, WhipBump
 };
 USTRUCT(BlueprintType)
 struct FBotanicusRobotPresentation
@@ -61,4 +61,6 @@ struct FBotanicusRobotPresentation
     UPROPERTY(BlueprintReadOnly) double StartedAt=0;
     UPROPERTY(BlueprintReadOnly) float Duration=0;
     UPROPERTY(BlueprintReadOnly) float AnimationStart=0;
+    /** Cosmetic event in the existing replicated snapshot; never serialized in a save. */
+    UPROPERTY(BlueprintReadOnly) double WateringCompletedAt=-1;
 };

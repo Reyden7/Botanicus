@@ -98,6 +98,10 @@ public:
     friend class UBotanicusCashRegisterValidation;
     friend class UBotanicusPlantContextValidation;
     ABotanicusCheckoutScanner* GetCheckoutScanner() const;
+    float GetWorldInteractionDistance() const {return MaximumWorldInteractionDistance;}
+    bool IsMultiToolContextBlocked() const;
+    void PlayMultiToolWhipVisual();
+    bool IsMultiToolCutInProgress() const;
     void SetCheckoutScannerReference(ABotanicusCheckoutScanner* Scanner);
     bool CanTakeCheckoutScanner() const;
     bool TryWaterReserveInput(const FInputKeyEventArgs& Params);
@@ -123,7 +127,8 @@ public:
     friend class UBotanicusSalesShelfValidation;
 	friend class UBotanicusEquipmentValidation;
 	friend class UBotanicusPlacementValidation;
-	FVector GetPlacementCosmeticHandPosition(FName ExpectedItem) const;
+	FVector GetSoilBagMouth(const FVector& NormalizedOffset) const;
+    FVector GetPlacementCosmeticHandPosition(FName ExpectedItem) const;
     bool UsesPlacementCosmeticActorPivot(const AActor* Item) const;
 
 	/** Private transaction confirmation; world events use the shared audio relay. */

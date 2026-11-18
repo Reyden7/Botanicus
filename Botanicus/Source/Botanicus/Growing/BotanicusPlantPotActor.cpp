@@ -1,6 +1,8 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Growing/BotanicusPlantPotActor.h"
+#include "Visuals/BotanicusSoilPourComponent.h"
+#include "Tools/BotanicusMultiToolComponent.h"
 #include "Growing/BotanicusAutomaticWatering.h"
 #include "Gardening/BotanicusGardeningSubsystem.h"
 #include "UI/BotanicusPlantContextSubsystem.h"
@@ -9,6 +11,7 @@
 
 #include "Botanicus.h"
 #include "BotanicusCharacter.h"
+#include "BotanicusGameMode.h"
 #include "BotanicusPlayerController.h"
 #include "BotanicusGameState.h"
 #include "Camera/PlayerCameraManager.h"
@@ -155,6 +158,7 @@ ABotanicusPlantPotActor::ABotanicusPlantPotActor()
 		Mesh->SetRelativeScale3D(FVector(0.42f, 0.42f, 0.34f));
 	}
 
+	SoilPour = CreateDefaultSubobject<UBotanicusSoilPourComponent>(TEXT("SoilPour"));
 	SoilMesh = CreateDefaultSubobject<UStaticMeshComponent>(
 		TEXT("Soil"));
 	SoilMesh->SetupAttachment(SceneRoot);
@@ -1103,6 +1107,9 @@ void ABotanicusPlantPotActor::EndPrimaryUse(AActor* Interactor)
 			TEXT("Recolte annulee."));
 	}
 
+    SoilPour->StopTransfer();
+    if (PrimaryUseMode == EPrimaryUseMode::FillSoil || PrimaryUseMode == EPrimaryUseMode::RemoveSoil)
+        if (auto* GM=GetWorld()->GetAuthGameMode<ABotanicusGameMode>()) GM->ScheduleInventoryAutosave();
 	UBotanicusAudioWorldSubsystem::WaterEnd(ActivePrimaryUser.Get());
 	ActivePrimaryUser.Reset();
 	PrimaryUseMode = EPrimaryUseMode::None;
@@ -1138,6 +1145,7 @@ bool ABotanicusPlantPotActor::UpdatePrimaryUse(float DeltaSeconds)
 			return true;
 		}
 
+    if (DeltaSeconds > 0) SoilPour->Transferred(Character,0);
 		SoilFillProgress = FMath::Clamp(
 			SoilFillProgress +
 				DeltaSeconds /
@@ -1159,6 +1167,8 @@ bool ABotanicusPlantPotActor::UpdatePrimaryUse(float DeltaSeconds)
 			ActivePrimaryUser.Reset();
 			PrimaryUseMode = EPrimaryUseMode::None;
 			SoilFillProgress = 0.0f;
+            SoilPour->StopTransfer();
+            if (auto* GM=GetWorld()->GetAuthGameMode<ABotanicusGameMode>()) GM->ScheduleInventoryAutosave();
 		}
 		return true;
 	}
@@ -1906,8 +1916,7 @@ bool ABotanicusPlantPotActor::CanHarvestWithInteractor(
 	return Definition &&
 		!Definition->HarvestItemKey.IsNone() &&
 		!Definition->HarvestToolItemKey.IsNone() &&
-		GetSelectedItemKey(Interactor) ==
-			Definition->HarvestToolItemKey;
+		UBotanicusMultiToolComponent::HasTool(Interactor,Definition->HarvestToolItemKey,this);
 }
 
 bool ABotanicusPlantPotActor::IsInteractorStillTargeting(
@@ -2334,4 +2343,26 @@ float ABotanicusPlantPotActor::ApplyAutomaticWater(int32 Slot,float Ratio,float 
     if(Added<=0)return 0;
     WaterLevel=FMath::Min(N.Maximum,WaterLevel+Added);if(bFirstPulse)++WateringCount;
     RefreshVisuals();ForceNetUpdate();return Added*N.UnitsPerMoisture;
+}
+
+// Read-only preparation: execution still goes through CanHarvestWithInteractor/BeginPrimaryUse.
+bool ABotanicusPlantPotActor::ResolveHarvestTool(const AActor* Interactor,FName& OutTool,int32& OutSlot) const
+{
+    OutTool=NAME_None;OutSlot=0;const auto* D=GetPlantDefinition();
+    if(!IsMature() || bElementalDead || !IsSoilFull() || (ActivePrimaryUser.IsValid() && ActivePrimaryUser.Get()!=Interactor) || !D || D->HarvestItemKey.IsNone() || D->HarvestToolItemKey.IsNone())return false;
+    OutTool=D->HarvestToolItemKey;return true;
+}
+
+TArray<float> ABotanicusPlantPotActor::GetSoilLevels() const { return {GetSoilLevel()}; }
+void ABotanicusPlantPotActor::RestoreSoilLevels(const TArray<float>& Levels)
+{
+    if (!HasAuthority() || Levels.IsEmpty()) return;
+    SoilFillProgress=FMath::Clamp(Levels[0],0.f,1.f); bHasSoil=SoilFillProgress>=1.f;
+    RefreshVisuals(); ForceNetUpdate();
+}
+FVector ABotanicusPlantPotActor::GetSoilSurfaceForSlot(int32 Slot) const
+{
+    if (const auto* Soil=Cast<ABotanicusPotSoilVisualActor>(SoilShapeVisual->GetChildActor())) return Soil->GetSurfaceCentre();
+    const auto Offset=GetConfiguredSoilHorizontalOffset();
+    return GetActorTransform().TransformPosition(FVector(Offset.X,Offset.Y,GetConfiguredSoilMaximumHeight()-GetConfiguredSoilVolumeHeight()*(1-GetSoilLevel())));
 }

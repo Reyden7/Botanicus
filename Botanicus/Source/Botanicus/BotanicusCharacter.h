@@ -13,6 +13,7 @@ class UCameraComponent;
 class UInputAction;
 class UBotanicusInteractionComponent;
 class UBotanicusQuickBarComponent;
+class UBotanicusMultiToolComponent;
 class ABotanicusWateringCanActor;
 struct FInputActionValue;
 
@@ -50,6 +51,9 @@ class ABotanicusCharacter : public ACharacter
 	/** Ten keyboard-accessible private inventory slots. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta = (AllowPrivateAccess = "true"))
 	UBotanicusQuickBarComponent* QuickBarComponent;
+
+	UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Components",meta=(AllowPrivateAccess="true"))
+	TObjectPtr<UBotanicusMultiToolComponent> MultiToolComponent;
 
 protected:
 

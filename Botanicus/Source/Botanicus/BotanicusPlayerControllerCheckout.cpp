@@ -142,12 +142,14 @@ bool ABotanicusPlayerController::TryRefreshCheckoutContext()
     }
     if(!Register) return false;
     if(Register->IsCheckoutScanning()){InteractionTargetWidget->SetContextStatus(FText::FromString(TEXT("Analyse de la plante...")));return true;}
+    if(Cast<ABotanicusVisitorCharacter>(Hit.GetActor()) && Held && Register->CanStartCheckoutScan())
+    {InteractionTargetWidget->SetLeftMousePrompt(FText::FromString(TEXT("Scanner la plante")),FText::FromString(TEXT("Visez la plante du client")),false);return true;}
     const auto& R=Register->GetReceipt();
     if(R.Phase==EBotanicusCheckoutPhase::AwaitingCollection)
     {
         const FString Value=FString::Printf(TEXT("%d crédits (%d pièces de 10%s)"),R.Amount,R.VisibleGoldCoins,R.VoucherCredits>0 ? *FString::Printf(TEXT(" + bon exact de %d"),R.VoucherCredits) : TEXT(""));
-        if(Cast<ABotanicusPaymentCoins>(Hit.GetActor())) InteractionTargetWidget->SetLeftMousePrompt(FText::FromString(TEXT("Encaisser les pièces")),FText::FromString(Value),false);
-        else InteractionTargetWidget->SetContextStatus(FText::FromString(TEXT("Récupérez les pièces sur le comptoir")));
+        if(Cast<ABotanicusPaymentCoins>(Hit.GetActor())) InteractionTargetWidget->SetLeftMousePrompt(FText::FromString(TEXT("Encaisser toutes les pièces")),FText::FromString(Value),false);
+        else InteractionTargetWidget->SetContextStatus(FText::FromString(FString::Printf(TEXT("%d crédits en attente — vous pouvez continuer à scanner"),R.Amount)));
     }
     else if(R.Phase==EBotanicusCheckoutPhase::Opening) InteractionTargetWidget->SetContextStatus(FText::FromString(TEXT("Paiement en cours...")));
     else if(R.Phase==EBotanicusCheckoutPhase::Collecting || R.Phase==EBotanicusCheckoutPhase::Closing) InteractionTargetWidget->SetContextStatus(FText::FromString(FString::Printf(TEXT("+%d crédits"),R.Amount)));

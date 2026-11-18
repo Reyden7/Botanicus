@@ -73,8 +73,9 @@ void ABotanicusCashRegisterActor::NotifyCheckoutChanged()
 bool ABotanicusCashRegisterActor::TryScanCustomer(ABotanicusPlayerController* PC,ABotanicusVisitorCharacter* Customer)
 {
     FBox Bounds;
-    if(!HasAuthority() || PendingScan.Id.IsValid() || !PC || !IsValid(Customer) || Receipt.Phase!=EBotanicusCheckoutPhase::Idle || !IsOperational() ||
+    if(!HasAuthority() || !CanStartCheckoutScan() || !PC || !IsValid(Customer) || !IsOperational() ||
         !DockScanner || DockScanner->GetCarrier()!=PC->GetPawn() || GetCheckoutCustomer()!=Customer || !Customer->CanUsePlayerCheckout() || !Customer->GetCheckoutPlantVisualBounds(Bounds))return false;
+    int64 PendingTotal=0;if(!ValidatePendingPayments(PendingTotal) || Customer->GetCheckoutPrice()<=0 || PendingTotal+Customer->GetCheckoutPrice()>MAX_int32)return false;
     const auto* Settings=GetDefault<UBotanicusCheckoutSettings>();
     PendingScan=FBotanicusCheckoutScan();PendingScan.Id=FGuid::NewGuid();PendingScan.Customer=Customer;
     PendingScan.CustomerId=Customer->GetCheckoutCustomerId();PendingScan.PlantKey=Customer->GetCarriedCheckoutPlantKey();PendingScan.StartedAt=CheckoutServerTime();
@@ -116,28 +117,46 @@ void ABotanicusCashRegisterActor::UpdatePendingScan()
 }
 bool ABotanicusCashRegisterActor::CompleteCheckoutScan(ABotanicusPlayerController* PC,ABotanicusVisitorCharacter* Customer)
 {
-    if(!HasAuthority() || !PendingScan.Id.IsValid() || PendingScan.bCompleted || Receipt.Phase!=EBotanicusCheckoutPhase::Idle || !PC || !IsValid(Customer))return false;
+    if(!HasAuthority() || !PendingScan.Id.IsValid() || PendingScan.bCompleted || (Receipt.Phase!=EBotanicusCheckoutPhase::Idle && Receipt.Phase!=EBotanicusCheckoutPhase::AwaitingCollection) || !PC || !IsValid(Customer))return false;
+    int64 PendingTotal=0;
+    if(!ValidatePendingPayments(PendingTotal) || Customer->GetCheckoutPrice()<=0 || PendingTotal+Customer->GetCheckoutPrice()>MAX_int32)return false;
     FBotanicusCheckoutReceipt Candidate;Candidate.TransactionId=PendingScan.Id;
     if(!Customer->CommitManualCheckout(Candidate)) return false;
     const auto* S=GetDefault<UBotanicusCheckoutSettings>();Candidate.Phase=EBotanicusCheckoutPhase::Opening;Candidate.PhaseStartedAt=CheckoutServerTime();
     Candidate.OpenSeconds=FMath::Clamp(S->DrawerOpenSeconds,.1f,1.f);Candidate.CloseSeconds=FMath::Clamp(S->DrawerCloseSeconds,.1f,1.f);Candidate.DepositSeconds=FMath::Clamp(S->CoinDepositSeconds,.1f,.6f);Candidate.ClosePauseSeconds=FMath::Clamp(S->AfterLastCoinPause,0.f,1.f);
+    // Preserve every original sale amount and identity; only the visible pile is aggregated.
+    PendingPayments.Add(Candidate);
+    Candidate.Amount=static_cast<int32>(PendingTotal+Candidate.Amount);
+    Candidate.PendingSaleCount=PendingPayments.Num();
+    if(PendingTotal>0)
+    {
+        Candidate.bDrawerAlreadyOpen=true;Candidate.PreviouslyDepositedGoldCoins=Receipt.VisibleGoldCoins;
+        Candidate.PaymentAnchor=Receipt.PaymentAnchor;Candidate.bHasPaymentAnchor=Receipt.bHasPaymentAnchor;
+        Candidate.OpenedAt=Receipt.OpenedAt;Candidate.FloatStartedAt=Receipt.FloatStartedAt;
+    }
     Candidate.CoinFlightSeconds=FMath::Clamp(S->CoinFlight,.1f,.5f);Candidate.VisibleGoldCoins=FMath::Min(Candidate.Amount/10,FMath::Clamp(S->MaximumVisibleGoldCoins,10,256));
     Candidate.VoucherCredits=Candidate.Amount-Candidate.VisibleGoldCoins*10;
     Candidate.CoinIntervalSeconds=FMath::Min(FMath::Clamp(S->CoinInterval,.03f,.2f),FMath::Max(.001f,(FMath::Clamp(S->MaximumCollectionSeconds,1.f,5.f)-Candidate.CoinFlightSeconds)/FMath::Max(1,Candidate.VisualCount()-1)));
     Candidate.CollectionSeconds=Candidate.CoinFlightSeconds+FMath::Max(0,Candidate.VisualCount()-1)*Candidate.CoinIntervalSeconds;
     Candidate.ScanOrigin=DockScanner->GetMuzzleLocation();Candidate.ScanTarget=Customer->GetCheckoutPlantLocation();Candidate.CustomerHand=Customer->GetCheckoutPlantLocation();
-    PendingScan.bCompleted=true;Receipt=Candidate;UpdatePaymentAnchor(Customer);OpeningCustomer=Customer;Customer->RecordManualCheckoutOutcome();++AcceptedScans;NotifyCheckoutChanged();
-    UBotanicusAudioWorldSubsystem::Emit(this,TEXT("ScannerBeep"),Receipt.ScanOrigin);UBotanicusAudioWorldSubsystem::Emit(this,TEXT("RegisterOpen"),GetDrawerDepositLocation());return true;
+    PendingScan.bCompleted=true;Receipt=Candidate;if(PendingTotal==0)UpdatePaymentAnchor(Customer);OpeningCustomer=Customer;Customer->RecordManualCheckoutOutcome();++AcceptedScans;NotifyCheckoutChanged();
+    UBotanicusAudioWorldSubsystem::Emit(this,TEXT("ScannerBeep"),Receipt.ScanOrigin);if(!Receipt.bDrawerAlreadyOpen)UBotanicusAudioWorldSubsystem::Emit(this,TEXT("RegisterOpen"),GetDrawerDepositLocation());return true;
 }
 bool ABotanicusCashRegisterActor::TryCollectPayment(ABotanicusPlayerController* PC,const FGuid& ExpectedId)
 {
-    auto* GS=GetWorld()->GetGameState<ABotanicusGameState>();
-    if(!HasAuthority() || !PC || !PC->GetPawn() || !GS || ExpectedId!=Receipt.TransactionId || !ExpectedId.IsValid() ||
-        Receipt.Phase!=EBotanicusCheckoutPhase::AwaitingCollection || Receipt.bCredited || Receipt.Amount<=0 ||
-        static_cast<int64>(GS->GetSharedFunds())+Receipt.Amount>MAX_int32 || static_cast<int64>(GS->GetDailyRevenue())+Receipt.Amount>MAX_int32) return false;
-    // Consume before any credit callback. Neither animation completion nor later RPCs can enter again.
+    auto* GS=GetWorld()->GetGameState<ABotanicusGameState>();int64 Total=0;
+    if(!HasAuthority() || !PC || !PC->GetPawn() || !GS || IsCheckoutScanning() || ExpectedId!=Receipt.TransactionId || !ExpectedId.IsValid() ||
+        Receipt.Phase!=EBotanicusCheckoutPhase::AwaitingCollection || Receipt.bCredited || PendingPayments.IsEmpty() || !ValidatePendingPayments(Total) ||
+        Total<=0 || static_cast<int64>(GS->GetSharedFunds())+Total>MAX_int32 || static_cast<int64>(GS->GetDailyRevenue())+Total>MAX_int32)return false;
+    // Freeze and consume this batch before callbacks. Replayed/concurrent RPCs cannot pay it twice.
     Receipt.bCredited=true;Receipt.Phase=EBotanicusCheckoutPhase::Collecting;Receipt.PhaseStartedAt=CheckoutServerTime();Receipt.CollectedAt=Receipt.PhaseStartedAt;
-    PC->CreditPlantSale(Receipt.PlantItemKey,Receipt.Amount,false);++AcceptedCollections;NotifyCheckoutChanged();return true;
+    for(auto& Sale:PendingPayments)
+    {
+        // Native credit callbacks may capture a save. Keep the remaining unpaid entries recoverable.
+        Sale.bCredited=true;PC->CreditPlantSale(Sale.PlantItemKey,Sale.Amount,false);
+    }
+    PendingPayments.Reset();
+    ++AcceptedCollections;NotifyCheckoutChanged();return true;
 }
 void ABotanicusCashRegisterActor::TickCheckout(float DeltaSeconds)
 {
@@ -147,8 +166,8 @@ void ABotanicusCashRegisterActor::TickCheckout(float DeltaSeconds)
     {
         if(Receipt.Phase==EBotanicusCheckoutPhase::Opening && Now-Receipt.PhaseStartedAt>=Receipt.OpenSeconds)
         {
-            Receipt.Phase=EBotanicusCheckoutPhase::AwaitingCollection;Receipt.PhaseStartedAt=Now;Receipt.OpenedAt=Now;
-            UpdatePaymentAnchor(OpeningCustomer.Get());if(auto* Customer=OpeningCustomer.Get()) Customer->BeginDeparture(true);OpeningCustomer.Reset();NotifyCheckoutChanged();
+            Receipt.Phase=EBotanicusCheckoutPhase::AwaitingCollection;Receipt.PhaseStartedAt=Now;Receipt.OpenedAt=Now;if(Receipt.FloatStartedAt<=0)Receipt.FloatStartedAt=Now;
+            if(Receipt.PendingSaleCount<=1)UpdatePaymentAnchor(OpeningCustomer.Get());if(auto* Customer=OpeningCustomer.Get()) Customer->BeginDeparture(true);OpeningCustomer.Reset();NotifyCheckoutChanged();
         }
         else if(Receipt.Phase==EBotanicusCheckoutPhase::Collecting && Now-Receipt.CollectedAt>=Receipt.CollectionSeconds+Receipt.ClosePauseSeconds)
         {
@@ -160,17 +179,25 @@ void ABotanicusCashRegisterActor::TickCheckout(float DeltaSeconds)
     if(GetNetMode()==NM_DedicatedServer) return;
     const auto* S=GetDefault<UBotanicusCheckoutSettings>();const bool bAnimate=S->bAnimationsEnabled && (!S->bDisableMotionOnLowQuality || Scalability::GetQualityLevels().EffectsQuality>0);
     float Open=Receipt.Phase==EBotanicusCheckoutPhase::Idle ? 0 : 1;
-    if(bAnimate && Receipt.Phase==EBotanicusCheckoutPhase::Opening) Open=FMath::Clamp(static_cast<float>((Now-Receipt.PhaseStartedAt)/Receipt.OpenSeconds),0.f,1.f);
+    if(bAnimate && Receipt.Phase==EBotanicusCheckoutPhase::Opening && !Receipt.bDrawerAlreadyOpen) Open=FMath::Clamp(static_cast<float>((Now-Receipt.PhaseStartedAt)/Receipt.OpenSeconds),0.f,1.f);
     if(bAnimate && Receipt.Phase==EBotanicusCheckoutPhase::Closing) Open=1-FMath::Clamp(static_cast<float>((Now-Receipt.PhaseStartedAt)/Receipt.CloseSeconds),0.f,1.f);
     Open=Open*Open*(3-2*Open);DrawerVisualRoot->SetRelativeLocation(FMath::Lerp(DrawerClosedTarget->GetRelativeLocation(),DrawerOpenTarget->GetRelativeLocation(),Open));
 }
 FBotanicusSavedCashRegister ABotanicusCashRegisterActor::CaptureCheckout() const
 {
-    FBotanicusSavedCashRegister Out;Out.ActorName=GetFName();Out.ActorClass=FSoftClassPath(GetClass());Out.Transform=GetActorTransform();Out.RegisterId=RegisterId;Out.Receipt=Receipt;return Out;
+    FBotanicusSavedCashRegister Out;Out.ActorName=GetFName();Out.ActorClass=FSoftClassPath(GetClass());Out.Transform=GetActorTransform();Out.RegisterId=RegisterId;Out.Receipt=Receipt;
+    int64 Unpaid=0;for(const auto& Sale:PendingPayments)if(!Sale.bCredited){Out.PendingPayments.Add(Sale);Unpaid+=Sale.Amount;}
+    if(Receipt.bCredited && !Out.PendingPayments.IsEmpty())
+    {
+        Out.Receipt.bCredited=false;Out.Receipt.Phase=EBotanicusCheckoutPhase::AwaitingCollection;
+        Out.Receipt.Amount=static_cast<int32>(Unpaid);Out.Receipt.PendingSaleCount=Out.PendingPayments.Num();
+    }
+    return Out;
 }
 void ABotanicusCashRegisterActor::RestoreCheckout(const FBotanicusSavedCashRegister& Saved)
 {
-    if(!HasAuthority()) return;CancelPendingScan();RegisterId=Saved.RegisterId.IsValid() ? Saved.RegisterId : FGuid::NewGuid();Receipt=Saved.Receipt;OpeningCustomer.Reset();
+    if(!HasAuthority()) return;CancelPendingScan();RegisterId=Saved.RegisterId.IsValid() ? Saved.RegisterId : FGuid::NewGuid();Receipt=Saved.Receipt;PendingPayments=Saved.PendingPayments;OpeningCustomer.Reset();
+    if(PendingPayments.IsEmpty() && Receipt.TransactionId.IsValid() && Receipt.Amount>0 && !Receipt.PlantItemKey.IsNone() && !Receipt.bCredited && Receipt.Phase!=EBotanicusCheckoutPhase::Idle)PendingPayments.Add(Receipt);
     if(!Receipt.TransactionId.IsValid() || Receipt.Amount<=0 || Receipt.PlantItemKey.IsNone()) Receipt=FBotanicusCheckoutReceipt();
     else
     {
@@ -179,7 +206,22 @@ void ABotanicusCashRegisterActor::RestoreCheckout(const FBotanicusSavedCashRegis
         Receipt.CoinFlightSeconds=FMath::Clamp(Receipt.CoinFlightSeconds,.1f,.5f);Receipt.CoinIntervalSeconds=FMath::Clamp(Receipt.CoinIntervalSeconds,.001f,.2f);
         Receipt.CollectionSeconds=Receipt.CoinFlightSeconds+FMath::Max(0,Receipt.VisualCount()-1)*Receipt.CoinIntervalSeconds;
     }
-    if(Receipt.bCredited || Receipt.Phase==EBotanicusCheckoutPhase::Collecting || Receipt.Phase==EBotanicusCheckoutPhase::Closing) {Receipt.bCredited=true;Receipt.Phase=EBotanicusCheckoutPhase::Idle;}
+    if(!PendingPayments.IsEmpty())
+    {
+        int64 Total=0;for(const auto& Sale:PendingPayments)Total+=Sale.Amount;
+        if(Total>0 && Total<=MAX_int32)
+        {
+            Receipt.Amount=static_cast<int32>(Total);Receipt.PendingSaleCount=PendingPayments.Num();Receipt.bCredited=false;
+            if(!Receipt.TransactionId.IsValid())Receipt.TransactionId=PendingPayments.Last().TransactionId;
+            Receipt.Phase=EBotanicusCheckoutPhase::AwaitingCollection;
+            Receipt.VisibleGoldCoins=FMath::Min(Receipt.Amount/10,FMath::Clamp(GetDefault<UBotanicusCheckoutSettings>()->MaximumVisibleGoldCoins,10,256));
+            Receipt.VoucherCredits=Receipt.Amount-Receipt.VisibleGoldCoins*10;
+            Receipt.CoinIntervalSeconds=FMath::Min(FMath::Clamp(Receipt.CoinIntervalSeconds,.001f,.2f),FMath::Max(.001f,(FMath::Clamp(GetDefault<UBotanicusCheckoutSettings>()->MaximumCollectionSeconds,1.f,5.f)-Receipt.CoinFlightSeconds)/FMath::Max(1,Receipt.VisualCount()-1)));
+            Receipt.CollectionSeconds=Receipt.CoinFlightSeconds+FMath::Max(0,Receipt.VisualCount()-1)*Receipt.CoinIntervalSeconds;
+            Receipt.OpenedAt=CheckoutServerTime()-Receipt.DepositSeconds-.05;Receipt.FloatStartedAt=Receipt.OpenedAt;
+        }
+    }
+    else if(Receipt.bCredited || Receipt.Phase==EBotanicusCheckoutPhase::Collecting || Receipt.Phase==EBotanicusCheckoutPhase::Closing) {Receipt.bCredited=true;Receipt.Phase=EBotanicusCheckoutPhase::Idle;}
     else if(Receipt.TransactionId.IsValid() && Receipt.Amount>0 && Receipt.Phase!=EBotanicusCheckoutPhase::Idle) {Receipt.Phase=EBotanicusCheckoutPhase::AwaitingCollection;Receipt.OpenedAt=CheckoutServerTime()-Receipt.DepositSeconds-.05;}
     else Receipt=FBotanicusCheckoutReceipt();
     if(Receipt.TransactionId.IsValid() && !Receipt.bHasPaymentAnchor) UpdatePaymentAnchor(nullptr);
@@ -236,4 +278,17 @@ void ABotanicusCashRegisterActor::ConfigureRegisterRepresentation()
     // Match the visible scanner head; the old support target was buried against the desk surface.
     ScannerDockHit->SetRelativeLocation(FVector(2,0,11));ScannerDockHit->SetBoxExtent(FVector(7,8,6));
     CoinDropPoint->SetRelativeLocation(FVector(-18,-12,5));
+}
+
+bool ABotanicusCashRegisterActor::ValidatePendingPayments(int64& Total) const
+{
+    Total=0;TSet<FGuid> Ids,Plants,Customers;
+    for(const auto& Sale:PendingPayments)
+    {
+        if(!Sale.TransactionId.IsValid() || Sale.PlantItemKey.IsNone() || Sale.Amount<=0 || Sale.bCredited || Ids.Contains(Sale.TransactionId) ||
+            (Sale.PlantInstanceId.IsValid() && Plants.Contains(Sale.PlantInstanceId)) || (Sale.CustomerId.IsValid() && Customers.Contains(Sale.CustomerId)))return false;
+        Ids.Add(Sale.TransactionId);Plants.Add(Sale.PlantInstanceId);Customers.Add(Sale.CustomerId);Total+=Sale.Amount;
+        if(Total>MAX_int32)return false;
+    }
+    return PendingPayments.IsEmpty() ? Receipt.Phase==EBotanicusCheckoutPhase::Idle : !Receipt.bCredited && Total==Receipt.Amount;
 }

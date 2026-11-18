@@ -14,6 +14,7 @@ class UAnimSequence;
 struct FBotanicusAutomaticWateringNeed;
 class UBotanicusReservoirVisualComponent;
 class UBotanicusRobotAudioComponent;
+class UBotanicusRobotFaceComponent;
 UCLASS()
 class BOTANICUS_API ABotanicusGardeningRobot : public ACharacter, public IBotanicusInteractable
 {
@@ -24,6 +25,7 @@ public:
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Reservoir") TObjectPtr<USceneComponent> WaterTankMount;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Reservoir") TObjectPtr<USceneComponent> WaterTankPivot;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Robot|Audio") TObjectPtr<UBotanicusRobotAudioComponent> RobotAudio;
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Robot|Face") TObjectPtr<UBotanicusRobotFaceComponent> RobotFace;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Reservoir") TObjectPtr<UBotanicusReservoirVisualComponent> ReservoirVisual;
     virtual void OnConstruction(const FTransform& Transform) override;
     virtual void BeginPlay() override;
@@ -57,6 +59,21 @@ public:
     FBotanicusGardeningSave Capture() const;
     void SetEnabled(bool bValue);
     bool IsDocked() const;
+    AActor* GetWateringTarget() const {return Target;}
+    int32 GetWateringTargetSlot() const {return TargetSlot;}
+    UPROPERTY(EditAnywhere,Category="Robot|Whip") TSoftObjectPtr<class UBotanicusRobotContactSurface> WhipContactSurface;
+    UPROPERTY(EditAnywhere,Category="Robot|Whip",meta=(ClampMin="0.05",ClampMax="0.4")) float WhipSparkDuration=.3f;
+    UPROPERTY(EditAnywhere,Category="Robot|Whip",meta=(ClampMin="1",ClampMax="32")) int32 WhipCyanSparks=10;
+    UPROPERTY(EditAnywhere,Category="Robot|Whip",meta=(ClampMin="0",ClampMax="12")) int32 WhipYellowSparks=4;
+    UPROPERTY(EditAnywhere,Category="Robot|Whip",meta=(ClampMin="0.1",ClampMax="4")) float WhipSparkSize=2.5f;
+    bool CanReceiveWhip() const;
+    bool ApplyElectricWhip(AActor* InstigatorActor);
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Robot|Whip",meta=(ClampMin="0",Units="cm")) float WhipBumpDistance=50;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Robot|Whip",meta=(ClampMin="0.01",Units="s")) float WhipBumpDuration=.25f;
+    UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Robot|Whip",meta=(ClampMin="0.1",Units="s")) float WhipCooldown=.75f;
+    UPROPERTY(EditAnywhere,Category="Robot|Whip") TSoftObjectPtr<class USoundBase> WhipImpactSound;
+    UPROPERTY(EditAnywhere,Category="Robot|Whip") TSoftObjectPtr<class UNiagaraSystem> WhipSparks;
+    UPROPERTY(EditAnywhere,Category="Robot|Whip",meta=(ClampMin="0")) float WhipVolume=.6f;
     bool CanLaunchRound() const;
     bool LaunchRound();
     bool HasPowerForTask() const;
@@ -72,6 +89,13 @@ public:
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Replicated,Category="Robot") EBotanicusGardeningState State=EBotanicusGardeningState::Inactive;
 private:
     void UpdateRobot();
+    void UpdateWhipBump();
+    void FinishWhipBump();
+    UFUNCTION(NetMulticast,Unreliable) void MulticastWhipImpact(FVector_NetQuantize10 Position,FVector_NetQuantizeNormal Normal);
+    FVector WhipDirection=FVector::ZeroVector;
+    float WhipApplied=0,WhipDistance=0;
+    double NextWhipAllowed=0;
+    EBotanicusGardeningState WhipResumeState=EBotanicusGardeningState::SearchingPlant;
     void SetupAnimatedVisual();
     void SetActivity(EBotanicusRobotActivity Activity,float Duration=0,float AnimationStart=0);
     UFUNCTION() void OnRep_Activity();

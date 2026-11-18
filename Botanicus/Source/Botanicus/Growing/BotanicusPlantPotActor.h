@@ -7,6 +7,7 @@
 #include "Growing/BotanicusPlantCatalog.h"
 #include "BotanicusPlantPotActor.generated.h"
 
+class UBotanicusSoilPourComponent;
 class UStaticMeshComponent;
 class UTextRenderComponent;
 class UWidgetComponent;
@@ -92,6 +93,12 @@ public:
 	UFUNCTION(BlueprintPure, Category="Botanicus|Growing|Environment")
 	FText GetEnvironmentDiagnostic() const;
 	float GetSoilMaximumHeight() const;
+    virtual TArray<float> GetSoilLevels() const;
+    virtual void RestoreSoilLevels(const TArray<float>& Levels);
+    virtual FVector GetSoilSurfaceForSlot(int32 Slot) const;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Botanicus|Soil")
+    TObjectPtr<UBotanicusSoilPourComponent> SoilPour;
+    float GetSoilFillDuration() const { return FMath::Max(.1f, SoilFillDuration); }
 	int32 GetWateringCount() const { return WateringCount; }
 	bool IsElementalDead() const { return bElementalDead; }
 	UFUNCTION(BlueprintPure, Category="Botanicus|Growing|Element")
@@ -99,6 +106,8 @@ public:
 	UFUNCTION(BlueprintPure, Category="Botanicus|Growing|Element")
 	bool IsPlantElementCompatible() const;
 	bool IsMature() const { return !PlantKey.IsNone() && GrowthProgress >= 0.999f; }
+	/** Existing maturity/species rules, without requiring a tool to be selected yet. */
+	virtual bool ResolveHarvestTool(const AActor* Interactor,FName& OutTool,int32& OutSlot) const;
 	void SetInspectionVisible(bool bVisible);
 	bool IsInspectionVisible() const { return bInspectionVisible; }
 	/** Harvest item representing the current plant and its present quality. */

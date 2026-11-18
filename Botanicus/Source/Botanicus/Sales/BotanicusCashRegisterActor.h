@@ -31,6 +31,7 @@ public:
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out) const override;
     virtual void EndPlay(const EEndPlayReason::Type Reason) override;
     const FBotanicusCheckoutReceipt& GetReceipt() const {return Receipt;}
+    bool CanStartCheckoutScan() const {return !PendingScan.Id.IsValid() && (Receipt.Phase==EBotanicusCheckoutPhase::Idle || Receipt.Phase==EBotanicusCheckoutPhase::AwaitingCollection);}
     bool IsCheckoutScanning() const {return PendingScan.Id.IsValid() && !PendingScan.bCompleted;}
     const FBotanicusCheckoutScan& GetCheckoutScan() const {return PendingScan;}
     bool TryScanCustomer(ABotanicusPlayerController* PC,ABotanicusVisitorCharacter* Customer);
@@ -89,6 +90,9 @@ private:
     void NotifyCheckoutChanged();
     UFUNCTION() void OnRep_Checkout();
     UPROPERTY(ReplicatedUsing=OnRep_Checkout) FBotanicusCheckoutReceipt Receipt;
+    // Not replicated: clients need the aggregate presentation, never authority over its ledger.
+    UPROPERTY() TArray<FBotanicusCheckoutReceipt> PendingPayments;
+    bool ValidatePendingPayments(int64& Total) const;
     UPROPERTY(Replicated) FGuid RegisterId;
     UPROPERTY(ReplicatedUsing=OnRep_Checkout) TObjectPtr<ABotanicusCheckoutScanner> DockScanner;
     UPROPERTY(ReplicatedUsing=OnRep_Checkout) TObjectPtr<ABotanicusPaymentCoins> PaymentCoins;

@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "BotanicusPlayerController.h"
+#include "Tools/BotanicusMultiToolComponent.h"
 #include "UI/BotanicusPlantContextSubsystem.h"
 #include "UI/BotanicusPlantContextSettings.h"
 #if WITH_EDITOR
@@ -1523,6 +1524,15 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 
 	if (Params.Key == EKeys::LeftMouseButton)
 	{
+		if(Params.Event==IE_Pressed)
+		{
+			if(auto* Context=GetPawn()?GetPawn()->FindComponentByClass<UBotanicusMultiToolComponent>():nullptr)
+			{
+				if(Context->TryWhip())return true;
+				if(Context->GetPreparedTarget(EBotanicusMultiToolMode::Cutter) && TryBeginNearbyParcelCut())return true;
+				if(Context->GetPreparedTarget(EBotanicusMultiToolMode::Shovel) && TryBeginNearbyPlantPotAction())return true;
+			}
+		}
 		if (Params.Event == IE_Pressed &&
 			(TryPlacePlantOnNearbySalesDisplay(true) ||
              TryStoreSelectedQuickBarItemOnAimedShelf() ||
@@ -2214,7 +2224,7 @@ void ABotanicusPlayerController::RefreshInteractionTargetName(
 		const FText PlantName = PlantDefinition
 			? PlantDefinition->DisplayName
 			: FText::FromName(PlantPot->GetPlantKey());
-		if (SelectedItemKey == TEXT("GardenTrowel") && bHasPlant)
+		if ((SelectedItemKey == TEXT("GardenTrowel") || UBotanicusMultiToolComponent::HasTool(BotanicusCharacter,TEXT("GardenTrowel"),PlantPot)) && bHasPlant)
 		{
 			const bool bMature = PlantPot->IsMature();
 			InteractionTargetWidget->SetLeftMousePrompt(
@@ -2275,7 +2285,7 @@ void ABotanicusPlayerController::RefreshInteractionTargetName(
 			: nullptr;
 		const bool bCutterSelected =
 			QuickBar &&
-			QuickBar->GetSelectedSlot().ItemKey == TEXT("BoxCutter");
+			UBotanicusMultiToolComponent::HasTool(const_cast<ABotanicusCharacter*>(BotanicusCharacter),TEXT("BoxCutter"),Parcel);
 		if (!bCutterSelected)
 		{
 			InteractionTargetWidget->ClearTarget();
@@ -4863,6 +4873,7 @@ void ABotanicusPlayerController::ApplyCarriedItemState(
 			MultiPlanter->RestoreMultiPlantState(
 				Slot.CarriedState.MultiPlanterSoilUnits,
 				Slots);
+            MultiPlanter->RestoreSoilLevels(Slot.CarriedState.SoilFillLevels);
 		}
 	}
 	else if (Slot.CarriedState.bHasPlantPotState)
@@ -4876,6 +4887,7 @@ void ABotanicusPlayerController::ApplyCarriedItemState(
 				Slot.CarriedState.WaterLevel,
 				Slot.CarriedState.GrowthProgress,
 				Slot.CarriedState.CareScore);
+            PlantPot->RestoreSoilLevels(Slot.CarriedState.SoilFillLevels);
 			PlantPot->RestoreWateringCount(
 				Slot.CarriedState.WateringCount);
 		}
@@ -4918,6 +4930,7 @@ void ABotanicusPlayerController::CopyWorldItemStateToPreview(
 			Target->RestoreIllegalPlanterState(
 				Source->GetPlanterLevel(), Source->GetSoilUnits(),
 				Source->GetWaterAmount(), Source->GetPlantSlots());
+            Target->RestoreSoilLevels(Source->GetSoilLevels());
 		}
 		return;
 	}
@@ -4929,6 +4942,7 @@ void ABotanicusPlayerController::CopyWorldItemStateToPreview(
 		{
 			Target->RestoreMultiPlantState(
 				Source->GetSoilUnits(), Source->GetPlantSlots());
+            Target->RestoreSoilLevels(Source->GetSoilLevels());
 		}
 		return;
 	}
@@ -4945,6 +4959,7 @@ void ABotanicusPlayerController::CopyWorldItemStateToPreview(
 				Source->GetGrowthProgress(),
 				Source->GetCareScore(),
 				Source->IsElementalDead());
+            Target->RestoreSoilLevels(Source->GetSoilLevels());
 			Target->RestoreWateringCount(
 				Source->GetWateringCount());
 		}
@@ -5118,7 +5133,7 @@ void ABotanicusPlayerController::UpdateEquippedQuickBarItem()
 			if (State.bHasPlantPotState && !State.bHasMultiPlanterState)
 			{
 				if (const auto* Pot = Cast<ABotanicusPlantPotActor>(LocalEquippedQuickBarItem))
-					bRepresentedStateDrifted = Pot->HasSoil() != State.bPlantPotHasSoil ||
+					bRepresentedStateDrifted = Pot->HasSoil() != State.bPlantPotHasSoil || (!State.SoilFillLevels.IsEmpty() && Pot->GetSoilLevels()!=State.SoilFillLevels) ||
 						Pot->GetPlantKey() != State.PlantKey || Pot->GetWaterLevel() != State.WaterLevel ||
 						Pot->GetGrowthProgress() != State.GrowthProgress || Pot->GetCareScore() != State.CareScore ||
 						Pot->GetWateringCount() != State.WateringCount;
@@ -5127,7 +5142,7 @@ void ABotanicusPlayerController::UpdateEquippedQuickBarItem()
 			{
 				if (const auto* Pot = Cast<ABotanicusMultiPlantPotActor>(LocalEquippedQuickBarItem))
 				{
-					bRepresentedStateDrifted = Pot->GetSoilUnits() != State.MultiPlanterSoilUnits;
+					bRepresentedStateDrifted = Pot->GetSoilUnits() != State.MultiPlanterSoilUnits || (!State.SoilFillLevels.IsEmpty() && Pot->GetSoilLevels()!=State.SoilFillLevels);
 					const auto& Slots = Pot->GetPlantSlots();
 					for (int32 Index = 0; Index < Slots.Num(); ++Index)
 					{
@@ -5320,6 +5335,12 @@ void ABotanicusPlayerController::UpdateEquippedQuickBarItem()
 		LocalEquippedRenderedMesh = LocalEquippedQuickBarItem->Mesh->GetStaticMesh();
 	}
 
+	if(auto* Tool=Cast<ABotanicusMultiToolActor>(LocalEquippedQuickBarItem))
+	{
+		Tool->SetActorTickEnabled(false);
+		if(auto* Context=BotanicusCharacter->FindComponentByClass<UBotanicusMultiToolComponent>())
+		{Tool->SetMultiToolMode(Context->GetMode());Tool->SetActorHiddenInGame(!Context->ShouldShowEquippedVisual());}
+	}
 	FVector ViewLocation;
 	FRotator ViewRotation;
 	GetPlayerViewPoint(ViewLocation, ViewRotation);
@@ -5328,9 +5349,9 @@ void ABotanicusPlayerController::UpdateEquippedQuickBarItem()
 		FRotationMatrix(ViewRotation).GetUnitAxis(EAxis::Y);
 	const FVector ViewUp =
 		FRotationMatrix(ViewRotation).GetUnitAxis(EAxis::Z);
-	const float ItemRadius =
-		LocalEquippedQuickBarItem->GetPlacementBoxExtent().
-			GetAbs().GetMax();
+	const auto* MultiTool=Cast<ABotanicusMultiToolActor>(LocalEquippedQuickBarItem);
+	const float ItemRadius = MultiTool ? MultiTool->GetHeldVisualRadius() :
+		LocalEquippedQuickBarItem->GetPlacementBoxExtent().GetAbs().GetMax();
 	const float ForwardDistance =
 		FMath::Clamp(
 			70.0f + ItemRadius * 0.35f,
@@ -7996,6 +8017,19 @@ bool ABotanicusPlayerController::TryBeginNearbyPlantPotAction()
 		return false;
 	}
 
+	if(auto* C=Cast<ABotanicusCharacter>(GetPawn());C && C->GetQuickBarComponent()->GetSelectedSlot().ItemKey==UBotanicusMultiToolComponent::ItemKey())
+	{
+		auto* Tool=C->FindComponentByClass<UBotanicusMultiToolComponent>();
+		auto* Pot=Tool?Cast<ABotanicusPlantPotActor>(Tool->GetPreparedTarget(EBotanicusMultiToolMode::Shovel)):nullptr;
+        if (!Pot)
+        {
+            auto* Planter=Tool?Cast<ABotanicusIllegalPlanterActor>(Tool->GetPreparedTarget(EBotanicusMultiToolMode::Shovel)):nullptr;
+            if (!Planter) return false;
+            LocalActivePlantPot=nullptr;LocalActiveIllegalPlanter=Planter;PlantPotActionHoldElapsed=0;bPlantPotActionHeld=true;
+            ServerBeginIllegalPlanterAction(Planter);return true;
+        }
+		LocalActivePlantPot=Pot;LocalActiveIllegalPlanter=nullptr;PlantPotActionHoldElapsed=0;bPlantPotActionHeld=true;ServerBeginPlantPotAction(Pot);return true;
+	}
 	ABotanicusPlantPotActor* NearestPot = nullptr;
 	ABotanicusIllegalPlanterActor* NearestIllegalPlanter = nullptr;
 	float BestDistanceSquared = FMath::Square(400.0f);
@@ -8089,11 +8123,18 @@ bool ABotanicusPlayerController::TryBeginNearbyParcelCut()
 		!BotanicusCharacter ||
 		!QuickBar ||
 		!GetWorld() ||
-		QuickBar->GetSelectedSlot().ItemKey != TEXT("BoxCutter"))
+		(QuickBar->GetSelectedSlot().ItemKey != TEXT("BoxCutter") && QuickBar->GetSelectedSlot().ItemKey!=UBotanicusMultiToolComponent::ItemKey()))
 	{
 		return false;
 	}
 
+	if(QuickBar->GetSelectedSlot().ItemKey==UBotanicusMultiToolComponent::ItemKey())
+	{
+		auto* Tool=BotanicusCharacter->FindComponentByClass<UBotanicusMultiToolComponent>();
+		auto* Parcel=Tool?Cast<ABotanicusDeliveryParcelActor>(Tool->GetPreparedTarget(EBotanicusMultiToolMode::Cutter)):nullptr;
+		if(!Parcel)return false;
+		LocalActiveParcelCut=Parcel;bParcelCutActionHeld=true;ServerBeginParcelCut(Parcel);return true;
+	}
 	ABotanicusDeliveryParcelActor* TargetParcel = nullptr;
 	float BestDistanceSquared = FMath::Square(450.0f);
 	for (TActorIterator<ABotanicusDeliveryParcelActor> ParcelIt(
@@ -9134,6 +9175,8 @@ void ABotanicusPlayerController::ServerPlaceCatalogOrder_Implementation(
 		? GameState->GetServerWorldTimeSeconds()
 		: GetWorld()->GetTimeSeconds();
 	Order.DeliveryServerTime = ServerTime + Delay;
+    if(UBotanicusMultiToolComponent::IsRobotItem(this,ItemKey))
+        if(auto* Shared=GetWorld()->GetGameState<ABotanicusGameState>())Shared->UnlockElectricWhip();
 	if (ABotanicusGameState* BotanicusGameState =
 		GetSharedGameState(this))
 	{
@@ -10598,6 +10641,7 @@ void ABotanicusPlayerController::
 		Cast<ABotanicusMultiPlantPotActor>(WorldItem))
 	{
 		CarriedState.bHasMultiPlanterState = true;
+        CarriedState.SoilFillLevels = MultiPlanter->GetSoilLevels();
 		CarriedState.MultiPlanterSoilUnits =
 			MultiPlanter->GetSoilUnits();
 		for (const FBotanicusMultiPlantSlotState& Slot :
@@ -10619,6 +10663,7 @@ void ABotanicusPlayerController::
 		Cast<ABotanicusPlantPotActor>(WorldItem))
 	{
 		CarriedState.bHasPlantPotState = true;
+        CarriedState.SoilFillLevels = PlantPot->GetSoilLevels();
 		CarriedState.bPlantPotHasSoil = PlantPot->HasSoil();
 		CarriedState.PlantKey = PlantPot->GetPlantKey();
 		CarriedState.WaterLevel = PlantPot->GetWaterLevel();
@@ -11571,4 +11616,15 @@ ABotanicusWateringCanActor* ABotanicusPlayerController::GetJuiceWateringCan() co
 void ABotanicusPlayerController::ClientCancelPickupPresentation_Implementation(FName ItemKey)
 {
     if(GetWorld())if(auto* J=GetWorld()->GetSubsystem<UBotanicusJuiceWorldSubsystem>())J->CancelPickupHand(GetPawn(),ItemKey);
+}
+
+FVector ABotanicusPlayerController::GetSoilBagMouth(const FVector& NormalizedOffset) const
+{
+    if (IsValid(LocalEquippedQuickBarItem) && LocalEquippedQuickBarItem->GetItemKey()==TEXT("PottingSoil"))
+        if (const auto* M=LocalEquippedQuickBarItem->FindComponentByClass<UStaticMeshComponent>())
+        {
+            FVector Min,Max;M->GetLocalBounds(Min,Max);
+            return M->GetComponentTransform().TransformPosition((Min+Max)*.5f+(Max-Min)*.5f*NormalizedOffset);
+        }
+    return GetPlacementCosmeticHandPosition(TEXT("PottingSoil"));
 }

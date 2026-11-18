@@ -11,6 +11,16 @@ UBotanicusRobotAudioComponent::UBotanicusRobotAudioComponent()
     PrimaryComponentTick.bCanEverTick=false;
     const FString Root=TEXT("/Game/Botanicus/Items/robot_aroseur/Sounds/");
     auto Ref=[&](const TCHAR* Name){return TSoftObjectPtr<USoundBase>(FSoftObjectPath(Root+Name+TEXT(".")+Name));};
+    const FString VoiceRoot=Root+TEXT("Expressions/");
+    const TCHAR* Events[]={TEXT("Start"),TEXT("PlantFound"),TEXT("Watering"),TEXT("Success"),TEXT("NoWater"),TEXT("LowBattery"),TEXT("Charging"),TEXT("Charged"),TEXT("Blocked"),TEXT("Ouch")};
+    for(int32 I=0;I<10;++I)
+    {
+        FString Name=I==9?TEXT("S_Robot_Ouch"):FString(TEXT("S_Robot_Beep_"))+Events[I];
+        RobotVoices.FindOrAdd(static_cast<EBotanicusRobotReaction>(I)).Sounds.Add(TSoftObjectPtr<USoundBase>(FSoftObjectPath(VoiceRoot+Name+TEXT(".")+Name)));
+    }
+    for(const auto& Pair:{TPair<EBotanicusRobotReaction,FString>(EBotanicusRobotReaction::Start,TEXT("S_Robot_Beep_Start_Variant")),TPair<EBotanicusRobotReaction,FString>(EBotanicusRobotReaction::Charging,TEXT("S_Robot_Beep_Charging_Variant"))})
+        RobotVoices[Pair.Key].Sounds.Add(TSoftObjectPtr<USoundBase>(FSoftObjectPath(VoiceRoot+Pair.Value+TEXT(".")+Pair.Value)));
+    RobotVoices[EBotanicusRobotReaction::Charging].VolumeMultiplier=.6f;
     PowerOnSound=Ref(TEXT("S_Robot_PowerOn"));PowerDownSound=Ref(TEXT("S_Robot_PowerDown"));RunSound=Ref(TEXT("S_Robot_Run"));DeploySound=Ref(TEXT("S_Robot_Deploy"));RetractSound=Ref(TEXT("S_Robot_Retract"));
 }
 UAudioComponent* UBotanicusRobotAudioComponent::MakeVoice(FName Name)
@@ -34,13 +44,14 @@ void UBotanicusRobotAudioComponent::BeginPlay()
         // One local voice per robot; do not consume the four-player manual watering concurrency group.
         Water->SetSound(WaterCatalog->WaterLoop);
     }
+    InitializeVoice();
     // Initial replication/restore never replays an old departure or docking cue.
     if(auto* R=Cast<ABotanicusGardeningRobot>(GetOwner())){LastActivity=R->GetPresentation().Activity;LastStartedAt=R->GetPresentation().StartedAt;bInitialized=true;}
 }
 void UBotanicusRobotAudioComponent::EndPlay(const EEndPlayReason::Type Reason)
 {
-    for(auto* Voice:{Motor.Get(),Arm.Get(),Power.Get(),Water.Get()})if(Voice){Voice->Stop();Voice->DestroyComponent();}
-    Motor=nullptr;Arm=nullptr;Power=nullptr;Water=nullptr;bWaterWanted=false;Super::EndPlay(Reason);
+    for(auto* Voice:{Motor.Get(),Arm.Get(),Power.Get(),Water.Get(),Expression.Get()})if(Voice){Voice->Stop();Voice->DestroyComponent();}
+    Motor=nullptr;Arm=nullptr;Power=nullptr;Water=nullptr;Expression=nullptr;bWaterWanted=false;Super::EndPlay(Reason);
 }
 void UBotanicusRobotAudioComponent::PlayAction(UAudioComponent* Voice,USoundBase* Sound,float Volume,float Age)
 {
@@ -50,6 +61,7 @@ void UBotanicusRobotAudioComponent::PlayAction(UAudioComponent* Voice,USoundBase
 void UBotanicusRobotAudioComponent::UpdatePresentation()
 {
     auto* R=Cast<ABotanicusGardeningRobot>(GetOwner());if(!R || !Motor || !Arm || !Power || LoadedSounds.Num()!=5)return;
+    UpdateVoice();
     const auto& P=R->GetPresentation();const auto A=P.Activity;const double Now=R->PresentationNow();
     const float Age=FMath::Max(0.f,float(Now-P.StartedAt));
     if(bInitialized && (LastActivity!=A || LastStartedAt!=P.StartedAt))
@@ -112,6 +124,7 @@ void UBotanicusRobotAudioComponent::ObserveEvaluatedArmMotion()
 
 void UBotanicusRobotAudioComponent::SetWaterActive(bool bActive)
 {
+    ObserveVoiceWater(bActive);
     if(!Water || !WaterCatalog || bWaterWanted==bActive)return;
     bWaterWanted=bActive;
     if(bActive)Water->FadeIn(FMath::Max(.01f,WaterFadeSeconds),WaterCatalog->WaterVolume*FMath::Clamp(WaterVolumeMultiplier,0.f,2.f));

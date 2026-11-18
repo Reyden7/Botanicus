@@ -8,6 +8,8 @@ class UBotanicusJuiceAssetTools : public UBlueprintFunctionLibrary
 {
 	GENERATED_BODY()
 public:
+    UFUNCTION(BlueprintCallable,Category="Botanicus|Editor|Soil") static FString BuildSoilPour();
+    UFUNCTION(BlueprintCallable,Category="Botanicus|Editor|Robot") static FString BuildRobotWhipImpact();
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Editor|Juice")
 	static FString InspectNiagara(const FString& AssetPath);
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Editor|Juice")

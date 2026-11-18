@@ -46,6 +46,9 @@ public:
 		uint16 InCutCoverageMask,
 		bool bInOpened);
 	void BeginCutting(AActor* Interactor);
+	/** Same tape band used by UpdateCutterTrace; no proximity-only preparation. */
+	bool IsCuttingAreaHit(const FHitResult& Hit) const;
+	bool IsBeingCutBy(const AActor* User) const;
 	void EndCutting(AActor* Interactor);
 	FName GetItemKey() const { return ItemKey; }
 	int32 GetQuantity() const { return Quantity; }

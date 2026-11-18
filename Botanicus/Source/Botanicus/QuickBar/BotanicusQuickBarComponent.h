@@ -18,6 +18,7 @@ struct BOTANICUS_API FBotanicusCarriedItemState
 
 	UPROPERTY()
 	bool bPlantPotHasSoil = false;
+    UPROPERTY() TArray<float> SoilFillLevels;
 
 	UPROPERTY()
 	FName PlantKey = NAME_None;
@@ -74,7 +75,7 @@ struct BOTANICUS_API FBotanicusCarriedItemState
 	bool operator==(const FBotanicusCarriedItemState& Other) const
 	{
 		return bHasPlantPotState == Other.bHasPlantPotState &&
-			bPlantPotHasSoil == Other.bPlantPotHasSoil &&
+			bPlantPotHasSoil == Other.bPlantPotHasSoil && SoilFillLevels == Other.SoilFillLevels &&
 			PlantKey == Other.PlantKey &&
 			FMath::IsNearlyEqual(WaterLevel, Other.WaterLevel) &&
 			FMath::IsNearlyEqual(
@@ -167,6 +168,7 @@ class BOTANICUS_API UBotanicusQuickBarComponent : public UActorComponent
 
 public:
 	static constexpr int32 SlotCount = 10;
+    bool NormalizeMultiToolSlots();
 
 	UBotanicusQuickBarComponent();
 

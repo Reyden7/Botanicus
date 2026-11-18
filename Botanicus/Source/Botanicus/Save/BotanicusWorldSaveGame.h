@@ -195,6 +195,7 @@ struct BOTANICUS_API FBotanicusSavedWorldItem
 
 	UPROPERTY()
 	bool bPlantPotHasSoil = false;
+    UPROPERTY() TArray<float> SoilFillLevels;
 
 	UPROPERTY()
 	FName PlantKey = NAME_None;
@@ -302,7 +303,9 @@ class BOTANICUS_API UBotanicusWorldSaveGame : public USaveGame
 
 public:
 	UPROPERTY()
-	int32 SaveVersion = 34;
+	int32 SaveVersion = 37;
+
+    UPROPERTY() bool bElectricWhipUnlocked=false;
 
 	UPROPERTY()
 	FString MapName;

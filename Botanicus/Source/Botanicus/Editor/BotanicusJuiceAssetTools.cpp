@@ -1,6 +1,9 @@
 #include "Editor/BotanicusJuiceAssetTools.h"
 #if WITH_EDITOR
 #include "NiagaraSystem.h"
+#include "Gardening/BotanicusGardeningRobot.h"
+#include "Gardening/BotanicusRobotContactSurface.h"
+#include "Components/StaticMeshComponent.h"
 #include "NiagaraEmitter.h"
 #include "NiagaraScript.h"
 #include "NiagaraScriptSource.h"
@@ -229,5 +232,197 @@ bool UBotanicusJuiceAssetTools::BuildDeliverySmoke()
     return UPackage::SavePackage(Package,System,*FPackageName::LongPackageNameToFilename(Path,FPackageName::GetAssetPackageExtension()),Args);
 #else
     return false;
+#endif
+}
+
+FString UBotanicusJuiceAssetTools::BuildRobotWhipImpact()
+{
+#if WITH_EDITOR
+    const FString Folder=TEXT("/Game/Botanicus/Items/robot_aroseur/VFX/");
+    const FString SurfacePath=Folder+TEXT("DA_RobotWhipContactSurface");
+    if(!FPackageName::DoesPackageExist(SurfacePath))
+    {
+        UClass* Class=LoadClass<ABotanicusGardeningRobot>(nullptr,TEXT("/Game/Botanicus/blueprints/BP_Item_GardeningRobot_L1.BP_Item_GardeningRobot_L1_C"));
+        auto* CDO=Class?Class->GetDefaultObject<ABotanicusGardeningRobot>():nullptr;if(!CDO)return TEXT("NO_ROBOT");
+        auto* Package=CreatePackage(*SurfacePath);auto* Data=NewObject<UBotanicusRobotContactSurface>(Package,TEXT("DA_RobotWhipContactSurface"),RF_Public|RF_Standalone|RF_Transactional);
+        if(!Data->Bake(CDO->RobotSkeletalMesh.LoadSynchronous(),CDO->Body->GetStaticMesh()))return TEXT("SURFACE_BAKE_FAILED");
+        FAssetRegistryModule::AssetCreated(Data);Package->MarkPackageDirty();FSavePackageArgs Args;Args.TopLevelFlags=RF_Public|RF_Standalone;
+        if(!UPackage::SavePackage(Package,Data,*FPackageName::LongPackageNameToFilename(SurfacePath,FPackageName::GetAssetPackageExtension()),Args))return TEXT("SURFACE_SAVE_FAILED");
+    }
+    const FString Path=Folder+TEXT("NS_Robot_WhipImpact");
+    if(FPackageName::DoesPackageExist(Path))return TEXT("EXISTS_PRESERVED");
+    auto* Original=LoadObject<UNiagaraSystem>(nullptr,TEXT("/Game/Botanicus/VFX/Juice/NS_BotanicusJuiceBurst.NS_BotanicusJuiceBurst"));
+    auto* Line=LoadObject<UMaterialInterface>(nullptr,*(Folder+TEXT("M_RobotElectricStreak.M_RobotElectricStreak")));
+    auto* Flash=LoadObject<UMaterialInterface>(nullptr,*(Folder+TEXT("M_RobotElectricFlash.M_RobotElectricFlash")));
+    auto* Range=LoadObject<UNiagaraScript>(nullptr,TEXT("/Niagara/DynamicInputs/UniformRange/V2/RandomRangeVector.RandomRangeVector"));
+    if(!Original || !Line || !Flash || !Range)return TEXT("MISSING_SOURCE");
+    auto* Package=CreatePackage(*Path);auto* System=DuplicateObject<UNiagaraSystem>(Original,Package,TEXT("NS_Robot_WhipImpact"));
+    System->SetFlags(RF_Public|RF_Standalone);System->ClearFlags(RF_Transient);
+    const auto Source=Original->GetEmitterHandles()[0].GetInstance();
+    FNiagaraEditorUtilities::AddEmitterToSystem(*System,*Source.Emitter,Source.Version,true);
+    FNiagaraEditorUtilities::AddEmitterToSystem(*System,*Source.Emitter,Source.Version,true);
+    auto& Store=System->GetExposedParameters();
+    auto Var=[](const FNiagaraTypeDefinition& Type,const TCHAR* Name){return FNiagaraVariable(Type,Name);};
+    const auto Cyan=Var(FNiagaraTypeDefinition::GetIntDef(),TEXT("User.CyanCount")),Yellow=Var(FNiagaraTypeDefinition::GetIntDef(),TEXT("User.YellowCount")),One=Var(FNiagaraTypeDefinition::GetIntDef(),TEXT("User.FlashCount"));
+    const auto CyanColor=Var(FNiagaraTypeDefinition::GetColorDef(),TEXT("User.CyanColor")),YellowColor=Var(FNiagaraTypeDefinition::GetColorDef(),TEXT("User.YellowColor")),FlashColor=Var(FNiagaraTypeDefinition::GetColorDef(),TEXT("User.FlashColor"));
+    const auto Min=Var(FNiagaraTypeDefinition::GetVec3Def(),TEXT("User.VelocityMin")),Max=Var(FNiagaraTypeDefinition::GetVec3Def(),TEXT("User.VelocityMax"));
+    const auto FlashLife=Var(FNiagaraTypeDefinition::GetFloatDef(),TEXT("User.FlashLifetime")),FlashSize=Var(FNiagaraTypeDefinition::GetFloatDef(),TEXT("User.FlashSize"));
+    Store.SetParameterValue(10,Cyan,true);Store.SetParameterValue(4,Yellow,true);Store.SetParameterValue(1,One,true);
+    Store.SetParameterValue(FLinearColor(0,.8f,1),CyanColor,true);Store.SetParameterValue(FLinearColor(1,.72f,.035f),YellowColor,true);Store.SetParameterValue(FLinearColor(1,.95f,.7f),FlashColor,true);
+    Store.SetParameterValue(FVector3f(-110,-110,-40),Min,true);Store.SetParameterValue(FVector3f(110,110,150),Max,true);
+    Store.SetParameterValue(.065f,FlashLife,true);Store.SetParameterValue(7.f,FlashSize,true);
+    Store.SetParameterValue(.3f,Var(FNiagaraTypeDefinition::GetFloatDef(),TEXT("User.Lifetime")),true);
+    Store.SetParameterValue(2.5f,Var(FNiagaraTypeDefinition::GetFloatDef(),TEXT("User.Size")),true);
+    Store.SetParameterValue(.6f,Var(FNiagaraTypeDefinition::GetFloatDef(),TEXT("User.Radius")),true);
+    Store.SetParameterValue(FVector3f(0,0,-200),Var(FNiagaraTypeDefinition::GetVec3Def(),TEXT("User.Gravity")),true);
+    Store.SetParameterValue(FVector3f::ZeroVector,Var(FNiagaraTypeDefinition::GetVec3Def(),TEXT("User.Velocity")),true);
+    TArray<FNiagaraVariable> All;Store.GetParameters(All);TSet<FNiagaraVariableBase> Known;for(const auto& V:All)Known.Add(V);
+    auto Rebind=[](UNiagaraNodeFunctionCall* Node,const TCHAR* Input,const FNiagaraVariable& Variable,const TSet<FNiagaraVariableBase>& KnownVars)
+    {
+        const auto H=FNiagaraParameterHandle::CreateAliasedModuleParameterHandle(FNiagaraParameterHandle(FName(*FString::Printf(TEXT("Module.%s"),Input))),Node);
+        auto& Pin=FNiagaraStackGraphUtilities::GetOrCreateStackFunctionInputOverridePin(*Node,H,Variable.GetType(),FGuid(),FGuid());
+        Pin.BreakAllPinLinks();
+        FNiagaraStackGraphUtilities::SetLinkedParameterValueForFunctionInput(Pin,Variable,KnownVars);
+    };
+    int32 Index=0;
+    for(auto& Handle:System->GetEmitterHandles())
+    {
+        const bool bFlash=Index==2;auto* Data=Handle.GetInstance().GetEmitterData();Data->bLocalSpace=false;Data->SimTarget=ENiagaraSimTarget::CPUSim;
+        for(auto* Renderer:Data->GetRenderers())if(auto* Sprite=Cast<UNiagaraSpriteRendererProperties>(Renderer))
+        {Sprite->Material=bFlash?Flash:Line;Sprite->Alignment=bFlash?ENiagaraSpriteAlignment::Unaligned:ENiagaraSpriteAlignment::VelocityAligned;}
+        UNiagaraGraph* Graph=CastChecked<UNiagaraScriptSource>(Data->GraphSource)->NodeGraph;UNiagaraNodeOutput* Spawn=nullptr;
+        TArray<UNiagaraNodeFunctionCall*> Modules;
+        for(UEdGraphNode* N:Graph->Nodes)
+        {
+            if(auto* Output=Cast<UNiagaraNodeOutput>(N))if(Output->GetUsage()==ENiagaraScriptUsage::ParticleSpawnScript)Spawn=Output;
+            if(auto* Node=Cast<UNiagaraNodeFunctionCall>(N))Modules.Add(Node);
+        }
+        for(auto* Node:Modules)
+        {
+            if(Node->GetFunctionName()==TEXT("SpawnBurst_Instantaneous"))Rebind(Node,TEXT("Spawn Count"),bFlash?One:Index==0?Cyan:Yellow,Known);
+            if(Node->GetFunctionName()==TEXT("InitializeParticle"))
+            {
+                Rebind(Node,TEXT("Color"),bFlash?FlashColor:Index==0?CyanColor:YellowColor,Known);
+                if(bFlash){Rebind(Node,TEXT("Lifetime"),FlashLife,Known);Rebind(Node,TEXT("Uniform Sprite Size"),FlashSize,Known);}
+            }
+        }
+        if(!bFlash && Spawn)
+        {
+            auto* Assign=FNiagaraStackGraphUtilities::AddParameterModuleToStack({Var(FNiagaraTypeDefinition::GetVec3Def(),TEXT("Particles.Velocity"))},*Spawn,INDEX_NONE,{TEXT("0,0,0")});
+            const auto H=FNiagaraParameterHandle::CreateAliasedModuleParameterHandle(FNiagaraParameterHandle(TEXT("Module.Particles.Velocity")),Assign);
+            auto& Pin=FNiagaraStackGraphUtilities::GetOrCreateStackFunctionInputOverridePin(*Assign,H,Min.GetType(),FGuid(),FGuid());
+            UNiagaraNodeFunctionCall* Dynamic=nullptr;FNiagaraStackGraphUtilities::SetDynamicInputForFunctionInput(Pin,Range,Dynamic);if(!Dynamic)return TEXT("NO_RANGE");
+            FString MinName,MaxName;UNiagaraGraph* G=CastChecked<UNiagaraScriptSource>(Range->GetLatestSource())->NodeGraph;
+            for(UEdGraphNode* N:G->Nodes)for(auto* P:N->Pins)
+            {FString S=P->PinName.ToString();if(!S.StartsWith(TEXT("Module.")))continue;S.RightChopInline(7);if(S.Contains(TEXT("Min")))MinName=S;if(S.Contains(TEXT("Max")))MaxName=S;}
+            if(MinName.IsEmpty() || MaxName.IsEmpty())return TEXT("BAD_RANGE");Rebind(Dynamic,*MinName,Min,Known);Rebind(Dynamic,*MaxName,Max,Known);
+        }
+        Graph->NotifyGraphChanged();++Index;
+    }
+    System->SetFixedBounds(FBox(FVector(-100),FVector(100)));System->SetWarmupTime(0);System->RequestCompile(true);System->WaitForCompilationComplete(false,false);
+    if(!System->IsReadyToRun())
+    {
+        FString Errors=TEXT("NIAGARA_COMPILE_FAILED\n");TArray<UNiagaraScript*> Scripts;Scripts.Add(System->GetSystemSpawnScript());Scripts.Add(System->GetSystemUpdateScript());
+        for(const auto& H:System->GetEmitterHandles())H.GetInstance().GetEmitterData()->GetScripts(Scripts,false);
+        for(auto* Script:Scripts)if(Script){Errors+=Script->GetPathName()+FString::Printf(TEXT(" status %d\n"),int32(Script->GetLastCompileStatus()));for(const auto& Event:Script->GetVMExecutableData().LastCompileEvents)Errors+=Event.Message+TEXT("\n");}
+        return Errors;
+    }
+    FAssetRegistryModule::AssetCreated(System);Package->MarkPackageDirty();FSavePackageArgs Args;Args.TopLevelFlags=RF_Public|RF_Standalone;
+    return UPackage::SavePackage(Package,System,*FPackageName::LongPackageNameToFilename(Path,FPackageName::GetAssetPackageExtension()),Args)?TEXT("SAVED"):TEXT("SAVE_FAILED");
+#else
+    return TEXT("EDITOR_ONLY");
+#endif
+}
+
+FString UBotanicusJuiceAssetTools::BuildSoilPour()
+{
+#if WITH_EDITOR
+    auto* Original=LoadObject<UNiagaraSystem>(nullptr,TEXT("/Game/Botanicus/VFX/Juice/NS_BotanicusWaterDrops.NS_BotanicusWaterDrops"));
+    auto* Range=LoadObject<UNiagaraScript>(nullptr,TEXT("/Niagara/DynamicInputs/UniformRange/V2/RandomRangeFloat.RandomRangeFloat"));
+    if(!Original || !Range) return TEXT("MISSING_SOURCE");
+    auto V=[](const FNiagaraTypeDefinition& T,const TCHAR* N){return FNiagaraVariable(T,N);};
+    const auto Float=FNiagaraTypeDefinition::GetFloatDef();
+    const auto Min=V(Float,TEXT("User.SizeMin")),Max=V(Float,TEXT("User.SizeMax"));
+    auto Rebind=[](UNiagaraNodeFunctionCall* Node,const TCHAR* Name,const FNiagaraVariable& Value,const TSet<FNiagaraVariableBase>& Known)
+    {
+        const auto H=FNiagaraParameterHandle::CreateAliasedModuleParameterHandle(FNiagaraParameterHandle(FName(*FString::Printf(TEXT("Module.%s"),Name))),Node);
+        auto& Pin=FNiagaraStackGraphUtilities::GetOrCreateStackFunctionInputOverridePin(*Node,H,Value.GetType(),FGuid(),FGuid());
+        Pin.BreakAllPinLinks();FNiagaraStackGraphUtilities::SetLinkedParameterValueForFunctionInput(Pin,Value,Known);
+    };
+    for (bool bContact:{false,true})
+    {
+        const FString Name=bContact?TEXT("NS_Botanicus_SoilContact"):TEXT("NS_Botanicus_SoilPour");
+        const FString Path=TEXT("/Game/Botanicus/VFX/Soil/")+Name;
+        if(FPackageName::DoesPackageExist(Path)) continue; // Never overwrite artist changes.
+        auto* Package=CreatePackage(*Path);auto* System=DuplicateObject<UNiagaraSystem>(Original,Package,*Name);
+        System->SetFlags(RF_Public|RF_Standalone);System->ClearFlags(RF_Transient);
+        if(bContact)
+        {
+            const auto Source=Original->GetEmitterHandles()[0].GetInstance();
+            FNiagaraEditorUtilities::AddEmitterToSystem(*System,*Source.Emitter,Source.Version,true);
+        }
+        auto& Store=System->GetExposedParameters();
+        Store.SetParameterValue(bContact?18.f:180.f,V(Float,TEXT("User.SpawnRate")),true);
+        Store.SetParameterValue(3.f,V(Float,TEXT("User.DustRate")),true);
+        Store.SetParameterValue(bContact?.18f:.5f,V(Float,TEXT("User.Lifetime")),true);
+        Store.SetParameterValue(.25f,V(Float,TEXT("User.DustLifetime")),true);
+        Store.SetParameterValue(.4f,Min,true);Store.SetParameterValue(.9f,Max,true);
+        Store.SetParameterValue(3.5f,V(Float,TEXT("User.DustSize")),true);
+        Store.SetParameterValue(bContact?2.f:.5f,V(Float,TEXT("User.Radius")),true);
+        Store.SetParameterValue(FLinearColor(.075f,.025f,.009f,1),V(FNiagaraTypeDefinition::GetColorDef(),TEXT("User.Tint")),true);
+        Store.SetParameterValue(FLinearColor(.12f,.065f,.03f,.06f),V(FNiagaraTypeDefinition::GetColorDef(),TEXT("User.DustTint")),true);
+        Store.SetParameterValue(FVector3f(0,0,bContact?55:-50),V(FNiagaraTypeDefinition::GetVec3Def(),TEXT("User.Velocity")),true);
+        Store.SetParameterValue(FVector3f(0,0,8),V(FNiagaraTypeDefinition::GetVec3Def(),TEXT("User.DustVelocity")),true);
+        Store.SetParameterValue(FVector3f(0,0,bContact?-500:-700),V(FNiagaraTypeDefinition::GetVec3Def(),TEXT("User.Gravity")),true);
+        Store.SetParameterValue(FVector3f::ZeroVector,V(FNiagaraTypeDefinition::GetVec3Def(),TEXT("User.DustGravity")),true);
+        TArray<FNiagaraVariable> Vars;Store.GetParameters(Vars);TSet<FNiagaraVariableBase> Known;for(const auto& Var:Vars)Known.Add(Var);
+        int32 Index=0;
+        for(auto& Handle:System->GetEmitterHandles())
+        {
+            const bool Dust=Index++==1;
+            auto* Data=Handle.GetInstance().GetEmitterData();Data->SimTarget=ENiagaraSimTarget::CPUSim;Data->bLocalSpace=false;
+            UNiagaraGraph* Graph=CastChecked<UNiagaraScriptSource>(Data->GraphSource)->NodeGraph;
+            TArray<UNiagaraNodeFunctionCall*> Nodes;for(UEdGraphNode* N:Graph->Nodes)if(auto* F=Cast<UNiagaraNodeFunctionCall>(N))Nodes.Add(F);
+            for(auto* Node:Nodes)
+            {
+                const FString Function=Node->GetFunctionName();
+                if(Function==TEXT("InitializeParticle"))
+                {
+                    if(Dust)
+                    {
+                        Rebind(Node,TEXT("Lifetime"),V(Float,TEXT("User.DustLifetime")),Known);
+                        Rebind(Node,TEXT("Uniform Sprite Size"),V(Float,TEXT("User.DustSize")),Known);
+                        Rebind(Node,TEXT("Color"),V(FNiagaraTypeDefinition::GetColorDef(),TEXT("User.DustTint")),Known);
+                    }
+                    else
+                    {
+                        const auto H=FNiagaraParameterHandle::CreateAliasedModuleParameterHandle(FNiagaraParameterHandle(TEXT("Module.Uniform Sprite Size")),Node);
+                        auto& Pin=FNiagaraStackGraphUtilities::GetOrCreateStackFunctionInputOverridePin(*Node,H,Float,FGuid(),FGuid());
+                        Pin.BreakAllPinLinks();UNiagaraNodeFunctionCall* Dynamic=nullptr;
+                        FNiagaraStackGraphUtilities::SetDynamicInputForFunctionInput(Pin,Range,Dynamic);
+                        if(!Dynamic)return TEXT("NO_SIZE_RANGE");
+                        FString MinName,MaxName;UNiagaraGraph* G=CastChecked<UNiagaraScriptSource>(Range->GetLatestSource())->NodeGraph;
+                        for(UEdGraphNode* N:G->Nodes)for(auto* P:N->Pins)
+                        {FString S=P->PinName.ToString();if(!S.StartsWith(TEXT("Module.")))continue;S.RightChopInline(7);if(S.Contains(TEXT("Min")))MinName=S;if(S.Contains(TEXT("Max")))MaxName=S;}
+                        if(MinName.IsEmpty() || MaxName.IsEmpty())return TEXT("BAD_SIZE_RANGE");
+                        Rebind(Dynamic,*MinName,Min,Known);Rebind(Dynamic,*MaxName,Max,Known);
+                    }
+                }
+                if(Dust && Function==TEXT("SpawnRate"))Rebind(Node,TEXT("SpawnRate"),V(Float,TEXT("User.DustRate")),Known);
+                if(Dust && Function==TEXT("GravityForce"))Rebind(Node,TEXT("Gravity"),V(FNiagaraTypeDefinition::GetVec3Def(),TEXT("User.DustGravity")),Known);
+                if(Dust && Node->IsA<UNiagaraNodeAssignment>())
+                    Rebind(Node,TEXT("Particles.Velocity"),V(FNiagaraTypeDefinition::GetVec3Def(),TEXT("User.DustVelocity")),Known);
+            }
+            Graph->NotifyGraphChanged();
+        }
+        System->SetFixedBounds(FBox(FVector(-600),FVector(600)));System->SetWarmupTime(0);
+        System->RequestCompile(true);System->WaitForCompilationComplete(false,false);
+        if(!System->IsReadyToRun())return TEXT("COMPILE_FAILED_")+Name;
+        FAssetRegistryModule::AssetCreated(System);Package->MarkPackageDirty();FSavePackageArgs Args;Args.TopLevelFlags=RF_Public|RF_Standalone;
+        if(!UPackage::SavePackage(Package,System,*FPackageName::LongPackageNameToFilename(Path,FPackageName::GetAssetPackageExtension()),Args))return TEXT("SAVE_FAILED_")+Name;
+    }
+    return TEXT("SAVED_OR_PRESERVED");
+#else
+    return TEXT("EDITOR_ONLY");
 #endif
 }
