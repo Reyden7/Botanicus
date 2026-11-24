@@ -141,14 +141,17 @@ bool ABotanicusDeliveryZoneActor::StartParcelDelivery(ABotanicusDeliveryParcelAc
     const FVector Cargo = IsValid(ActiveShip) ? ActiveShip->GetCargoLocation()
         : Frame.GetLocation()+FVector(0,0,DeliverySpawnHeight);
     FCollisionQueryParams Query(SCENE_QUERY_STAT(BotanicusDeliveryDrop),false,Parcel);
-    // Test only the creation volume. A carton on the floor must not prohibit stacking.
+    // Keep the full footprint inside the drop area when it fits. Test the actual
+    // creation box at cargo height so cartons can still stack on the platform.
+    const FVector2D CenterRange(FMath::Max(0., Size.X * .5 - Extent.X - 3.),
+        FMath::Max(0., Size.Y * .5 - Extent.Y - 3.));
     for (int32 Attempt=0; Attempt<32; ++Attempt)
     {
-        const FVector Local(FMath::FRandRange(-FMath::Max(1.,Size.X)*.5,FMath::Max(1.,Size.X)*.5),
-            FMath::FRandRange(-FMath::Max(1.,Size.Y)*.5,FMath::Max(1.,Size.Y)*.5),0);
+        const FVector Local(FMath::FRandRange(-CenterRange.X, CenterRange.X),
+            FMath::FRandRange(-CenterRange.Y, CenterRange.Y), 0);
         const FVector Spawn = FVector(Frame.TransformPosition(Local).X,Frame.TransformPosition(Local).Y,Cargo.Z);
         if (GetWorld()->OverlapBlockingTestByChannel(Spawn,Frame.GetRotation(),ECC_PhysicsBody,
-            FCollisionShape::MakeSphere(Extent.Size()+3),Query)) continue;
+            FCollisionShape::MakeBox(Extent + FVector(3.0)),Query)) continue;
         Parcel->SetActorLocationAndRotation(Spawn,Frame.GetRotation(),false,nullptr,ETeleportType::TeleportPhysics);
         Parcel->StartDeliveryPhysics();
         UE_LOG(LogTemp,Display,TEXT("DeliveryDrop %s local=(%.2f,%.2f) height=%.2f"),
@@ -197,7 +200,8 @@ bool ABotanicusDeliveryZoneActor::DropNextOrder(ABotanicusDeliveryShip* Ship)
     }
     FActorSpawnParameters Params;
     Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-    auto* Parcel = GetWorld()->SpawnActor<ABotanicusDeliveryParcelActor>(GetParcelSpawnLocation(),FRotator::ZeroRotator,Params);
+    UClass* ParcelClass = ABotanicusDeliveryParcelActor::ResolveParcelClass(*GetWorld(), Order.ItemKey, Order.Quantity);
+    auto* Parcel = GetWorld()->SpawnActor<ABotanicusDeliveryParcelActor>(ParcelClass, GetParcelSpawnLocation(), FRotator::ZeroRotator, Params);
     if (!Parcel) return false;
     Parcel->InitializeParcel(Order.ItemKey,Order.Quantity);
     bool bFallback = false;

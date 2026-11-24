@@ -7,6 +7,7 @@
 #include "Sales/BotanicusSalesDisplayActor.h"
 #include "Delivery/BotanicusPlaceableItemActor.h"
 #include "Delivery/BotanicusLargeEquipmentActor.h"
+#include "Delivery/BotanicusDeliveryParcelActor.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
@@ -94,7 +95,16 @@ bool UBotanicusJuiceWorldSubsystem::SetPlacementHologram(AActor* Preview,bool bV
     auto* Hologram=PlacementHolograms.Find(Preview);
     if(!Hologram)
     {
-        auto& New=PlacementHolograms.Add(Preview);New.Material=UMaterialInstanceDynamic::Create(PlacementHologramMaterial,this);
+        UMaterialInterface* BaseMaterial = PlacementHologramMaterial;
+        if (Preview->IsA<ABotanicusDeliveryParcelActor>())
+        {
+            static const TSoftObjectPtr<UMaterialInterface> CartonHologram(FSoftObjectPath(TEXT(
+                "/Game/Botanicus/Materials/Juice/Placement/M_PlacementHologram_Carton.M_PlacementHologram_Carton")));
+            if (auto* RigMaterial = CartonHologram.LoadSynchronous())
+                BaseMaterial = RigMaterial;
+        }
+        auto& New = PlacementHolograms.Add(Preview);
+        New.Material = UMaterialInstanceDynamic::Create(BaseMaterial, this);
         New.Color=bValid ? S->ValidColor : S->InvalidColor;New.Rim=bValid ? S->ValidRim : S->InvalidRim;Hologram=&New;
     }
     Hologram->bValid=bValid;RefreshPlacementHologram(Preview,*Hologram,0);return true;
@@ -110,8 +120,10 @@ void UBotanicusJuiceWorldSubsystem::RefreshPlacementHologram(AActor* Preview,FBo
     MID->SetScalarParameterValue(TEXT("Opacity"),FMath::Clamp(S->Opacity,.1f,.8f));
     MID->SetScalarParameterValue(TEXT("FresnelIntensity"),FMath::Clamp(S->FresnelIntensity,0.f,2.f));
     MID->SetScalarParameterValue(TEXT("Emission"),FMath::Clamp(S->EmissiveIntensity,0.f,3.f));
+    const auto* Parcel=Cast<ABotanicusDeliveryParcelActor>(Preview);
     for(UMeshComponent* Mesh:PlacementMeshes(Preview))
     {
+        if (Parcel && !Parcel->IsParcelHologramMesh(Mesh)) continue;
         auto* Record=Hologram.Meshes.FindByPredicate([Mesh](const auto& R){return R.Mesh==Mesh;});
         if(!Record)
         {
@@ -119,7 +131,14 @@ void UBotanicusJuiceWorldSubsystem::RefreshPlacementHologram(AActor* Preview,FBo
         }
         if(auto* Static=Cast<UStaticMeshComponent>(Mesh);Static && !Static->bForceDisableNanite) Static->SetForceDisableNanite(true);
         for(int32 I=Record->Materials.Num();I<Mesh->GetNumMaterials();++I) Record->Materials.Add(Mesh->GetMaterial(I));
-        for(int32 I=0;I<Mesh->GetNumMaterials();++I) if(Mesh->GetMaterial(I)!=MID) {Record->Materials[I]=Mesh->GetMaterial(I);Mesh->SetMaterial(I,MID);}
+        for (int32 I=0; I<Mesh->GetNumMaterials(); ++I)
+        {
+            if ((!Parcel || Parcel->IsParcelHologramSlot(Mesh,I)) && Mesh->GetMaterial(I)!=MID)
+            {
+                Record->Materials[I]=Mesh->GetMaterial(I);
+                Mesh->SetMaterial(I,MID);
+            }
+        }
         Mesh->SetRenderCustomDepth(false);Mesh->SetOverlayMaterial(nullptr);
     }
 }

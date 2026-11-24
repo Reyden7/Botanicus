@@ -73,7 +73,7 @@ void ABotanicusGardeningRobot::FinishWhipBump()
     SetActivity(EBotanicusRobotActivity::None);GetCharacterMovement()->StopMovementImmediately();
     if(!bEnabled || Battery<=0 || !Base || !Base->IsStationAvailable())
     {ReleaseTarget();State=Battery<=0?EBotanicusGardeningState::Blocked:EBotanicusGardeningState::Inactive;return;}
-    if(WhipResumeState==EBotanicusGardeningState::ReturningToBase){ReturnToBase(bAwaitFullCharge);return;}
+    if(WhipResumeState==EBotanicusGardeningState::ReturningToBase){ReturnToBase();return;}
     FBotanicusAutomaticWateringNeed Need;
     if(WhipResumeState==EBotanicusGardeningState::MovingToPlant && IsValid(Target) &&
         BotanicusAutomaticWatering::Read(Target,TargetSlot,1.f,Need) && Need.Current<Need.Target-KINDA_SMALL_NUMBER)

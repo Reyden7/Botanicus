@@ -1,4 +1,4 @@
-﻿#include "BotanicusPlayerController.h"
+#include "BotanicusPlayerController.h"
 #include "BotanicusCharacter.h"
 #include "Delivery/BotanicusLargeEquipmentActor.h"
 #include "Delivery/BotanicusDeliveryParcelActor.h"
@@ -11,7 +11,7 @@
 #include "Engine/World.h"
 bool ABotanicusPlayerController::HasSalePotForDeposit() const
 {
-    if(!GetPawn() || IsValid(LocalQuickBarItemPreview) || IsValid(LocalLargeEquipmentPlacement) || bFurnitureMoveModeActive || GetCheckoutScanner() || IsValid(LocalParcelMovePreview.Get()) || !CarriedTransplantPlantKey.IsNone())return false;
+    if(!GetPawn() || IsValid(LocalQuickBarItemPreview) || IsValid(LocalLargeEquipmentPlacement) || bFurnitureMoveModeActive || GetCheckoutScanner() || IsValid(LocalMovedDeliveryParcel.Get()) || !CarriedTransplantPlantKey.IsNone())return false;
     auto* PlayerCharacter=Cast<ABotanicusCharacter>(GetPawn());
     if(!PlayerCharacter || PlayerCharacter->IsCarryingEquipment() || PlayerCharacter->GetHeldWateringCan())return false;
     if(auto* Held=Cast<ABotanicusSalePotActor>(LocalMovedPlaceableItem.Get()))return Held->IsReadyForSale();

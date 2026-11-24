@@ -3,6 +3,7 @@
 #include "Gardening/BotanicusGardeningRobotBase.h"
 #include "Growing/BotanicusPlantPotActor.h"
 #include "Growing/BotanicusAutomaticWatering.h"
+#include "GameFramework/WorldSettings.h"
 #include "Visuals/BotanicusReservoirVisualComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
@@ -67,6 +68,14 @@ void ABotanicusGardeningRobot::SetActivity(EBotanicusRobotActivity Activity,floa
 {
     if(!HasAuthority())return;
     Presentation.Activity=Activity;Presentation.StartedAt=PresentationNow();Presentation.Duration=Duration;Presentation.AnimationStart=AnimationStart;
+    const double RealNow = GetWorld()->GetRealTimeSeconds();
+    if (Activity == EBotanicusRobotActivity::StoppingForWater || Activity == EBotanicusRobotActivity::AimingAtPlant ||
+        Activity == EBotanicusRobotActivity::PreparingWater)
+    {
+        const float Dilation = FMath::Max(0.01f, GetWorld()->GetWorldSettings()->GetEffectiveTimeDilation());
+        WateringPhaseDeadline = RealNow + FMath::Max(FMath::Max(1.f, WateringStartTimeout), Duration / Dilation + 0.5f);
+    }
+    if (Activity == EBotanicusRobotActivity::Watering) LastWaterTransfer = RealNow;
     ForceNetUpdate();OnRep_Activity();
 }
 void ABotanicusGardeningRobot::OnRep_Activity()
@@ -100,6 +109,7 @@ bool ABotanicusGardeningRobot::DockLaneClear(const FVector& To) const
 }
 void ABotanicusGardeningRobot::FailDocking()
 {
+    ReleaseTarget();
     GetCharacterMovement()->StopMovementImmediately();SetActivity(EBotanicusRobotActivity::None);
     State=EBotanicusGardeningState::Blocked;NextSearch=GetWorld()->GetTimeSeconds()+Config.UnreachableRetrySeconds;
 }
@@ -109,15 +119,17 @@ void ABotanicusGardeningRobot::BeginWaterPreparation()
     if(auto* AI=Cast<AAIController>(GetController()))AI->StopMovement();GetCharacterMovement()->StopMovementImmediately();
     SetActivity(EBotanicusRobotActivity::StoppingForWater,StopRunDuration());
 }
-void ABotanicusGardeningRobot::FinishWatering(bool bReturn,bool bLowBattery)
+void ABotanicusGardeningRobot::FinishWatering(bool bReturn,bool bRetry)
 {
-    const auto A=Presentation.Activity;bReturnAfterFinish=bReturn;bLowBatteryAfterFinish=bLowBattery;
+    const auto A=Presentation.Activity;bReturnAfterFinish=bReturn;
     auto* Arm=ArmAnimation.LoadSynchronous();const float Length=Arm?Arm->GetPlayLength():0;
     const float Rate=Arm?FMath::Max(.01f,FMath::Abs(Arm->RateScale)):1;
     float Position=0;
     if(A==EBotanicusRobotActivity::PreparingWater)Position=FMath::Clamp(Length-float(PresentationNow()-Presentation.StartedAt)*Rate,0.f,Length);
     else if(A!=EBotanicusRobotActivity::Watering)Position=Length;
-    ReleaseTarget();State=EBotanicusGardeningState::SearchingPlant;
+    bRetryAfterFinish = bRetry;
+    if (!bRetry) ReleaseTarget();
+    State=EBotanicusGardeningState::SearchingPlant;
     SetActivity(EBotanicusRobotActivity::FinishingWater,(Length-Position)/Rate,Position);
 }
 bool ABotanicusGardeningRobot::UpdateActivity(double Now)
@@ -127,21 +139,39 @@ bool ABotanicusGardeningRobot::UpdateActivity(double Now)
     if(bPrepare)
     {
         FBotanicusAutomaticWateringNeed Need;
-        if(!bEnabled || !Base || !Base->IsStationAvailable() || !Target || !BotanicusAutomaticWatering::Read(Target,TargetSlot,1.f /* species maximum */,Need) || Need.Current>=Need.Target-KINDA_SMALL_NUMBER || CurrentWater<=0 || Battery<=0)
-        {FinishWatering(Battery<=Config.BatteryReturnThreshold || CurrentWater<=0,Battery<=Config.BatteryReturnThreshold);return true;}
+        const bool bCanContinue = CanAfford(ReturnPathLength, 0);
+        if(!bEnabled || !Base || !Base->IsStationAvailable() || !Target || !BotanicusAutomaticWatering::Read(Target,TargetSlot,1.f /* species maximum */,Need) || Need.Current>=Need.Target-KINDA_SMALL_NUMBER || CurrentWater<=KINDA_SMALL_NUMBER || !bCanContinue)
+        {FinishWatering(!bCanContinue || CurrentWater<=KINDA_SMALL_NUMBER);return true;}
         WaterTarget=Need.SoilPoint;
+        if (!IsWithinWateringReach(WaterTarget))
+        {
+            RecoverWatering(TEXT("plant out of reach during preparation"));
+            return true;
+        }
+        if (GetWorld()->GetRealTimeSeconds() >= WateringPhaseDeadline)
+        {
+            RecoverWatering(TEXT("watering preparation timed out"));
+            return true;
+        }
     }
     if(A==EBotanicusRobotActivity::StoppingForWater && Age>=Presentation.Duration)
         SetActivity(EBotanicusRobotActivity::AimingAtPlant,3);
     else if(A==EBotanicusRobotActivity::PreparingWater && Age>=Presentation.Duration)
     {
-        if(!HasWaterLine(WaterTarget)){if(Target)RetryAfter.Add(Target,Now+Config.UnreachableRetrySeconds);FinishWatering(true);return true;}
+        if (!HasWaterLine(WaterTarget))
+        {
+            RecoverWatering(TEXT("water line blocked with arm deployed"));
+            return true;
+        }
         State=EBotanicusGardeningState::Watering;SetActivity(EBotanicusRobotActivity::Watering);
     }
     else if(A==EBotanicusRobotActivity::FinishingWater && Age>=Presentation.Duration)
     {
         SetActivity(EBotanicusRobotActivity::None);
-        if(bEnabled && Battery>0){if(bReturnAfterFinish)ReturnToBase(bLowBatteryAfterFinish);else{State=EBotanicusGardeningState::SearchingPlant;NextSearch=Now;}}
+        const bool bRetry = bRetryAfterFinish;
+        bRetryAfterFinish = false;
+        if (bRetry && bEnabled && Battery > 0) RetryWateringApproach();
+        else if(bEnabled && Battery>0){if(bReturnAfterFinish)ReturnToBase();else{State=EBotanicusGardeningState::SearchingPlant;NextSearch=Now;}}
         else State=Battery<=0?EBotanicusGardeningState::Blocked:EBotanicusGardeningState::Inactive;
     }
     else if(A==EBotanicusRobotActivity::StoppingAtDock && Age>=Presentation.Duration)
@@ -165,7 +195,11 @@ void ABotanicusGardeningRobot::Tick(float Dt)
     {
         const float Yaw=(WaterTarget-GetActorLocation()).Rotation().Yaw;
         const float Next=FMath::FixedTurn(GetActorRotation().Yaw,Yaw,DockTurnSpeed*Dt);SetActorRotation(FRotator(0,Next,0));
-        if(FMath::Abs(FMath::FindDeltaAngleDegrees(Next,Yaw))<1)SetActivity(EBotanicusRobotActivity::PreparingWater,AnimationDuration(ArmAnimation));
+        if (FMath::Abs(FMath::FindDeltaAngleDegrees(Next, Yaw)) <= 5.f)
+        {
+            SetActorRotation(FRotator(0, Yaw, 0));
+            SetActivity(EBotanicusRobotActivity::PreparingWater, AnimationDuration(ArmAnimation));
+        }
         return;
     }
     if(A==EBotanicusRobotActivity::TurningAtDock)
@@ -185,7 +219,7 @@ void ABotanicusGardeningRobot::Tick(float Dt)
     if(Distance<=1.5f)
     {
         GetCharacterMovement()->StopMovementImmediately();
-        if(A==EBotanicusRobotActivity::ReversingToDock){SetActivity(EBotanicusRobotActivity::Docked);State=bAwaitFullCharge?EBotanicusGardeningState::Charging:EBotanicusGardeningState::RefillingWater;}
+        if(A==EBotanicusRobotActivity::ReversingToDock){SetActivity(EBotanicusRobotActivity::Docked);State=GetDockedState();}
         else {const FVector Next=PendingDestination;const auto NextState=PendingState;SetActivity(EBotanicusRobotActivity::None);if(!Navigate(Next,NextState))FailDocking();}
         return;
     }

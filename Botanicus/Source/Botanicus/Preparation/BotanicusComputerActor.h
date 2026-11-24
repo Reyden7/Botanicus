@@ -3,21 +3,24 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Delivery/BotanicusPlaceableItemActor.h"
+#include "Interaction/BotanicusInteractableActor.h"
 #include "BotanicusComputerActor.generated.h"
 
 class UCameraComponent;
 class UBotanicusTerminalEyesComponent;
 
-/** Physical nursery computer used to access the command panel. */
+/** Level-authored nursery terminal used to access the command panel. */
 UCLASS()
 class BOTANICUS_API ABotanicusComputerActor
-	: public ABotanicusPlaceableItemActor
+	: public ABotanicusInteractableActor
 {
 	GENERATED_BODY()
 
 public:
 	ABotanicusComputerActor();
+
+	/** SKU used by saves made when the terminal was a movable item. */
+	static FName LegacyItemKey();
 
 	UFUNCTION(BlueprintPure, Category="Botanicus|Computer View")
 	UCameraComponent* GetInteractionCamera() const
@@ -36,6 +39,8 @@ public:
 		AActor* Interactor) override;
 
 protected:
+	virtual void PostInitializeComponents() override;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Botanicus|Eyes")
 	TObjectPtr<UBotanicusTerminalEyesComponent> TerminalEyes;
 

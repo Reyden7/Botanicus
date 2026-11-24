@@ -5,6 +5,7 @@
 class ABotanicusDeliveryParcelActor;
 class USceneComponent;
 class USkeletalMeshComponent;
+class UStaticMeshComponent;
 class USkeletalMesh;
 class UAnimSequence;
 class UMaterialInterface;
@@ -21,6 +22,9 @@ struct FBotanicusParcelOpeningPresentation
 	UPROPERTY() TObjectPtr<UAnimSequence> Animation;
 	UPROPERTY() TArray<TObjectPtr<UMaterialInterface>> Materials;
 	UPROPERTY() FTransform MeshLocalTransform;
+	UPROPERTY() FTransform LabelLocalTransform;
+	UPROPERTY() FName ItemId;
+	UPROPERTY() int32 Quantity = 0;
 	UPROPERTY() FVector HalfExtent = FVector::ZeroVector;
 	UPROPERTY() double StartedAt = -1;
 	UPROPERTY() float Duration = .5f;
@@ -51,6 +55,7 @@ private:
 	UPROPERTY(ReplicatedUsing=OnRep_Presentation) FBotanicusParcelOpeningPresentation Presentation;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<USceneComponent> VisualRoot;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<USkeletalMeshComponent> CartonVisual;
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> LabelSurface;
 	UPROPERTY(Transient) TObjectPtr<UNiagaraSystem> LoadedSystem;
 	UPROPERTY(Transient) TObjectPtr<UNiagaraComponent> Confetti;
 	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> ConfettiMaterial;

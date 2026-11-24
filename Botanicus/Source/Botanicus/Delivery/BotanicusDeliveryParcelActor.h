@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Delivery/BotanicusParcelPackaging.h"
 #include "Interaction/BotanicusInteractableActor.h"
 #include "BotanicusDeliveryParcelActor.generated.h"
 
@@ -15,6 +16,7 @@ class UTextRenderComponent;
 class UAnimSequence;
 class UMaterialInterface;
 class UStaticMeshComponent;
+class UMeshComponent;
 
 /** Replicated delivery carton opened by tracing a cutter along its tape. */
 UCLASS()
@@ -29,6 +31,11 @@ public:
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void BeginPlay() override;
+	virtual void OnConstruction(const FTransform& Transform) override;
+
+	static UClass* ResolveParcelClass(const UWorld& World, FName ItemId, int32 Count,
+		const FBotanicusParcelPackaging& SavedPackaging = {});
+	FTransform GetLabelLocalTransform() const;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void OnRep_ReplicatedMovement() override;
 	virtual FBotanicusInteractionPrompt
@@ -40,11 +47,23 @@ public:
 	/** Server-only: Chaos moves the actor root, including its saved/replicated transform. */
 	void StartDeliveryPhysics(bool bAddInitialSpin = true);
 	void StopDeliveryPhysics();
+	bool TryBeginCarry(APawn* Pawn);
+	void EndCarry(const FTransform& DropTransform);
+	void SetCarriedInspectionOrientation(const FRotator& WorldRotation);
+	APawn* GetCarrier() const { return Carrier; }
+	const FTransform& GetParcelSaveTransform() const;
+	FTransform GetParcelPresentation() const;
+	FVector GetLabelNormalInParcelSpace() const;
+	void SetLocalParcelPresentation(const FTransform& Pose);
+	void ResetLocalParcelPresentation();
+	bool IsParcelHologramMesh(const UMeshComponent* Component) const;
+	bool IsParcelHologramSlot(const UMeshComponent* Component, int32 Slot) const;
 	void RestoreParcelState(
 		FName InItemKey,
 		int32 InQuantity,
 		uint16 InCutCoverageMask,
-		bool bInOpened);
+		bool bInOpened,
+		const FBotanicusParcelPackaging& InPackaging = FBotanicusParcelPackaging());
 	void BeginCutting(AActor* Interactor);
 	/** Same tape band used by UpdateCutterTrace; no proximity-only preparation. */
 	bool IsCuttingAreaHit(const FHitResult& Hit) const;
@@ -60,6 +79,8 @@ public:
 			static_cast<float>(TapeSegmentCount);
 	}
 	FVector GetParcelHalfExtent() const { return ParcelHalfExtent; }
+
+	const FBotanicusParcelPackaging& GetPackaging() const { return Packaging; }
 
 	const FGuid& GetOpeningVisualId() const { return OpeningVisualId; }
 	UAnimSequence* GetOpeningAnimation() const { return OpeningAnimation; }
@@ -95,7 +116,40 @@ private:
 	TObjectPtr<UPhysicalMaterial> DeliveryPhysicalMaterial;
 
 	void RefreshParcelAppearance(bool bPlayOpeningAnimation = true);
-	void RefreshAnimatedCarton(bool bPlayOpeningAnimation);
+	void RefreshAnimatedCarton(bool bPlayOpeningAnimation, bool bModelChanged);
+	bool ApplyParcelPackaging();
+	void RefreshParcelLabel();
+	UFUNCTION() void OnRep_Carrier();
+
+	UPROPERTY(ReplicatedUsing=OnRep_Carrier)
+	TObjectPtr<APawn> Carrier;
+	UPROPERTY(Replicated)
+	FRotator CarriedInspectionOrientation = FRotator::ZeroRotator;
+	UPROPERTY(Replicated)
+	bool bHasCarriedInspectionOrientation = false;
+	FTransform PickupTransform;
+	TOptional<FTransform> VisualHomeTransform;
+	TOptional<FTransform> LocalParcelPresentation;
+	void RefreshParcelVisualAttachment();
+	void ApplyLocalParcelPresentation();
+	static FBotanicusParcelPackaging ResolvePackaging(const UWorld& World, FName ItemId, int32 Count);
+
+	UPROPERTY(VisibleAnywhere, Category="Botanicus|Parcel|Label")
+	TObjectPtr<USceneComponent> LabelPivot;
+	UPROPERTY(VisibleAnywhere, Category="Botanicus|Parcel|Label")
+	TObjectPtr<UStaticMeshComponent> LabelSurface;
+#if WITH_EDITORONLY_DATA
+	UPROPERTY(EditAnywhere, Category="Botanicus|Parcel|Label")
+	FName LabelPreviewItemId;
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Parcel|Label")
+	EBotanicusParcelShape LabelPreviewShape = EBotanicusParcelShape::Square;
+#endif
+	FName LastLabelItemId;
+	int32 LastLabelQuantity = 0;
+	UPROPERTY(ReplicatedUsing=OnRep_ParcelState)
+	FBotanicusParcelPackaging Packaging;
+	EBotanicusParcelShape AppliedShape = EBotanicusParcelShape::Automatic;
+	float AppliedMassKg = 0.f;
 	void UpdateCutterTrace();
 	void MarkTapeSegment(int32 SegmentIndex);
 	int32 CountCutSegments() const;

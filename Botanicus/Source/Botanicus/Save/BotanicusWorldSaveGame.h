@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Delivery/BotanicusParcelPackaging.h"
 #include "Gardening/BotanicusGardeningTypes.h"
 #include "GameFramework/SaveGame.h"
 #include "Growing/BotanicusPlantCatalog.h"
@@ -194,6 +195,9 @@ struct BOTANICUS_API FBotanicusSavedWorldItem
 	bool bParcelOpened = false;
 
 	UPROPERTY()
+	FBotanicusParcelPackaging ParcelPackaging;
+
+	UPROPERTY()
 	bool bPlantPotHasSoil = false;
     UPROPERTY() TArray<float> SoilFillLevels;
 
@@ -220,6 +224,8 @@ struct BOTANICUS_API FBotanicusSavedWorldItem
 
 	UPROPERTY()
 	TArray<FName> MultiPlanterPlantKeys;
+
+    UPROPERTY() TArray<FVector> PlanterPlantPlacementVariations;
 
 	UPROPERTY()
 	TArray<float> MultiPlanterWaterLevels;
@@ -303,7 +309,7 @@ class BOTANICUS_API UBotanicusWorldSaveGame : public USaveGame
 
 public:
 	UPROPERTY()
-	int32 SaveVersion = 37;
+	int32 SaveVersion = 38;
 
     UPROPERTY() bool bElectricWhipUnlocked=false;
 

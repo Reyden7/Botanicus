@@ -196,12 +196,14 @@ ABotanicusMultiPlantPotActor::ABotanicusMultiPlantPotActor()
 		ECollisionEnabled::NoCollision);
 
 	PlantSlots.SetNum(4);
+    RefreshPlanterDimensions();
 	RefreshVisuals();
 }
 
 void ABotanicusMultiPlantPotActor::BeginPlay()
 {
 	Super::BeginPlay();
+    RefreshPlanterDimensions();
 	if (MultiSoilMesh && MultiSoilMaterial)
 	{
 		MultiSoilDynamicMaterial = UMaterialInstanceDynamic::Create(
@@ -667,8 +669,9 @@ void ABotanicusMultiPlantPotActor::BeginPrimaryUse(
 			return;
 		}
 		Slot.PlantKey = Definition->PlantKey;
+        Slot.PlantPlacementVariation = bEnableRandomPlantPlacement ? BotanicusPlanterSoil::MakePlantVariation() : FVector::ZeroVector;
 		UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Plant"), GetActorTransform().TransformPosition(GetSlotLocalLocation(SlotIndex)));
-		UBotanicusJuiceWorldSubsystem::PlantSucceeded(this, UBotanicusJuiceWorldSubsystem::SoilSurface(this, GetActorTransform().TransformPosition(GetSlotLocalLocation(SlotIndex))));
+		UBotanicusJuiceWorldSubsystem::PlantSucceeded(this, GetSoilSurfaceForSlot(SlotIndex));
 		Slot.DiseaseState = FBotanicusPlantDiseaseState();
 		Slot.bElementalDead = false;
 		Slot.GrowthProgress = 0.02f;
@@ -891,34 +894,19 @@ int32 ABotanicusMultiPlantPotActor::ResolveAimedSlot(
 	{
 		TargetLocation = Hit.ImpactPoint;
 	}
-    else if(!BotanicusPlanterSoil::TrySurfaceAim(this,Pawn,BotanicusPlanterSoil::ClassicExtent(GetPlantCapacity()),GetSoilVisualHeight(),TargetLocation)) return INDEX_NONE;
-	const FVector Local =
-		GetActorTransform().InverseTransformPosition(TargetLocation);
-	int32 BestIndex = 0;
-	float BestDistance = MAX_flt;
-	for (int32 Index = 0; Index < GetPlantCapacity(); ++Index)
-	{
-		const float Distance =
-			FMath::Abs(
-				Local.X - GetSlotLocalLocation(Index).X);
-		if (Distance < BestDistance)
-		{
-			BestDistance = Distance;
-			BestIndex = Index;
-		}
-	}
-	return BestIndex;
+    else if(!BotanicusPlanterSoil::TrySurfaceAim(this,Pawn,GetPlanterSoilExtent(),GetSoilVisualHeight(),TargetLocation)) return INDEX_NONE;
+    const BotanicusPlanterSoil::FPlantLayout Layout(GetPlanterSoilExtent(), GetPlantCapacity(), PlantEdgeMargin);
+    return Layout.ResolveSlot(GetActorTransform().InverseTransformPosition(TargetLocation));
 }
 
-FVector ABotanicusMultiPlantPotActor::GetSlotLocalLocation(
-	int32 SlotIndex) const
+FVector ABotanicusMultiPlantPotActor::GetSlotLocalLocation(int32 SlotIndex) const
 {
-	return FVector(
-		(static_cast<float>(SlotIndex) -
-		 (static_cast<float>(GetPlantCapacity() - 1) * 0.5f)) *
-			55.0f,
-		0.0f,
-		18.0f);
+    const BotanicusPlanterSoil::FPlantLayout Layout(GetPlanterSoilExtent(), GetPlantCapacity(), PlantEdgeMargin);
+    const FVector Variation = PlantSlots.IsValidIndex(SlotIndex)
+        ? PlantSlots[SlotIndex].PlantPlacementVariation : FVector::ZeroVector;
+    const FVector Amplitude = BotanicusPlanterSoil::PlantVariationAmplitude(
+        bEnableRandomPlantPlacement, PlantRandomOffsetX, PlantRandomOffsetY, PlantRandomOffsetZ);
+    return Layout.Position(SlotIndex, GetSoilVisualHeight(), Variation, Amplitude);
 }
 
 const FBotanicusPlantDefinition*
@@ -1000,23 +988,8 @@ bool ABotanicusMultiPlantPotActor::IsInteractorStillTargeting(
 void ABotanicusMultiPlantPotActor::RefreshVisuals()
 {
 	const int32 Capacity = GetPlantCapacity();
-	const float LengthScale =
-		0.45f + static_cast<float>(Capacity) * 0.3f;
-	Mesh->SetRelativeScale3D(
-		FVector(LengthScale, 0.42f, 0.3f));
-	const FBoxSphereBounds PotBounds =
-		Mesh->CalcBounds(Mesh->GetRelativeTransform());
-	const float PotRimHeight =
-		PotBounds.Origin.Z + PotBounds.BoxExtent.Z;
-	MultiSoilMesh->SetRelativeLocation(
-		FVector(0.0f, 0.0f, GetSoilMaximumHeight()));
-	MultiSoilMesh->SetRelativeScale3D(
-		FVector(
-			LengthScale * 0.88f,
-			0.34f,
-			0.035f));
-	MultiSoilMesh->SetVisibility(false);
-    RefreshSoilContainer();
+    const FBoxSphereBounds PotBounds = Mesh->CalcBounds(Mesh->GetRelativeTransform());
+    const float PotRimHeight = PotBounds.Origin.Z + PotBounds.BoxExtent.Z;
     RefreshSlotSoil();
 
 	int32 PlantedCount = 0;
@@ -1457,7 +1430,7 @@ bool ABotanicusMultiPlantPotActor::GetAutomaticWateringNeed(int32 Index,float Ra
     const auto& S=PlantSlots[Index];if(S.bElementalDead || S.PlantKey.IsNone())return false;
     const auto* D=FindPlant(S.PlantKey);if(D && GetPotElement()!=EBotanicusPlantElement::Normal && D->Element!=GetPotElement())return false;
     if(!FBotanicusAutomaticWateringNeed::Read(D,S.WaterLevel,Ratio,Out))return false;
-    Out.SoilPoint=GetActorTransform().TransformPosition(GetSlotLocalLocation(Index));return true;
+    Out.SoilPoint=GetSoilSurfaceForSlot(Index);return true;
 }
 float ABotanicusMultiPlantPotActor::ApplyAutomaticWater(int32 Index,float Ratio,float AvailableUnits,bool bFirstPulse)
 {
@@ -1498,8 +1471,9 @@ void ABotanicusMultiPlantPotActor::RefreshSlotSoil()
     float Ratio=GetSoilFillRatio(),Wetness=0;int32 Occupied=0;
     if(GetWorld() && !GetWorld()->IsGameWorld()) Ratio=FMath::Clamp(SoilVisualPreviewFillRatio,0.f,1.f);
     for(const auto& Slot:PlantSlots)if(!Slot.PlantKey.IsNone()){Wetness+=Slot.WaterLevel;++Occupied;}
-    const FVector2D Extent=BotanicusPlanterSoil::ClassicExtent(GetPlantCapacity());
-    BotanicusPlanterSoil::Surface(SlotSoilVisuals[0],Extent,SoilVisualMinHeight,SoilVisualMaxHeight,Ratio,Wetness/FMath::Max(1,Occupied));
+    const FVector2D Extent=GetPlanterSoilExtent();
+    const FVector2D Heights = GetPlanterSoilHeightRange();
+    BotanicusPlanterSoil::Surface(SlotSoilVisuals[0],Extent,Heights.X,Heights.Y,Ratio,Wetness/FMath::Max(1,Occupied));
     // Keep old native component names valid for existing Blueprint references; only one renders.
     for(int32 I=1;I<SlotSoilVisuals.Num();++I)BotanicusPlanterSoil::Hide(SlotSoilVisuals[I]);
 }
@@ -1511,10 +1485,18 @@ void ABotanicusMultiPlantPotActor::RefreshSoilContainer()
     for (auto& W:SoilContainerWalls) W->SetVisibility(bSolidBlockout);
     if (!bSolidBlockout || SoilContainerWalls.Num()!=5) return;
     const auto B=Mesh->CalcBounds(Mesh->GetRelativeTransform());
-    const float X=B.BoxExtent.X,Y=B.BoxExtent.Y,Bottom=B.Origin.Z-B.BoxExtent.Z,Top=FMath::Max(GetSoilMaximumHeight()+.5f,float(B.Origin.Z+B.BoxExtent.Z));
-    const float Z=(Bottom+Top)*.5f,Height=Top-Bottom,Thickness=2.f;
-    const FVector Positions[]={FVector(-X+1,0,Z),FVector(X-1,0,Z),FVector(0,-Y+1,Z),FVector(0,Y-1,Z),FVector(0,0,Bottom+1)};
-    const FVector Sizes[]={FVector(Thickness,Y*2,Height),FVector(Thickness,Y*2,Height),FVector(X*2,Thickness,Height),FVector(X*2,Thickness,Height),FVector(X*2,Y*2,Thickness)};
+    const float X=B.BoxExtent.X,Y=B.BoxExtent.Y,Bottom=B.Origin.Z-B.BoxExtent.Z;
+    const float Top = Bottom + FMath::Max(30.f, GetSoilMaximumHeight() + 15.5f) * GetPlanterDimensionScale().Z;
+    const FVector Scale = GetPlanterDimensionScale();
+    const double Z = (Bottom + Top) * 0.5, Height = Top - Bottom;
+    const FVector Positions[] = {
+        FVector(-X + Scale.X, 0, Z), FVector(X - Scale.X, 0, Z),
+        FVector(0, -Y + Scale.Y, Z), FVector(0, Y - Scale.Y, Z),
+        FVector(0, 0, Bottom + Scale.Z)};
+    const FVector Sizes[] = {
+        FVector(2 * Scale.X, Y * 2, Height), FVector(2 * Scale.X, Y * 2, Height),
+        FVector(X * 2, 2 * Scale.Y, Height), FVector(X * 2, 2 * Scale.Y, Height),
+        FVector(X * 2, Y * 2, 2 * Scale.Z)};
     for (int32 I=0;I<5;++I)
     {
         auto* W=SoilContainerWalls[I].Get();W->SetRelativeLocation(Positions[I]);W->SetRelativeScale3D(Sizes[I]/100.f);
@@ -1525,6 +1507,7 @@ void ABotanicusMultiPlantPotActor::RefreshSoilContainer()
 void ABotanicusMultiPlantPotActor::OnConstruction(const FTransform& Transform)
 {
     Super::OnConstruction(Transform);
+    RefreshPlanterDimensions();
     RefreshVisuals();
 }
 float ABotanicusMultiPlantPotActor::GetSoilFillRatio() const
@@ -1533,9 +1516,81 @@ float ABotanicusMultiPlantPotActor::GetSoilFillRatio() const
 }
 float ABotanicusMultiPlantPotActor::GetSoilVisualHeight() const
 {
-    return FMath::Lerp(SoilVisualMinHeight,FMath::Max(SoilVisualMinHeight,SoilVisualMaxHeight),GetSoilFillRatio());
+    const FVector2D Heights = GetPlanterSoilHeightRange();
+    return FMath::Lerp(Heights.X, Heights.Y, GetSoilFillRatio());
 }
 FVector ABotanicusMultiPlantPotActor::GetSoilPourTarget(const APawn* Source) const
 {
-    return BotanicusPlanterSoil::AimedSurface(this,Source,BotanicusPlanterSoil::ClassicExtent(GetPlantCapacity()),GetSoilVisualHeight());
+    return BotanicusPlanterSoil::AimedSurface(this,Source,GetPlanterSoilExtent(),GetSoilVisualHeight());
+}
+
+
+FVector ABotanicusMultiPlantPotActor::GetPlanterDimensionScale() const
+{
+    return FVector(FMath::Max(0.25f, PlanterLengthScale),
+        FMath::Max(0.25f, PlanterWidthScale), FMath::Max(0.25f, PlanterHeightScale));
+}
+
+FVector2D ABotanicusMultiPlantPotActor::GetPlanterSoilExtent() const
+{
+    const FVector Scale = GetPlanterDimensionScale();
+    if (Mesh->GetStaticMesh() && Mesh->GetStaticMesh()->GetPathName() != TEXT("/Engine/BasicShapes/Cube.Cube"))
+    {
+        // The imported preparation planter's inner faces are at 92.7% and 86.6%
+        // of its outer extents, measured on the straight walls below the rim.
+        const FVector Extent = Mesh->CalcBounds(Mesh->GetRelativeTransform()).BoxExtent;
+        return FVector2D(Extent.X * 0.927 - 0.25 * Scale.X, Extent.Y * 0.866 - 0.25 * Scale.Y);
+    }
+
+    const FVector2D Extent = BotanicusPlanterSoil::ClassicExtent(GetPlantCapacity());
+    return Extent * FVector2D(Scale.X, Scale.Y);
+}
+
+FVector2D ABotanicusMultiPlantPotActor::GetPlanterSoilHeightRange() const
+{
+    const FBoxSphereBounds Bounds = Mesh->CalcBounds(Mesh->GetRelativeTransform());
+    const float Bottom = Bounds.Origin.Z - Bounds.BoxExtent.Z;
+    const float HeightScale = GetPlanterDimensionScale().Z;
+    const bool bBlockout = Mesh->GetStaticMesh() &&
+        Mesh->GetStaticMesh()->GetPathName() == TEXT("/Engine/BasicShapes/Cube.Cube");
+    // The imported mesh's cavity floor is 3.81 cm above its base at reference size.
+    const float Floor = Bottom + (bBlockout ? 0.5f : 4.f) * HeightScale;
+    const float Rim = bBlockout
+        ? Bottom + FMath::Max(30.f, GetSoilMaximumHeight() + 15.5f) * HeightScale
+        : Bounds.Origin.Z + Bounds.BoxExtent.Z;
+    return BotanicusPlanterSoil::FitHeightRange(SoilVisualMinHeight, SoilVisualMaxHeight, Floor, Rim);
+}
+
+void ABotanicusMultiPlantPotActor::RefreshPlanterDimensions()
+{
+    const FVector Scale = GetPlanterDimensionScale();
+    const FVector ReferenceScale(0.45f + GetPlantCapacity() * 0.3f, 0.42f, 0.3f);
+    const auto* ReferenceMesh = IsTemplate() ? nullptr : Cast<UStaticMeshComponent>(Mesh->GetArchetype());
+    FTransform Reference = ReferenceMesh ? ReferenceMesh->GetRelativeTransform() : Mesh->GetRelativeTransform();
+    Reference.SetScale3D(ReferenceScale);
+    FTransform Sized = Reference;
+    FVector SizedScale = ReferenceScale * Scale;
+    if (!FMath::IsNearlyEqual(Scale.Z, 1.0) && Mesh->GetStaticMesh() &&
+        Mesh->GetStaticMesh()->GetPathName() == TEXT("/Engine/BasicShapes/Cube.Cube"))
+    {
+        // Match the resized shell's lip while leaving existing placed blockouts unchanged at 1.
+        SizedScale.Z = FMath::Max(30.f, GetSoilMaximumHeight() + 15.5f) * Scale.Z / 100.f;
+    }
+    Sized.SetScale3D(SizedScale);
+    const FBoxSphereBounds Before = Mesh->CalcBounds(Reference);
+    const FBoxSphereBounds After = Mesh->CalcBounds(Sized);
+    Sized.AddToTranslation(FVector(0, 0, (Before.Origin.Z - Before.BoxExtent.Z) - (After.Origin.Z - After.BoxExtent.Z)));
+    if (!Mesh->GetRelativeTransform().Equals(Sized))
+    {
+        Mesh->SetRelativeTransform(Sized);
+    }
+    MultiSoilMesh->SetVisibility(false);
+    RefreshSoilContainer();
+}
+
+void ABotanicusMultiPlantPotActor::ApplyItemDefinition()
+{
+    Super::ApplyItemDefinition();
+    RefreshPlanterDimensions();
+    RefreshSlotSoil();
 }

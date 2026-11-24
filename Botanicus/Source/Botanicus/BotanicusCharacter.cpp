@@ -5,6 +5,7 @@
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/SpotLightComponent.h"
 #include "EnhancedInputComponent.h"
 #include "InputActionValue.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -44,6 +45,24 @@ ABotanicusCharacter::ABotanicusCharacter()
 	FirstPersonCameraComponent->bEnableFirstPersonScale = true;
 	FirstPersonCameraComponent->FirstPersonFieldOfView = 70.0f;
 	FirstPersonCameraComponent->FirstPersonScale = 0.6f;
+
+	HeadFlashlightAim = CreateDefaultSubobject<USceneComponent>(TEXT("Head Flashlight Aim"));
+	HeadFlashlightAim->SetupAttachment(FirstPersonCameraComponent);
+	HeadFlashlightAim->SetUsingAbsoluteRotation(true);
+	HeadFlashlight = CreateDefaultSubobject<USpotLightComponent>(TEXT("HeadFlashlight"));
+	HeadFlashlight->SetupAttachment(HeadFlashlightAim);
+	HeadFlashlight->SetMobility(EComponentMobility::Movable);
+	HeadFlashlight->SetRelativeLocation(FVector(12.f, 0.f, 6.f));
+	HeadFlashlight->SetIntensityUnits(ELightUnits::Lumens);
+	HeadFlashlight->SetIntensity(450.f);
+	HeadFlashlight->SetAttenuationRadius(1800.f);
+	HeadFlashlight->SetInnerConeAngle(15.f);
+	HeadFlashlight->SetOuterConeAngle(35.f);
+	HeadFlashlight->SetLightColor(FLinearColor(1.f, 0.94f, 0.84f));
+	HeadFlashlight->SetCastShadows(true);
+	HeadFlashlight->SetVolumetricScatteringIntensity(0.f);
+	HeadFlashlight->SetIndirectLightingIntensity(0.f);
+	HeadFlashlight->SetVisibility(false);
 
 	BotanicusInteractionComponent = CreateDefaultSubobject<UBotanicusInteractionComponent>(
 		TEXT("Botanicus Interaction Component"));
@@ -85,7 +104,17 @@ void ABotanicusCharacter::BeginPlay()
 	}
 	ApplyCarryMovementMultiplier();
 	ConfigureTrueFirstPersonLocalView();
+	InitializeHeadFlashlight();
+}
 
+void ABotanicusCharacter::NotifyControllerChanged()
+{
+	ManualFlashlightOverride.Reset();
+	Super::NotifyControllerChanged();
+	if (HasActorBegunPlay())
+	{
+		ConfigureFlashlightSampling();
+	}
 }
 
 void ABotanicusCharacter::ToggleCrouching()
@@ -111,6 +140,8 @@ void ABotanicusCharacter::GetLifetimeReplicatedProps(
 	TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME_CONDITION(ABotanicusCharacter, bHeadFlashlightOn, COND_SkipOwner);
+	DOREPLIFETIME_CONDITION(ABotanicusCharacter, FlashlightYawOverride, COND_SkipOwner);
 	DOREPLIFETIME(
 		ABotanicusCharacter,
 		CarryMovementMultiplier);
@@ -246,11 +277,13 @@ void ABotanicusCharacter::PawnClientRestart()
 {
 	Super::PawnClientRestart();
 	ConfigureTrueFirstPersonLocalView();
+	ConfigureFlashlightSampling();
 }
 
 void ABotanicusCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	UpdateHeadFlashlight(DeltaSeconds);
 
 	if (!IsLocallyControlled())
 	{
@@ -427,7 +460,6 @@ void ABotanicusCharacter::LookInput(const FInputActionValue& Value)
 	// get the Vector2D look axis
 	FVector2D LookAxisVector = Value.Get<FVector2D>();
 
-	// pass the axis values to the aim input
 	DoAim(LookAxisVector.X, LookAxisVector.Y);
 
 }

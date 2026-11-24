@@ -29,6 +29,9 @@ struct BOTANICUS_API FBotanicusIllegalPlantSlotState
 	/** Water belongs to this plant, never to the whole planter. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(ClampMin="0.0"))
 	float WaterAmount = 0.0f;
+
+    // Sampled once on the server and replicated with the slot. Zero for older saves.
+    UPROPERTY() FVector PlantPlacementVariation = FVector::ZeroVector;
 };
 
 /** Four-slot MVP planter for the simplified clandestine crop loop. */
@@ -72,6 +75,32 @@ public:
     float SoilVisualMinHeight = 15.f;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Botanicus|Soil", meta=(Units="cm", ToolTip="Hauteur locale maximale du terreau. Choisir une valeur à l'intérieur des parois; ne change ni leur taille ni la quantité stockée."))
     float SoilVisualMaxHeight = 80.f;
+
+    // Multipliers relative to this Blueprint's original container dimensions.
+    UPROPERTY(EditDefaultsOnly, Category="Botanicus|Dimensions", meta=(ClampMin="0.25", UIMin="0.25", UIMax="2.0"))
+    float PlanterLengthScale = 1.f;
+
+    UPROPERTY(EditDefaultsOnly, Category="Botanicus|Dimensions", meta=(ClampMin="0.25", UIMin="0.25", UIMax="2.0"))
+    float PlanterWidthScale = 1.f;
+
+    UPROPERTY(EditDefaultsOnly, Category="Botanicus|Dimensions", meta=(ClampMin="0.25", UIMin="0.25", UIMax="2.0"))
+    float PlanterHeightScale = 1.f;
+
+    UPROPERTY(EditDefaultsOnly, Category="Botanicus|Plant Placement", meta=(ClampMin="0", Units="cm"))
+    float PlantEdgeMargin = 5.f;
+
+    UPROPERTY(EditDefaultsOnly, Category="Botanicus|Plant Placement")
+    bool bEnableRandomPlantPlacement = true;
+
+    UPROPERTY(EditDefaultsOnly, Category="Botanicus|Plant Placement", meta=(ClampMin="0", Units="cm"))
+    float PlantRandomOffsetX = 5.f;
+
+    UPROPERTY(EditDefaultsOnly, Category="Botanicus|Plant Placement", meta=(ClampMin="0", Units="cm"))
+    float PlantRandomOffsetY = 5.f;
+
+    UPROPERTY(EditDefaultsOnly, Category="Botanicus|Plant Placement", meta=(ClampMin="0", ClampMax="0.5", Units="cm"))
+    float PlantRandomOffsetZ = 0.5f;
+
     UPROPERTY(EditAnywhere, Category="Botanicus|Soil|Editor Preview", meta=(ClampMin="0",ClampMax="1",ToolTip="Prévisualisation dans l'éditeur uniquement. En jeu, la quantité réelle est utilisée."))
     float SoilVisualPreviewFillRatio = 1.f;
     FVector GetSoilSurfaceForSlot(int32 Slot) const;
@@ -109,7 +138,7 @@ private:
 	void OnRep_PlanterState();
 
 	void EnsureSlotCount();
-	float GetPlantSlotSpacing() const;
+	FVector GetSlotLocalLocation(int32 SlotIndex) const;
 	void RefreshVisuals();
 	void RefreshGrowthWidgets();
 	void ScheduleAutosave();
@@ -166,10 +195,16 @@ private:
 	UPROPERTY(ReplicatedUsing=OnRep_PlanterState)
 	int32 SoilUnits = 0;
     UPROPERTY(ReplicatedUsing=OnRep_PlanterState) TArray<float> SlotSoilLevels;
-    UPROPERTY(VisibleAnywhere, Category="Botanicus|Soil") TArray<TObjectPtr<UChildActorComponent>> SlotSoilVisuals;
+    // Internal component references. The Blueprint Details panel must not expand their child templates.
+    UPROPERTY() TArray<TObjectPtr<UChildActorComponent>> SlotSoilVisuals;
     bool IsSlotSoilFull(int32 Slot) const { return SlotSoilLevels.IsValidIndex(Slot) && SlotSoilLevels[Slot]>=1.f; }
     float SoilReplicationElapsed=0;
     void RefreshSlotSoil();
+    FVector GetPlanterDimensionScale() const;
+    FVector2D GetPlanterSoilExtent() const;
+    FVector2D GetPlanterSoilHeightRange() const;
+    void RefreshPlanterDimensions();
+
 
 	UPROPERTY(ReplicatedUsing=OnRep_PlanterState)
 	TArray<FBotanicusIllegalPlantSlotState> PlantSlots;

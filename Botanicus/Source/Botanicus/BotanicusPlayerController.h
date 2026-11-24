@@ -100,6 +100,8 @@ public:
     ABotanicusCheckoutScanner* GetCheckoutScanner() const;
     float GetWorldInteractionDistance() const {return MaximumWorldInteractionDistance;}
     bool IsMultiToolContextBlocked() const;
+	virtual void SetPawn(APawn* InPawn) override;
+	virtual void FlushPressedKeys() override;
     void PlayMultiToolWhipVisual();
     bool IsMultiToolCutInProgress() const;
     void SetCheckoutScannerReference(ABotanicusCheckoutScanner* Scanner);
@@ -395,6 +397,11 @@ protected:
 	UPROPERTY(EditAnywhere, Category="Input|Input Mappings")
 	TArray<UInputMappingContext*> DefaultMappingContexts;
 
+	UPROPERTY(Transient)
+	TObjectPtr<class UInputAction> ToggleFlashlightInputAction;
+
+	void HandleToggleFlashlightInput();
+
 	/** Input Mapping Contexts */
 	UPROPERTY(EditAnywhere, Category="Input|Input Mappings")
 	TArray<UInputMappingContext*> MobileExcludedMappingContexts;
@@ -467,16 +474,18 @@ protected:
 	void HideEbsDemoHud();
 	void HideLegacyWorldGuidance();
 	bool TryCollectNearbyDeliveryParcel();
-	void BeginParcelMoveCharge(
-		ABotanicusDeliveryParcelActor* Parcel);
-	void UpdateParcelMoveCharge(float DeltaTime);
-	void CancelParcelMoveCharge();
-	void BeginDeliveryParcelMove(
-		ABotanicusDeliveryParcelActor* Parcel);
-	void UpdateDeliveryParcelPlacement(float DeltaTime);
-	void RotateDeliveryParcelPlacement(float Direction);
+	bool HandleDeliveryParcelInput(const FInputKeyEventArgs& Params);
+	void UpdateDeliveryParcelCarry(float DeltaTime);
+	FTransform UpdateParcelInspectionPose(const ABotanicusDeliveryParcelActor& Parcel, float DeltaTime);
+	bool HandleParcelInspectionMouse(const FInputKeyEventArgs& Params);
+	void StopParcelInspectionRotation(bool bCoast = false);
+	void UpdateParcelInspectionRotation(float DeltaTime);
+	void SendParcelInspectionOrientation(const FQuat& WorldOrientation, float DeltaTime);
+	void BeginDeliveryParcelPlacement();
 	void ConfirmDeliveryParcelPlacement();
 	void CancelDeliveryParcelPlacement();
+	void ClearLocalDeliveryParcelCarry();
+	void ReleaseServerDeliveryParcelCarry();
 	bool ResolveDeliveryParcelPlacement(
 		const ABotanicusDeliveryParcelActor* Parcel,
 		const FVector& RequestedLocation,
@@ -643,8 +652,13 @@ protected:
 		float RequestedYaw);
 
 	UFUNCTION(Server, Reliable)
-	void ServerCancelDeliveryParcelMove(
-		ABotanicusDeliveryParcelActor* Parcel);
+	void ServerSetParcelInspectionOrientation(ABotanicusDeliveryParcelActor* Parcel, FRotator WorldRotation);
+
+	UFUNCTION(Client, Reliable)
+	void ClientBeginDeliveryParcelInspection(ABotanicusDeliveryParcelActor* Parcel);
+
+	UFUNCTION(Client, Reliable)
+	void ClientDeliveryParcelPlacementResult(ABotanicusDeliveryParcelActor* Parcel, bool bAccepted, const FTransform& Placement);
 
 	UFUNCTION(Server, Reliable)
 	void ServerBeginParcelCut(
@@ -1146,14 +1160,6 @@ protected:
 
 	UPROPERTY(Transient)
 	TObjectPtr<ABotanicusDeliveryParcelActor>
-		LocalParcelMoveCandidate;
-
-	UPROPERTY(Transient)
-	TObjectPtr<ABotanicusDeliveryParcelActor>
-		LocalParcelMovePreview;
-
-	UPROPERTY(Transient)
-	TObjectPtr<ABotanicusDeliveryParcelActor>
 		LocalMovedDeliveryParcel;
 
 	UPROPERTY(Transient)
@@ -1173,11 +1179,46 @@ protected:
 
 	UPROPERTY(EditAnywhere, Category="Botanicus|Interaction", meta=(ClampMin="0.1"))
 	float GardenTrowelTransplantHoldDuration = 1.0f;
-	float ParcelMoveChargeElapsed = 0.0f;
 	float WaterRefillRequestAccumulator = 0.0f;
 	float WateringCanSprayRequestAccumulator = 0.0f;
 	double LastServerWaterRefillPulseTime = -1000.0;
 	double LastServerWateringCanSprayPulseTime = -1000.0;
+	enum class EParcelCarryMode : uint8 { None, Inspection, Placement, Confirming, Settling };
+	EParcelCarryMode ParcelCarryMode = EParcelCarryMode::None;
+	FTransform LocalParcelPresentation;
+	FTransform LocalParcelPlacement;
+	FQuat ParcelInspectionRotation = FQuat::Identity;
+	FQuat ParcelInspectionTargetRotation = FQuat::Identity;
+	FVector2D ParcelInspectionLookDelta = FVector2D::ZeroVector;
+	FVector2D ParcelInspectionAngularVelocity = FVector2D::ZeroVector;
+	float ParcelSettlementRemaining = 0.f;
+	bool bParcelInspectionRotating = false;
+	TOptional<FQuat> LastSentParcelInspectionOrientation;
+	float ParcelInspectionSendElapsed = 0.f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Carton Inspection", meta=(ClampMin="30", Units="cm"))
+	float InspectionDistance = 70.f;
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Carton Inspection", meta=(Units="cm"))
+	float InspectionVerticalOffset = -10.f;
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Carton Inspection", meta=(Units="cm"))
+	float InspectionHorizontalOffset = 0.f;
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Carton Inspection", meta=(ClampMin="1"))
+	float InspectionPositionSmoothness = 19.f;
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Carton Inspection", meta=(ClampMin="0.01"))
+	float InspectionRotationSensitivity = .30f;
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Carton Inspection", meta=(ClampMin="1"))
+	float InspectionRotationSmoothness = 28.f;
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Carton Inspection", meta=(ClampMin="0", ClampMax="0.95"))
+	float InspectionAngularInertia = .65f;
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Carton Inspection", meta=(ClampMin="0"))
+	float InspectionAngularDamping = 11.f;
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Carton Inspection", meta=(ClampMin="30", ClampMax="1440", Units="deg/s"))
+	float InspectionMaxAngularSpeed = 720.f;
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Carton Inspection")
+	bool InvertInspectionVerticalAxis = false;
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Carton Inspection", meta=(ClampMin="0", Units="cm"))
+	float InspectionMovementSway = 4.f;
+
 	float ParcelPlacementYaw = 0.0f;
 	float ParcelPreviewUpdateAccumulator = 0.0f;
 	bool bLocalLargeEquipmentPlacementValid = false;

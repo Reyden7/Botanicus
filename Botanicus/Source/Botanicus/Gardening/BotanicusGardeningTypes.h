@@ -14,9 +14,11 @@ USTRUCT(BlueprintType)
 struct BOTANICUS_API FBotanicusGardeningConfig
 {
     GENERATED_BODY()
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="0.1")) float BatteryRuntimeHours=6;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(DisplayName="Battery Autonomy Game Hours", ClampMin="0.1")) float BatteryRuntimeHours=7;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="0.1")) float BatteryRechargeHours=1;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="0",ClampMax="0.9")) float BatteryReturnThreshold=.10f;
+    /** Percentage of total charge required to leave the station. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="0",ClampMax="100")) float MinimumBatteryToLeaveDock=20.f;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="0.01")) float WaterCapacity=1;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="0.001")) float RefillRate=.4f;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="1")) float MovementSpeed=180;
@@ -42,6 +44,7 @@ struct BOTANICUS_API FBotanicusGardeningSave
     UPROPERTY() float Battery=1;
     UPROPERTY() float Water=1;
     UPROPERTY() bool bEnabled=true;
+    /** Legacy save field. Departure now depends on charge and the route budget. */
     UPROPERTY() bool bAwaitFullCharge=false;
     UPROPERTY() EBotanicusGardeningState State=EBotanicusGardeningState::Inactive;
 };

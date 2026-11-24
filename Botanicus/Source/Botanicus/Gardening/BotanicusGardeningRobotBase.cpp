@@ -103,7 +103,14 @@ void ABotanicusGardeningRobotBase::EnsureRobot()
     Robot=GetWorld()->SpawnActorDeferred<ABotanicusGardeningRobot>(Class,Saved.RobotTransform,this,nullptr,ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButDontSpawnIfColliding);
     if(Robot)
     {
-        Robot->Config=Config;Robot->InitializeRobot(this,Saved);Robot->FinishSpawning(Saved.RobotTransform);
+        // The station configures the kit's gardening settings. Battery tuning belongs to the robot Blueprint.
+        FBotanicusGardeningConfig InstalledConfig = Config;
+        InstalledConfig.BatteryRuntimeHours = Robot->Config.BatteryRuntimeHours;
+        InstalledConfig.BatteryRechargeHours = Robot->Config.BatteryRechargeHours;
+        InstalledConfig.BatteryReturnThreshold = Robot->Config.BatteryReturnThreshold;
+        InstalledConfig.MinimumBatteryToLeaveDock = Robot->Config.MinimumBatteryToLeaveDock;
+        Robot->Config = InstalledConfig;
+        Robot->InitializeRobot(this,Saved);Robot->FinishSpawning(Saved.RobotTransform);
         // Deferred spawning can fail on collision at FinishSpawning. Retain the kit/saved resources and retry later.
         if(IsValid(Robot) && !Robot->IsActorBeingDestroyed()){bSpawnedOnce=true;PendingSave=Robot->Capture();}
         else Robot=nullptr;
@@ -144,7 +151,7 @@ FBotanicusInteractionPrompt ABotanicusGardeningRobotBase::GetInteractionPrompt_I
 {
     if(!Robot)return Super::GetInteractionPrompt_Implementation(Interactor);
     FBotanicusInteractionPrompt P;P.ActionText=Robot->bEnabled?NSLOCTEXT("Robot","LaunchRound","Lancer une ronde"):NSLOCTEXT("Robot","Enable","Activer le robot");
-    const float Remaining=(1-Robot->Battery)*Config.BatteryRechargeHours*60;
+    const float Remaining=(1-Robot->Battery)*Robot->Config.BatteryRechargeHours*60;
     P.TargetName=FText::Format(NSLOCTEXT("Robot","BaseInfo","Station jardinier — batterie {0}% | eau {1}%\nRecharge restante : {2} min de jeu"),FMath::RoundToInt(Robot->Battery*100),FMath::RoundToInt(Robot->CurrentWater/FMath::Max(.01f,Config.WaterCapacity)*100),FMath::CeilToInt(Remaining));
     P.bCanInteract=CanInteract_Implementation(Interactor);return P;
 }

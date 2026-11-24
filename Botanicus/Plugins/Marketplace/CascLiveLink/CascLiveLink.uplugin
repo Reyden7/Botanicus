@@ -1,0 +1,59 @@
+{
+	"FileVersion": 3,
+	"Version": 2,
+	"VersionName": "1.0.2",
+	"FriendlyName": "Cascadeur Live Link",
+	"Description": "Cascadeur Live Link allows streaming of animated data into the Unreal Editor",
+	"Category": "Animation",
+	"CreatedBy": "Nekki Limited",
+	"CreatedByURL": "https://cascadeur.com/",
+	"DocsURL": "https://cascadeur.com/help/category/268",
+	"MarketplaceURL": "",
+	"SupportURL": "https://nekki.helpshift.com/hc/en/14-cascadeur/contact-us/?l=en&contact=1",
+	"EngineVersion": "5.8.0",
+	"CanContainContent": false,
+	"Installed": true,
+	"SupportedTargetPlatforms": [
+		"Win64"
+	],
+	"Modules": [
+		{
+			"Name": "CascLiveLink",
+			"Type": "Editor",
+			"LoadingPhase": "PreDefault",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "CascLiveLinkTimeline",
+			"Type": "Editor",
+			"LoadingPhase": "PreDefault",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "CascLiveLinkInterface",
+			"Type": "Editor",
+			"LoadingPhase": "PreDefault",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "LiveLink",
+			"Enabled": true
+		},
+		{
+			"Name": "LevelSequenceEditor",
+			"Enabled": true
+		},
+		{
+			"Name": "AnimationData",
+			"Enabled": true
+		}
+	]
+}

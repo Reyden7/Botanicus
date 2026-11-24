@@ -48,6 +48,15 @@ public:
     UPROPERTY(EditAnywhere,Category="Robot|Appearance") FVector OutletMeshSpacePosition=FVector(-275,414,340);
     UPROPERTY(EditAnywhere,Category="Robot|Reservoir") FVector ReservoirScale=FVector(1.7f,1.7f,2.5f);
     UPROPERTY(EditAnywhere,Category="Robot|Appearance") FName OutletSocket=TEXT("poigné");
+    UPROPERTY(EditAnywhere, Category="Robot|Watering", meta=(ClampMin="1", Units="s"))
+    float WateringStartTimeout = 5.f;
+
+    UPROPERTY(EditAnywhere, Category="Robot|Watering", meta=(ClampMin="0", ClampMax="5"))
+    int32 WateringRecoveryMaxAttempts = 2;
+
+    UPROPERTY(EditAnywhere, Category="Robot|Watering", meta=(ClampMin="8", Units="cm"))
+    float WateringApproachTolerance = 35.f;
+
     UPROPERTY(EditAnywhere,Category="Robot|Dock",meta=(ClampMin="5",Units="cm/s")) float DockSpeed=35;
     UPROPERTY(EditAnywhere,Category="Robot|Dock",meta=(ClampMin="10",Units="deg/s")) float DockTurnSpeed=90;
     virtual void EndPlay(const EEndPlayReason::Type Reason) override;
@@ -101,7 +110,11 @@ private:
     UFUNCTION() void OnRep_Activity();
     bool UpdateActivity(double Now);
     void BeginWaterPreparation();
-    void FinishWatering(bool bReturn=false,bool bLowBattery=false);
+    void FinishWatering(bool bReturn=false,bool bRetry=false);
+    void RecoverWatering(const TCHAR* Reason);
+    void RetryWateringApproach();
+    void AbandonWateringTarget();
+    bool IsWithinWateringReach(const FVector& Soil) const;
     bool GetDockApproach(FVector& Point) const;
     bool DockLaneClear(const FVector& To) const;
     void FailDocking();
@@ -110,18 +123,24 @@ private:
     UPROPERTY(ReplicatedUsing=OnRep_Activity) FBotanicusRobotPresentation Presentation;
     FVector PendingDestination=FVector::ZeroVector,DockDestination=FVector::ZeroVector;
     EBotanicusGardeningState PendingState=EBotanicusGardeningState::SearchingPlant;
-    bool bReturnAfterFinish=false,bLowBatteryAfterFinish=false;
+    bool bReturnAfterFinish=false;
     double DockLastProgress=0;
     FVector DockLastPosition=FVector::ZeroVector;
     void Search();
-    void ReturnToBase(bool bLowBattery=false);
+    void ReturnToBase();
     void ReleaseTarget();
     bool Navigate(const FVector& Point,EBotanicusGardeningState NextState);
     bool Path(const FVector& Start,const FVector& End,float& Length) const;
-    bool Approach(AActor* Pot,int32 Slot,FVector& Point,float& Length) const;
+    bool Approach(AActor* Pot,int32 Slot,FVector& Point,float& Length, TConstArrayView<FVector> Rejected = {}) const;
     bool HasWaterLine(const FVector& Soil) const;
+    bool HasWaterLineFrom(const FVector& Origin, const FVector& Soil, const AActor* Pot) const;
+    bool CanWaterFrom(const FVector& Feet, const FVector& Soil, const AActor* Pot) const;
+    bool CanWaterFromHere(const FVector& Soil, const AActor* Pot) const;
+    bool GetReturnPathLength(const FVector& From, float& Length) const;
     float WateringApproachDistance() const;
     bool CanAfford(float Distance,float Water) const;
+    bool HasDockDepartureCharge() const;
+    EBotanicusGardeningState GetDockedState() const;
     void AccountResources(float Minutes,float Seconds);
     void FailMove();
     void UpdateCosmetics();
@@ -134,12 +153,16 @@ private:
     UPROPERTY(ReplicatedUsing=OnRep_Carrier) TObjectPtr<ACharacter> Carrier;
     UPROPERTY(VisibleAnywhere) TObjectPtr<UNiagaraComponent> Stream;
     UPROPERTY(VisibleAnywhere) TObjectPtr<UNiagaraComponent> Splash;
-    TMap<TWeakObjectPtr<AActor>,double> RetryAfter;
+    TMap<TWeakObjectPtr<AActor>, TMap<int32,double>> RetryAfter;
+    TArray<FVector, TInlineAllocator<10>> RejectedWateringPositions;
+    int32 WateringRecoveryAttempts = 0;
+    int32 LastWaterMoveRequest = INDEX_NONE;
+    double WateringPhaseDeadline = 0;
+    double LastWaterTransfer = 0;
+    bool bRetryAfterFinish = false;
     FVector Destination=FVector::ZeroVector,LastProgressLocation=FVector::ZeroVector;
     double LastUpdate=-1,NextSearch=0,MoveStarted=0,LastProgress=0;
     float LastClock=-1,ReturnPathLength=0;
-    double NextReturnPathCheck=0;
-    UPROPERTY(Replicated) bool bAwaitFullCharge=false;
     UPROPERTY(Replicated) bool bTaskPowerLimited=false;
     bool bFirstWaterPulse=true,bDropping=false;
     int32 MoveFailures=0;

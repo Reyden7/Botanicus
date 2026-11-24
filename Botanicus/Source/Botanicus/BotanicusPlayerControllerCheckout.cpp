@@ -1,4 +1,4 @@
-﻿#include "BotanicusPlayerController.h"
+#include "BotanicusPlayerController.h"
 #include "BotanicusCharacter.h"
 #include "Sales/BotanicusCashRegisterActor.h"
 #include "Sales/Checkout/BotanicusCheckoutScanner.h"
@@ -47,7 +47,7 @@ bool ABotanicusPlayerController::TraceCheckoutAim(FHitResult& Hit) const
 }
 bool ABotanicusPlayerController::TryCheckoutInput(const FInputKeyEventArgs& Params)
 {
-    if(bCheckoutContextBlocked || !IsLocalController() || !GetPawn() || bFurnitureMoveModeActive || IsValid(LocalMovedPlaceableItem) || IsValid(LocalQuickBarItemPreview) || IsValid(LocalLargeEquipmentPlacement) || IsValid(LocalParcelMovePreview)) return false;
+    if(bCheckoutContextBlocked || !IsLocalController() || !GetPawn() || bFurnitureMoveModeActive || IsValid(LocalMovedPlaceableItem) || IsValid(LocalQuickBarItemPreview) || IsValid(LocalLargeEquipmentPlacement) || IsValid(LocalMovedDeliveryParcel)) return false;
     auto* Held=GetCheckoutScanner();
     if(Held && Params.Key==EKeys::A) return true;
     if(Params.Event!=IE_Pressed || (Params.Key!=EKeys::E && Params.Key!=EKeys::LeftMouseButton)) return false;
@@ -113,7 +113,7 @@ void ABotanicusPlayerController::ServerCollectCheckoutCoins_Implementation(ABota
 }
 bool ABotanicusPlayerController::TryRefreshCheckoutContext()
 {
-    if(bCheckoutContextBlocked || !InteractionTargetWidget || !GetPawn() || bFurnitureMoveModeActive || IsValid(LocalMovedPlaceableItem) || IsValid(LocalQuickBarItemPreview) || IsValid(LocalLargeEquipmentPlacement) || IsValid(LocalParcelMovePreview)) return false;
+    if(bCheckoutContextBlocked || !InteractionTargetWidget || !GetPawn() || bFurnitureMoveModeActive || IsValid(LocalMovedPlaceableItem) || IsValid(LocalQuickBarItemPreview) || IsValid(LocalLargeEquipmentPlacement) || IsValid(LocalMovedDeliveryParcel)) return false;
     FHitResult Hit;if(!TraceCheckoutAim(Hit)) return false;
     auto* Held=GetCheckoutScanner();ABotanicusCashRegisterActor* Register=nullptr;
     if(auto* Scanner=Cast<ABotanicusCheckoutScanner>(Hit.GetActor()))

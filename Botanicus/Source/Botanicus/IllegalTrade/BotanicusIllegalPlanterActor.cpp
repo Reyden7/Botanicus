@@ -33,6 +33,7 @@
 namespace
 {
 	constexpr int32 MaximumVisualSlots = 12;
+	constexpr int32 PlanterSlotCount = 4;
 
 	UBotanicusQuickBarComponent* GetQuickBar(AActor* Interactor)
 	{
@@ -158,6 +159,7 @@ ABotanicusIllegalPlanterActor::ABotanicusIllegalPlanterActor()
 void ABotanicusIllegalPlanterActor::BeginPlay()
 {
 	Super::BeginPlay();
+    RefreshPlanterDimensions();
 	EnsureSlotCount();
 	UClass* GrowthWidgetClass = LoadClass<UUserWidget>(
 		nullptr,
@@ -188,19 +190,23 @@ void ABotanicusIllegalPlanterActor::ApplyItemDefinition()
 		Mesh->SetRelativeLocation(FVector::ZeroVector);
 		Mesh->SetRelativeScale3D(FVector::OneVector);
 	}
+    RefreshPlanterDimensions();
+    RefreshSlotSoil();
 }
 
 void ABotanicusIllegalPlanterActor::EnsureSlotCount()
 {
-	PlantSlots.SetNum(4);
+	PlantSlots.SetNum(PlanterSlotCount);
 }
 
-float ABotanicusIllegalPlanterActor::GetPlantSlotSpacing() const
+FVector ABotanicusIllegalPlanterActor::GetSlotLocalLocation(int32 SlotIndex) const
 {
-	return FMath::Clamp(
-		(2.0f * SoilHalfExtent.X - 20.0f) /
-		FMath::Max(1, PlantSlots.Num() - 1),
-		1.0f, 52.0f);
+    const BotanicusPlanterSoil::FPlantLayout Layout(GetPlanterSoilExtent(), PlanterSlotCount, PlantEdgeMargin);
+    const FVector Variation = PlantSlots.IsValidIndex(SlotIndex)
+        ? PlantSlots[SlotIndex].PlantPlacementVariation : FVector::ZeroVector;
+    const FVector Amplitude = BotanicusPlanterSoil::PlantVariationAmplitude(
+        bEnableRandomPlantPlacement, PlantRandomOffsetX, PlantRandomOffsetY, PlantRandomOffsetZ);
+    return Layout.Position(SlotIndex, GetSoilVisualHeight(), Variation, Amplitude);
 }
 
 float ABotanicusIllegalPlanterActor::GetWaterAmount() const
@@ -417,9 +423,9 @@ void ABotanicusIllegalPlanterActor::Interact_Implementation(AActor* Interactor)
 				if (QuickBar->ConsumeSelectedItem())
 				{
 					Slot->PlantId = Plant->PlantId;
+                    Slot->PlantPlacementVariation = bEnableRandomPlantPlacement ? BotanicusPlanterSoil::MakePlantVariation() : FVector::ZeroVector;
 					UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Plant"), GetActorLocation());
-					const float JuiceX = (SlotIndex - .5f * (PlantSlots.Num() - 1)) * GetPlantSlotSpacing();
-					UBotanicusJuiceWorldSubsystem::PlantSucceeded(this, GetActorTransform().TransformPosition(FVector(JuiceX, 0, SoilBottomHeight + SoilVolumeHeight)));
+					UBotanicusJuiceWorldSubsystem::PlantSucceeded(this, GetSoilSurfaceForSlot(SlotIndex));
 					Slot->GrowthProgress = 0.0f;
 					UE_LOG(LogBotanicusIllegalTrade, Display,
 						TEXT("Plant created: %s."), *Plant->PlantId.ToString());
@@ -690,16 +696,14 @@ void ABotanicusIllegalPlanterActor::RefreshVisuals()
 	const float AverageWaterRatio = OccupiedWater /
 		FMath::Max(0.1f, Level.MaximumWater * FMath::Max(1, OccupiedSlots));
     RefreshSlotSoil();
-	const float Spacing = GetPlantSlotSpacing();
-	const float Start = -0.5f * Spacing * (PlantSlots.Num() - 1);
-	const float PlantBaseHeight = SoilBottomHeight + SoilVolumeHeight;
 	int32 MatureCount = 0;
 	for (int32 Index = 0; Index < PlantVisuals.Num(); ++Index)
 	{
 		UStaticMeshComponent* Visual = PlantVisuals[Index];
 		const bool bOccupied = PlantSlots.IsValidIndex(Index) && !PlantSlots[Index].PlantId.IsNone();
 		Visual->SetVisibility(bOccupied, true);
-		Visual->SetRelativeLocation(FVector(Start + Spacing * Index, 0.0f, PlantBaseHeight));
+		const FVector BaseLocation = GetSlotLocalLocation(Index);
+        Visual->SetRelativeLocation(BaseLocation);
 		if (!bOccupied) continue;
 		const FBotanicusIllegalPlantSlotState& Slot = PlantSlots[Index];
 		const int32 Stage = GetGrowthStage(Slot.GrowthProgress);
@@ -733,9 +737,9 @@ void ABotanicusIllegalPlanterActor::RefreshVisuals()
 			const FVector Centre = Bounds.GetCenter();
 			Visual->SetRelativeScale3D(FVector(Scale));
 			Visual->SetRelativeLocation(FVector(
-				Start + Spacing * Index - Centre.X * Scale,
-				-Centre.Y * Scale,
-				PlantBaseHeight - Bounds.Min.Z * Scale));
+				BaseLocation.X - Centre.X * Scale,
+				BaseLocation.Y - Centre.Y * Scale,
+				BaseLocation.Z - Bounds.Min.Z * Scale));
 		}
 	}
 	for (int32 Index=0;Index<PlantVisuals.Num();++Index)
@@ -758,8 +762,6 @@ void ABotanicusIllegalPlanterActor::RefreshGrowthWidgets()
 
 	const FBotanicusIllegalPlanterLevelDefinition& Level =
 		Settings->GetPlanterLevel(PlanterLevel);
-	const float Spacing = GetPlantSlotSpacing();
-	const float Start = -0.5f * Spacing * (PlantSlots.Num() - 1);
 	const float PlanterRimHeight = Mesh
 		? GetActorTransform().InverseTransformPosition(
 			Mesh->Bounds.Origin +
@@ -791,15 +793,16 @@ void ABotanicusIllegalPlanterActor::RefreshGrowthWidgets()
 		const FBotanicusIllegalPlantSlotState& Slot = PlantSlots[Index];
 		const FBotanicusIllegalPlantDefinition* Definition =
 			Settings->FindPlant(Slot.PlantId);
-		const float PlantTopHeight =
-			SoilBottomHeight + SoilVolumeHeight +
+		const FVector BaseLocation = GetSlotLocalLocation(Index);
+        const float PlantTopHeight =
+			BaseLocation.Z +
 			GetGrowthVisualHeight(Definition, Slot.GrowthProgress);
 		const float WidgetBelowPivot =
 			GrowthComponent->GetDrawSize().Y * PlantGrowthWidgetScale *
 			GrowthComponent->GetPivot().Y;
 		if(GrowthComponent->GetWidgetSpace()==EWidgetSpace::World && !GrowthComponent->ComponentHasTag(TEXT("BotanicusPlantContextUI"))) GrowthComponent->SetRelativeLocation(FVector(
-			Start + Spacing * Index,
-			0.0f,
+			BaseLocation.X,
+			BaseLocation.Y,
 			FMath::Max(PlantTopHeight, PlanterRimHeight) +
 			PlantGrowthWidgetClearance + WidgetBelowPivot));
 
@@ -843,11 +846,9 @@ int32 ABotanicusIllegalPlanterActor::ResolveAimedSlot(AActor* Interactor) const
 	{
 		TargetLocation = Hit.ImpactPoint;
 	}
-    else if(!BotanicusPlanterSoil::TrySurfaceAim(this,Cast<APawn>(Interactor),SoilHalfExtent,GetSoilVisualHeight(),TargetLocation))return INDEX_NONE;
-	const float LocalX = GetActorTransform().InverseTransformPosition(TargetLocation).X;
-	const float Spacing = GetPlantSlotSpacing();
-	const float Start = -0.5f * Spacing * (PlantSlots.Num() - 1);
-	return FMath::Clamp(FMath::RoundToInt((LocalX - Start) / Spacing), 0, PlantSlots.Num() - 1);
+    else if(!BotanicusPlanterSoil::TrySurfaceAim(this,Cast<APawn>(Interactor),GetPlanterSoilExtent(),GetSoilVisualHeight(),TargetLocation))return INDEX_NONE;
+    const BotanicusPlanterSoil::FPlantLayout Layout(GetPlanterSoilExtent(), PlanterSlotCount, PlantEdgeMargin);
+    return Layout.ResolveSlot(GetActorTransform().InverseTransformPosition(TargetLocation));
 }
 
 bool ABotanicusIllegalPlanterActor::IsInteractorStillTargeting(
@@ -870,7 +871,7 @@ bool ABotanicusIllegalPlanterActor::IsInteractorStillTargeting(
 	FCollisionQueryParams Params(
 		SCENE_QUERY_STAT(IllegalPlanterPrimaryUse), false, Interactor);
 	FVector SoilPoint;
-    if(BotanicusPlanterSoil::TrySurfaceAim(this,Cast<APawn>(Interactor),SoilHalfExtent,GetSoilVisualHeight(),SoilPoint))return true;
+    if(BotanicusPlanterSoil::TrySurfaceAim(this,Cast<APawn>(Interactor),GetPlanterSoilExtent(),GetSoilVisualHeight(),SoilPoint))return true;
 	return GetWorld() && GetWorld()->LineTraceSingleByChannel(
 		Hit,
 		ViewLocation,
@@ -932,8 +933,7 @@ bool ABotanicusIllegalPlanterActor::GetAutomaticWateringNeed(int32 Slot,float Ra
     Out.Minimum=.5f; // Designer rule: start below 50% of this slot's existing reserve.
     Out.Maximum=1.f;Out.Target=FMath::Lerp(Out.Minimum,Out.Maximum,FMath::Clamp(Ratio,0.f,1.f));
     Out.UnitsPerMoisture=Level.MaximumWater; // Illegal water already uses watering-can reservoir units directly.
-    const float X=(Slot-.5f*(PlantSlots.Num()-1))*GetPlantSlotSpacing();
-    Out.SoilPoint=GetActorTransform().TransformPosition(FVector(X,0,SoilBottomHeight+SoilVolumeHeight));
+    Out.SoilPoint=GetSoilSurfaceForSlot(Slot);
     return true;
 }
 float ABotanicusIllegalPlanterActor::ApplyAutomaticWater(int32 Slot,float Ratio,float AvailableUnits,bool bFirstPulse)
@@ -958,8 +958,9 @@ void ABotanicusIllegalPlanterActor::RestoreSoilLevels(const TArray<float>& Level
 }
 FVector ABotanicusIllegalPlanterActor::GetSoilSurfaceForSlot(int32 Slot) const
 {
-    const float X=(Slot-.5f*(PlantSlots.Num()-1))*GetPlantSlotSpacing();
-    return GetActorTransform().TransformPosition(FVector(X,0,GetSoilVisualHeight()));
+    FVector Local = GetSlotLocalLocation(Slot);
+    Local.Z = GetSoilVisualHeight();
+    return GetActorTransform().TransformPosition(Local);
 }
 
 bool ABotanicusIllegalPlanterActor::ResolveHarvestTarget(const AActor* Interactor,int32& Slot) const
@@ -975,13 +976,15 @@ void ABotanicusIllegalPlanterActor::RefreshSlotSoil()
     if(GetWorld() && !GetWorld()->IsGameWorld())Ratio=FMath::Clamp(SoilVisualPreviewFillRatio,0.f,1.f);
     const float Maximum=GetDefault<UBotanicusIllegalTradeSettings>()->GetPlanterLevel(PlanterLevel).MaximumWater;
     for(const auto& Slot:PlantSlots)if(!Slot.PlantId.IsNone()){Wetness+=Slot.WaterAmount/FMath::Max(.1f,Maximum);++Occupied;}
-    BotanicusPlanterSoil::Surface(SoilShapeVisual,SoilHalfExtent,SoilVisualMinHeight,SoilVisualMaxHeight,Ratio,Wetness/FMath::Max(1,Occupied));
+    const FVector2D Heights = GetPlanterSoilHeightRange();
+    BotanicusPlanterSoil::Surface(SoilShapeVisual,GetPlanterSoilExtent(),Heights.X,Heights.Y,Ratio,Wetness/FMath::Max(1,Occupied));
     for(auto& Old:SlotSoilVisuals)BotanicusPlanterSoil::Hide(Old);
 }
 
 void ABotanicusIllegalPlanterActor::OnConstruction(const FTransform& Transform)
 {
     Super::OnConstruction(Transform);
+    RefreshPlanterDimensions();
     RefreshVisuals();
 }
 float ABotanicusIllegalPlanterActor::GetSoilFillRatio() const
@@ -990,9 +993,79 @@ float ABotanicusIllegalPlanterActor::GetSoilFillRatio() const
 }
 float ABotanicusIllegalPlanterActor::GetSoilVisualHeight() const
 {
-    return FMath::Lerp(SoilVisualMinHeight,FMath::Max(SoilVisualMinHeight,SoilVisualMaxHeight),GetSoilFillRatio());
+    const FVector2D Heights = GetPlanterSoilHeightRange();
+    return FMath::Lerp(Heights.X, Heights.Y, GetSoilFillRatio());
 }
 FVector ABotanicusIllegalPlanterActor::GetSoilPourTarget(const APawn* Source) const
 {
-    return BotanicusPlanterSoil::AimedSurface(this,Source,SoilHalfExtent,GetSoilVisualHeight());
+    return BotanicusPlanterSoil::AimedSurface(this,Source,GetPlanterSoilExtent(),GetSoilVisualHeight());
+}
+
+
+FVector ABotanicusIllegalPlanterActor::GetPlanterDimensionScale() const
+{
+    return FVector(FMath::Max(0.25f, PlanterLengthScale),
+        FMath::Max(0.25f, PlanterWidthScale), FMath::Max(0.25f, PlanterHeightScale));
+}
+
+FVector2D ABotanicusIllegalPlanterActor::GetPlanterSoilExtent() const
+{
+    const FVector Scale = GetPlanterDimensionScale();
+    return SoilHalfExtent * FVector2D(Scale.X, Scale.Y);
+}
+
+FVector2D ABotanicusIllegalPlanterActor::GetPlanterSoilHeightRange() const
+{
+    const FBoxSphereBounds Bounds = Mesh->CalcBounds(Mesh->GetRelativeTransform());
+    const float Bottom = Bounds.Origin.Z - Bounds.BoxExtent.Z;
+    const float Height = 2.f * Bounds.BoxExtent.Z;
+    // The imported model has a raised cavity floor and an uneven rim.
+    return BotanicusPlanterSoil::FitHeightRange(SoilVisualMinHeight, SoilVisualMaxHeight,
+        Bottom + Height * 0.42f, Bottom + Height * 0.8f);
+}
+
+void ABotanicusIllegalPlanterActor::RefreshPlanterDimensions()
+{
+    if (IsTemplate())
+    {
+        return;
+    }
+
+    const FVector Scale = GetPlanterDimensionScale();
+    const auto* TemplateMesh = Cast<UStaticMeshComponent>(Mesh->GetArchetype());
+    const FTransform Reference = UsesBlueprintAppearance() && TemplateMesh
+        ? TemplateMesh->GetRelativeTransform() : FTransform::Identity;
+    FTransform Sized = Reference;
+    Sized.SetScale3D(Reference.GetScale3D() * Scale);
+    const FBoxSphereBounds Before = Mesh->CalcBounds(Reference);
+    const FBoxSphereBounds After = Mesh->CalcBounds(Sized);
+    const float Bottom = Before.Origin.Z - Before.BoxExtent.Z;
+    Sized.AddToTranslation(FVector(0, 0, Bottom - (After.Origin.Z - After.BoxExtent.Z)));
+    if (!Mesh->GetRelativeTransform().Equals(Sized))
+    {
+        Mesh->SetRelativeTransform(Sized);
+    }
+
+    const float WallHeight = 2.f * After.BoxExtent.Z;
+    for (UStaticMeshComponent* Wall : {LeftWallVisual.Get(), RightWallVisual.Get(),
+        FrontWallVisual.Get(), BackWallVisual.Get()})
+    {
+        const auto* TemplateWall = Cast<UStaticMeshComponent>(Wall->GetArchetype());
+        if (!TemplateWall)
+        {
+            continue;
+        }
+
+        FTransform WallTransform = TemplateWall->GetRelativeTransform();
+        FVector Location = WallTransform.GetLocation() * Scale;
+        Location.Z = Bottom + WallHeight * 0.5f;
+        FVector WallScale = WallTransform.GetScale3D() * Scale;
+        WallScale.Z = WallHeight / 100.f;
+        WallTransform.SetLocation(Location);
+        WallTransform.SetScale3D(WallScale);
+        if (!Wall->GetRelativeTransform().Equals(WallTransform))
+        {
+            Wall->SetRelativeTransform(WallTransform);
+        }
+    }
 }

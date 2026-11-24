@@ -1,9 +1,11 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Delivery/BotanicusDeliveryParcelActor.h"
+#include "Delivery/BotanicusCartonLabel.h"
 #include "Tools/BotanicusMultiToolComponent.h"
 
 #include "Delivery/BotanicusParcelOpeningSettings.h"
+#include "Delivery/BotanicusParcelPackagingSettings.h"
 #include "Delivery/BotanicusParcelOpeningVisualActor.h"
 #include "NiagaraSystem.h"
 #include "Audio/BotanicusAudioWorldSubsystem.h"
@@ -30,6 +32,7 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/SkeletalMesh.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInterface.h"
 #include "Net/UnrealNetwork.h"
@@ -53,7 +56,6 @@ ABotanicusDeliveryParcelActor::ABotanicusDeliveryParcelActor()
 	DeliveryBody->SetEnableGravity(true);
 	DeliveryBody->BodyInstance.bUseCCD = true;
 	DeliveryBody->BodyInstance.bGenerateWakeEvents = true;
-	DeliveryBody->SetMassOverrideInKg(NAME_None, 3.0f);
 	DeliveryBody->SetLinearDamping(0.1f);
 	DeliveryBody->SetAngularDamping(1.5f);
     DeliveryBody->SetNotifyRigidBodyCollision(true);
@@ -169,12 +171,43 @@ ABotanicusDeliveryParcelActor::ABotanicusDeliveryParcelActor()
 	InteractionIndicator->SetCollisionEnabled(
 		ECollisionEnabled::NoCollision);
 
+	LabelPivot = CreateDefaultSubobject<USceneComponent>(TEXT("LabelPivot"));
+	LabelPivot->SetupAttachment(SkeletalMeshVisual);
+	LabelPivot->SetRelativeLocation(FVector(-101.25, 0, 84));
+	LabelPivot->SetRelativeRotation(FRotationMatrix::MakeFromXZ(FVector::RightVector, -FVector::ForwardVector).Rotator());
+	LabelSurface = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("LabelSurface"));
+	LabelSurface->SetupAttachment(LabelPivot);
+	LabelSurface->SetRelativeScale3D(FVector(.786, 1.179, 1));
+	UBotanicusCartonLabelSubsystem::ConfigureSurface(LabelSurface);
+
 	RefreshParcelAppearance(false);
+}
+
+void ABotanicusDeliveryParcelActor::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+#if WITH_EDITORONLY_DATA
+	const UWorld* World = GetWorld();
+	if (World && !World->IsGameWorld() && !IsRunningCookCommandlet())
+	{
+		const auto& Model = GetDefault<UBotanicusParcelPackagingSettings>()->GetModel(LabelPreviewShape);
+		const FVector HalfExtent = Model.LocalHalfExtent();
+		const TGuardValue<FBotanicusParcelPackaging> RestorePackaging(Packaging,
+			{LabelPreviewShape, HalfExtent * (0.5 * Model.NominalShortSideCm / FMath::Min(HalfExtent.X, HalfExtent.Y)), Model.EmptyMassKg});
+		RefreshParcelAppearance(false);
+	}
+#endif
+}
+
+FTransform ABotanicusDeliveryParcelActor::GetLabelLocalTransform() const
+{
+	return LabelSurface->GetRelativeTransform() * LabelPivot->GetRelativeTransform();
 }
 
 void ABotanicusDeliveryParcelActor::BeginPlay()
 {
 	Super::BeginPlay();
+	RefreshParcelLabel();
 	if (GetNetMode() != NM_DedicatedServer && !ActorHasTag(TEXT("BotanicusPlacementPreview")))
 	{
 		// Load while the carton is still closed, before the player cuts its tape.
@@ -190,7 +223,11 @@ void ABotanicusDeliveryParcelActor::GetLifetimeReplicatedProps(
 	TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(ABotanicusDeliveryParcelActor, Carrier);
+	DOREPLIFETIME(ABotanicusDeliveryParcelActor, CarriedInspectionOrientation);
+	DOREPLIFETIME(ABotanicusDeliveryParcelActor, bHasCarriedInspectionOrientation);
 	DOREPLIFETIME(ABotanicusDeliveryParcelActor, ItemKey);
+	DOREPLIFETIME(ABotanicusDeliveryParcelActor, Packaging);
 	DOREPLIFETIME(ABotanicusDeliveryParcelActor, Quantity);
 	DOREPLIFETIME(ABotanicusDeliveryParcelActor, CutCoverageMask);
 	DOREPLIFETIME(ABotanicusDeliveryParcelActor, bOpened);
@@ -201,6 +238,8 @@ void ABotanicusDeliveryParcelActor::GetLifetimeReplicatedProps(
 
 void ABotanicusDeliveryParcelActor::OnRep_ReplicatedMovement()
 {
+	if (GetCarrier())
+		return;
 	Super::OnRep_ReplicatedMovement();
 	const FRepMovement& Movement = GetReplicatedMovement();
 	if (GetNetMode() == NM_Client && Movement.bRepPhysics && Movement.bSimulatedPhysicSleep)
@@ -220,6 +259,14 @@ void ABotanicusDeliveryParcelActor::OnRep_ReplicatedMovement()
 void ABotanicusDeliveryParcelActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+
+	if (bHasCarriedInspectionOrientation && IsValid(Carrier) && !LocalParcelPresentation.IsSet() && VisualHomeTransform.IsSet())
+	{
+		const FQuat Target = CarriedInspectionOrientation.Quaternion() * VisualHomeTransform.GetValue().GetRotation();
+		const FQuat Current = SceneRoot->GetComponentQuat();
+		if (!Current.Equals(Target, 1.e-4))
+			SceneRoot->SetWorldRotation(FQuat::Slerp(Current, Target, 1.f - FMath::Exp(-20.f * DeltaSeconds)));
+	}
 
 	if (HasAuthority() && ActiveCutter.IsValid() && !bOpened)
 	{
@@ -249,9 +296,9 @@ ABotanicusDeliveryParcelActor::GetInteractionPrompt_Implementation(
 		? NSLOCTEXT("BotanicusDelivery", "TakeParcelContents", "Deballer")
 		: NSLOCTEXT(
 			"BotanicusDelivery",
-			"CutParcelTape",
-			"Couper le scotch rouge avec le cutter");
-	Prompt.bCanInteract = bOpened;
+			"InspectClosedParcel",
+			"Prendre et inspecter");
+	Prompt.bCanInteract = !GetCarrier();
 	return Prompt;
 }
 
@@ -266,7 +313,8 @@ void ABotanicusDeliveryParcelActor::RestoreParcelState(
 	FName InItemKey,
 	int32 InQuantity,
 	uint16 InCutCoverageMask,
-	bool bInOpened)
+	bool bInOpened,
+	const FBotanicusParcelPackaging& InPackaging)
 {
 	if (!HasAuthority())
 	{
@@ -274,6 +322,7 @@ void ABotanicusDeliveryParcelActor::RestoreParcelState(
 	}
 	ItemKey = InItemKey;
 	Quantity = FMath::Max(1, InQuantity);
+	Packaging = InPackaging.IsValid() ? InPackaging : ResolvePackaging(*GetWorld(), ItemKey, Quantity);
 	CutCoverageMask = InCutCoverageMask;
 	bOpened = bInOpened;
 	if (!OpeningVisualId.IsValid()) OpeningVisualId = FGuid::NewGuid();
@@ -282,8 +331,8 @@ void ABotanicusDeliveryParcelActor::RestoreParcelState(
 	bOpeningVisualReplaced = false;
 	RefreshParcelAppearance(false);
 	ForceNetUpdate();
-	// No save-format change: a carton saved in flight resumes gravity at its
-	// saved transform. Previews never simulate. New deliveries start immediately.
+	// A carton saved in flight resumes gravity at its saved transform.
+	// Previews never simulate. New deliveries start immediately.
 	if (HasActorBegunPlay() && GetIsReplicated() &&
 		!ActorHasTag(TEXT("BotanicusPlacementPreview")))
 	{
@@ -295,7 +344,7 @@ void ABotanicusDeliveryParcelActor::RestoreParcelState(
 void ABotanicusDeliveryParcelActor::StartDeliveryPhysics(bool bAddInitialSpin)
 {
 	if (!HasAuthority() || !GetIsReplicated() ||
-		ActorHasTag(TEXT("BotanicusPlacementPreview")) || DeliveryBody->IsSimulatingPhysics())
+		ActorHasTag(TEXT("BotanicusPlacementPreview")) || GetCarrier() || DeliveryBody->IsSimulatingPhysics())
 	{
 		return;
 	}
@@ -321,6 +370,144 @@ void ABotanicusDeliveryParcelActor::StopDeliveryPhysics()
 	}
 }
 
+bool ABotanicusDeliveryParcelActor::TryBeginCarry(APawn* Pawn)
+{
+	if (!HasAuthority() || !IsValid(Pawn) || !Pawn->GetRootComponent() || Carrier || bOpened || ItemKey.IsNone() ||
+		(ActiveCutter.IsValid() && ActiveCutter.Get() != Pawn))
+		return false;
+
+	EndCutting(Pawn);
+	PickupTransform = GetActorTransform();
+	StopDeliveryPhysics();
+	bHasCarriedInspectionOrientation = false;
+	Carrier = Pawn;
+	OnRep_Carrier();
+	SetNetDormancy(DORM_Awake);
+	FlushNetDormancy();
+	ForceNetUpdate();
+	return true;
+}
+
+void ABotanicusDeliveryParcelActor::EndCarry(const FTransform& DropTransform)
+{
+	if (!HasAuthority() || !Carrier)
+		return;
+
+	const FTransform Destination = DropTransform;
+	Carrier = nullptr;
+	SetActorTransform(Destination, false, nullptr, ETeleportType::TeleportPhysics);
+	OnRep_Carrier();
+	StartDeliveryPhysics(false);
+	ForceNetUpdate();
+}
+
+void ABotanicusDeliveryParcelActor::SetCarriedInspectionOrientation(const FRotator& WorldRotation)
+{
+	if (HasAuthority() && Carrier)
+	{
+		CarriedInspectionOrientation = WorldRotation.GetNormalized();
+		bHasCarriedInspectionOrientation = true;
+		ForceNetUpdate();
+	}
+}
+
+void ABotanicusDeliveryParcelActor::OnRep_Carrier()
+{
+	if (Carrier)
+	{
+		bDeliveryImpactArmed = false;
+		DeliveryBody->SetSimulatePhysics(false);
+	}
+	SetActorEnableCollision(Carrier == nullptr);
+	RefreshParcelVisualAttachment();
+}
+
+const FTransform& ABotanicusDeliveryParcelActor::GetParcelSaveTransform() const
+{
+	return Carrier ? PickupTransform : GetActorTransform();
+}
+
+FTransform ABotanicusDeliveryParcelActor::GetParcelPresentation() const
+{
+	return FTransform(SceneRoot->GetComponentQuat(), SceneRoot->GetComponentLocation());
+}
+
+FVector ABotanicusDeliveryParcelActor::GetLabelNormalInParcelSpace() const
+{
+	return SceneRoot->GetComponentQuat().UnrotateVector(LabelSurface->GetUpVector());
+}
+
+void ABotanicusDeliveryParcelActor::SetLocalParcelPresentation(const FTransform& Pose)
+{
+	const bool bStartingPresentation = !LocalParcelPresentation.IsSet();
+	LocalParcelPresentation = Pose;
+	if (bStartingPresentation)
+		RefreshParcelVisualAttachment();
+	else
+		ApplyLocalParcelPresentation();
+}
+
+void ABotanicusDeliveryParcelActor::ResetLocalParcelPresentation()
+{
+	if (LocalParcelPresentation.IsSet())
+	{
+		LocalParcelPresentation.Reset();
+		RefreshParcelVisualAttachment();
+	}
+}
+
+void ABotanicusDeliveryParcelActor::RefreshParcelVisualAttachment()
+{
+	const USceneComponent* CarrierRoot = IsValid(Carrier) ? Carrier->GetRootComponent() : nullptr;
+	const bool bLocalPresentation = LocalParcelPresentation.IsSet();
+	if (!VisualHomeTransform.IsSet())
+	{
+		if (!CarrierRoot && !bLocalPresentation)
+			return;
+		VisualHomeTransform = SceneRoot->GetRelativeTransform();
+	}
+
+	// Keep the collision body owned by the parcel at the last authoritative
+	// position. Only the visible assembly follows the replicated carrier.
+	USceneComponent* Parent = CarrierRoot && !bLocalPresentation ? Carrier->GetRootComponent() : DeliveryBody.Get();
+	if (SceneRoot->GetAttachParent() != Parent)
+		SceneRoot->AttachToComponent(Parent, FAttachmentTransformRules::KeepWorldTransform);
+
+	SceneRoot->SetAbsolute(bLocalPresentation, bLocalPresentation, false);
+	if (bLocalPresentation)
+	{
+		ApplyLocalParcelPresentation();
+	}
+	else if (CarrierRoot)
+	{
+		const double Distance = 45.0 + ParcelHalfExtent.Size2D();
+		const FVector Scale = GetActorScale3D() * FTransform::GetSafeScaleReciprocal(CarrierRoot->GetComponentScale());
+		SceneRoot->SetRelativeTransform(VisualHomeTransform.GetValue() *
+			FTransform(FQuat::Identity, FVector(Distance, 0, 22), Scale));
+	}
+	else
+	{
+		SceneRoot->SetRelativeTransform(VisualHomeTransform.GetValue());
+		VisualHomeTransform.Reset();
+	}
+}
+
+void ABotanicusDeliveryParcelActor::ApplyLocalParcelPresentation()
+{
+	const FTransform VisualPose = VisualHomeTransform.GetValue() * LocalParcelPresentation.GetValue();
+	SceneRoot->SetWorldLocationAndRotation(VisualPose.GetLocation(), VisualPose.GetRotation());
+}
+
+bool ABotanicusDeliveryParcelActor::IsParcelHologramMesh(const UMeshComponent* Component) const
+{
+	return Component == SkeletalMeshVisual || TapeSegments.Contains(Cast<UStaticMeshComponent>(Component));
+}
+
+bool ABotanicusDeliveryParcelActor::IsParcelHologramSlot(const UMeshComponent* Component, int32 Slot) const
+{
+	return Component != SkeletalMeshVisual || Slot != SkeletalMeshVisual->GetMaterialIndex(TEXT("etiquette"));
+}
+
 void ABotanicusDeliveryParcelActor::OnDeliveryBodySleep(UPrimitiveComponent* Component, FName BoneName)
 {
 	if (HasAuthority())
@@ -342,7 +529,7 @@ void ABotanicusDeliveryParcelActor::OnDeliveryBodyWake(UPrimitiveComponent* Comp
 
 void ABotanicusDeliveryParcelActor::BeginCutting(AActor* Interactor)
 {
-	if (!HasAuthority() || bOpened || ActiveCutter.IsValid())
+	if (!HasAuthority() || Carrier || bOpened || ActiveCutter.IsValid())
 	{
 		return;
 	}
@@ -541,54 +728,82 @@ int32 ABotanicusDeliveryParcelActor::CountCutSegments() const
 	return Count;
 }
 
-void ABotanicusDeliveryParcelActor::RefreshParcelAppearance(
-	bool bPlayOpeningAnimation)
+UClass* ABotanicusDeliveryParcelActor::ResolveParcelClass(const UWorld& World, FName ItemId, int32 Count,
+	const FBotanicusParcelPackaging& SavedPackaging)
 {
-	const UGameInstance* GameInstance = GetGameInstance();
+	const EBotanicusParcelShape Shape = SavedPackaging.IsValid() ? SavedPackaging.Shape : ResolvePackaging(World, ItemId, Count).Shape;
+	static const TSoftClassPtr<ABotanicusDeliveryParcelActor> Square(FSoftObjectPath(TEXT(
+		"/Game/Botanicus/Items/itemsMesh/carton/carton2/Labels/BP_CartonSquare.BP_CartonSquare_C")));
+	static const TSoftClassPtr<ABotanicusDeliveryParcelActor> Rectangular(FSoftObjectPath(TEXT(
+		"/Game/Botanicus/Items/itemsMesh/carton/carton2/Labels/BP_CartonRectangular.BP_CartonRectangular_C")));
+	if (UClass* Variant = (Shape == EBotanicusParcelShape::Rectangular ? Rectangular : Square).LoadSynchronous())
+		return Variant;
+	return StaticClass();
+}
+
+FBotanicusParcelPackaging ABotanicusDeliveryParcelActor::ResolvePackaging(const UWorld& World, FName ItemId, int32 Count)
+{
+	const UGameInstance* GameInstance = World.GetGameInstance();
 	const UBotanicusItemCatalogSubsystem* Catalog =
 		GameInstance
 			? GameInstance->GetSubsystem<
 				UBotanicusItemCatalogSubsystem>()
 			: nullptr;
 	const FBotanicusItemDefinition* Definition =
-		Catalog ? Catalog->FindItem(ItemKey) : nullptr;
+		Catalog ? Catalog->FindItem(ItemId) : nullptr;
 
-	FVector CartonScale(0.48f, 0.38f, 0.30f);
-	if (Definition)
-	{
-		const float LargestContentScale =
-			Definition->WorldScale.GetAbsMax();
-		if (Definition->WeightClass ==
-				EBotanicusItemWeightClass::OnePlayerCarry ||
-			Definition->WeightClass ==
-				EBotanicusItemWeightClass::TwoPlayerCarry)
-		{
-			CartonScale = FVector(1.25f, 0.90f, 0.75f);
-		}
-		else if (
-			Definition->WeightClass ==
-				EBotanicusItemWeightClass::Handheld ||
-			LargestContentScale >= 0.55f)
-		{
-			CartonScale = FVector(0.78f, 0.58f, 0.46f);
-		}
-		const float QuantityFactor =
-			FMath::Clamp(
-				1.0f + FMath::Log2(
-					static_cast<float>(FMath::Max(1, Quantity))) *
-					0.035f,
-				1.0f,
-				1.28f);
-		CartonScale *= QuantityFactor;
-	}
-	Mesh->SetRelativeScale3D(CartonScale);
-	ParcelHalfExtent = CartonScale * 50.0f;
+	return GetDefault<UBotanicusParcelPackagingSettings>()->Resolve(ItemId, Count, Definition);
+}
+
+bool ABotanicusDeliveryParcelActor::ApplyParcelPackaging()
+{
+	if (!Packaging.IsValid())
+		return false;
+
+	const bool bGeometryChanged = !ParcelHalfExtent.Equals(Packaging.HalfExtent);
+	ParcelHalfExtent = Packaging.HalfExtent;
 	if (!DeliveryBody->GetUnscaledBoxExtent().Equals(ParcelHalfExtent))
-	{
 		DeliveryBody->SetBoxExtent(ParcelHalfExtent);
+	if (!FMath::IsNearlyEqual(AppliedMassKg, Packaging.MassKg))
+	{
+		AppliedMassKg = Packaging.MassKg;
+		DeliveryBody->SetMassOverrideInKg(NAME_None, AppliedMassKg);
 	}
-	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	RefreshAnimatedCarton(bPlayOpeningAnimation);
+	if (AppliedShape == Packaging.Shape && !bGeometryChanged)
+		return false;
+
+	const auto& Model = GetDefault<UBotanicusParcelPackagingSettings>()->GetModel(Packaging.Shape);
+	USkeletalMesh* NewMesh = Model.Mesh.LoadSynchronous();
+	UAnimSequence* NewAnimation = Model.OpeningAnimation.LoadSynchronous();
+	AppliedShape = Packaging.Shape;
+	if (!NewMesh || !NewAnimation || NewAnimation->GetSkeleton() != NewMesh->GetSkeleton())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Invalid delivery carton mesh/animation pair for %s; using the existing carton."),
+			*ItemKey.ToString());
+		const USkeletalMesh* FallbackMesh = SkeletalMeshVisual->GetSkeletalMeshAsset();
+		if (!FallbackMesh) return false;
+		const FBoxSphereBounds Bounds = FallbackMesh->GetBounds();
+		const FVector Scale = ParcelHalfExtent / Bounds.BoxExtent.ComponentMax(FVector(0.01));
+		SkeletalMeshVisual->SetRelativeTransform(FTransform(FQuat::Identity, -Bounds.Origin * Scale, Scale));
+		return true;
+	}
+
+	SkeletalMeshVisual->SetSkeletalMesh(NewMesh);
+	// Retain the authored cardboard and logo. Only the old sticker overlay is replaced.
+	SkeletalMeshVisual->EmptyOverrideMaterials();
+	UBotanicusCartonLabelSubsystem::SuppressImportedLabel(SkeletalMeshVisual);
+	const FQuat Rotation = FRotator(0, Model.MeshYaw, 0).Quaternion();
+	const double Scale = ParcelHalfExtent.X / Model.LocalHalfExtent().X;
+	SkeletalMeshVisual->SetRelativeTransform(FTransform(Rotation, -Rotation.RotateVector(Model.ClosedCenter) * Scale, FVector(Scale)));
+	OpeningAnimation = NewAnimation;
+	return true;
+}
+
+void ABotanicusDeliveryParcelActor::RefreshParcelAppearance(bool bPlayOpeningAnimation)
+{
+	const bool bModelChanged = ApplyParcelPackaging();
+	RefreshAnimatedCarton(bPlayOpeningAnimation, bModelChanged);
+	RefreshParcelLabel();
 
 	const float TapeLength = ParcelHalfExtent.X * 2.0f * 0.92f;
 	const float SegmentLength = TapeLength / TapeSegmentCount;
@@ -624,8 +839,8 @@ void ABotanicusDeliveryParcelActor::RefreshParcelAppearance(
 	}
 
 	const FVector FlapScale(
-		CartonScale.X * 0.98f,
-		CartonScale.Y * 0.47f,
+		ParcelHalfExtent.X * 0.0196f,
+		ParcelHalfExtent.Y * 0.0094f,
 		0.018f);
 	if (LeftFlap)
 	{
@@ -656,26 +871,35 @@ void ABotanicusDeliveryParcelActor::RefreshParcelAppearance(
 	}
 }
 
+void ABotanicusDeliveryParcelActor::RefreshParcelLabel()
+{
+	if (!GetWorld() || GetNetMode() == NM_DedicatedServer || ActorHasTag(TEXT("BotanicusPlacementPreview")))
+		return;
+#if WITH_EDITORONLY_DATA
+	if (!GetWorld()->IsGameWorld())
+	{
+		UBotanicusCartonLabelSubsystem::Apply(LabelSurface, LabelPreviewItemId, 0);
+		return;
+	}
+#endif
+	if (ItemKey != LastLabelItemId || Quantity != LastLabelQuantity)
+	{
+		LastLabelItemId = ItemKey;
+		LastLabelQuantity = Quantity;
+		UBotanicusCartonLabelSubsystem::Apply(LabelSurface, ItemKey, Quantity);
+	}
+}
+
 void ABotanicusDeliveryParcelActor::RefreshAnimatedCarton(
-	bool bPlayOpeningAnimation)
+	bool bPlayOpeningAnimation, bool bModelChanged)
 {
 	if (!SkeletalMeshVisual || !SkeletalMeshVisual->GetSkeletalMeshAsset())
 	{
 		return;
 	}
 
-	const FBoxSphereBounds SourceBounds =
-		SkeletalMeshVisual->GetSkeletalMeshAsset()->GetBounds();
-	const FVector SafeExtent(
-		FMath::Max(SourceBounds.BoxExtent.X, 0.01f),
-		FMath::Max(SourceBounds.BoxExtent.Y, 0.01f),
-		FMath::Max(SourceBounds.BoxExtent.Z, 0.01f));
-	const FVector VisualScale = ParcelHalfExtent / SafeExtent;
-	SkeletalMeshVisual->SetRelativeScale3D(VisualScale);
-	SkeletalMeshVisual->SetRelativeLocation(
-		-SourceBounds.Origin * VisualScale);
 	const bool bShowCarton = !bOpeningVisualReplaced;
-	SkeletalMeshVisual->SetVisibility(bShowCarton, true);
+	SkeletalMeshVisual->SetVisibility(bShowCarton);
 	SkeletalMeshVisual->SetHiddenInGame(!bShowCarton, true);
 
 	if (!OpeningAnimation)
@@ -684,7 +908,7 @@ void ABotanicusDeliveryParcelActor::RefreshAnimatedCarton(
 		return;
 	}
 
-	const bool bJustOpened = bOpened && !bLastRenderedOpenedState;
+	const bool bJustOpened = bOpened && (!bLastRenderedOpenedState || bModelChanged);
 	if (bOpened)
 	{
 		if (bJustOpened)
@@ -697,7 +921,7 @@ void ABotanicusDeliveryParcelActor::RefreshAnimatedCarton(
 				const double Phase = FMath::Clamp((GetWorld()->GetGameState()->GetServerWorldTimeSeconds() - OpeningStartedAt) / OpeningDuration, 0.0, 1.0);
 				SkeletalMeshVisual->SetPosition(OpeningAnimation->GetPlayLength() * Phase, false);
 			}
-			if (!bPlayOpeningAnimation)
+			if (!bPlayOpeningAnimation || OpeningStartedAt < 0)
 			{
 				SkeletalMeshVisual->SetPosition(
 					OpeningAnimation->GetPlayLength(),
@@ -706,7 +930,7 @@ void ABotanicusDeliveryParcelActor::RefreshAnimatedCarton(
 			}
 		}
 	}
-	else
+	else if (bModelChanged || bLastRenderedOpenedState || !Packaging.IsValid())
 	{
 		SkeletalMeshVisual->PlayAnimation(OpeningAnimation, false);
 		SkeletalMeshVisual->SetPosition(0.0f, false);
@@ -853,7 +1077,7 @@ void ABotanicusDeliveryParcelActor::HandOffOpeningVisual()
 {
 	if (bOpeningVisualReplaced) return;
 	bOpeningVisualReplaced = true;
-	SkeletalMeshVisual->SetHiddenInGame(true);
+	SkeletalMeshVisual->SetHiddenInGame(true, true);
 	SkeletalMeshVisual->SetVisibility(false);
 	SkeletalMeshVisual->SetComponentTickEnabled(false);
 	for (UStaticMeshComponent* Segment : TapeSegments) Segment->SetVisibility(false);

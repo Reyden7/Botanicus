@@ -10,6 +10,8 @@
 class UInputComponent;
 class USkeletalMeshComponent;
 class UCameraComponent;
+class USpotLightComponent;
+class ABotanicusAmbienceDirector;
 class UInputAction;
 class UBotanicusInteractionComponent;
 class UBotanicusQuickBarComponent;
@@ -44,6 +46,47 @@ class ABotanicusCharacter : public ACharacter
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta = (AllowPrivateAccess = "true"))
 	UCameraComponent* FirstPersonCameraComponent;
 
+	UPROPERTY()
+	TObjectPtr<USceneComponent> HeadFlashlightAim;
+
+	/** Edit the light's intensity, range, cone, color and relative transform on this component. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Botanicus|Flashlight", meta=(AllowPrivateAccess="true"))
+	TObjectPtr<USpotLightComponent> HeadFlashlight;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Flashlight")
+	bool bAutoFlashlightEnabled = true;
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Flashlight", meta=(ClampMin="0", ClampMax="1"))
+	float BrightnessThreshold = 0.50f;
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Flashlight", meta=(ClampMin="0", ClampMax="0.5"))
+	float BrightnessHysteresis = 0.05f;
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Flashlight", meta=(ClampMin="0", Units="s"))
+	float FlashlightFadeDuration = 0.25f;
+
+	UPROPERTY(Replicated)
+	bool bHeadFlashlightOn = false;
+
+	// Movement replication supplies yaw unless the player turns in place
+	// and the authoritative pawn's body rotation does not follow the view.
+	static constexpr uint16 NoFlashlightYawOverride = 256;
+	UPROPERTY(Replicated)
+	uint16 FlashlightYawOverride = NoFlashlightYawOverride;
+	bool bPredictedHeadFlashlightOn = false;
+
+	// Unset keeps the existing automatic light policy. This state lives only on the current pawn.
+	TOptional<bool> ManualFlashlightOverride;
+
+	UFUNCTION(Server, Reliable)
+	void ServerSetManualFlashlightOverride(bool bOn);
+	float FlashlightFullIntensity = 0.f;
+	float FlashlightFadeAlpha = 0.f;
+	FTimerHandle FlashlightSampleTimer;
+	TWeakObjectPtr<ABotanicusAmbienceDirector> FlashlightAmbience;
+
+	void InitializeHeadFlashlight();
+	void ConfigureFlashlightSampling();
+	void SampleHeadFlashlight();
+	void UpdateHeadFlashlight(float DeltaSeconds);
+
 	/** Detects and authoritatively executes gameplay interactions. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta = (AllowPrivateAccess = "true"))
 	UBotanicusInteractionComponent* BotanicusInteractionComponent;
@@ -75,11 +118,13 @@ protected:
 	
 public:
 	ABotanicusCharacter();
+	void ToggleHeadFlashlight();
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void NotifyControllerChanged() override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void PawnClientRestart() override;
 	virtual bool CanJumpInternal_Implementation() const override;

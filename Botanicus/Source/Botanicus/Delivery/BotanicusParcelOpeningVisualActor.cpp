@@ -1,4 +1,6 @@
 #include "Delivery/BotanicusParcelOpeningVisualActor.h"
+#include "Delivery/BotanicusCartonLabel.h"
+#include "Components/StaticMeshComponent.h"
 #include "Delivery/BotanicusDeliveryParcelActor.h"
 #include "Delivery/BotanicusParcelOpeningSettings.h"
 #include "Animation/AnimSequence.h"
@@ -37,6 +39,9 @@ ABotanicusParcelOpeningVisualActor::ABotanicusParcelOpeningVisualActor()
 	CartonVisual->SetupAttachment(VisualRoot);
 	CartonVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	CartonVisual->SetHiddenInGame(true);
+	LabelSurface = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("LabelSurface"));
+	LabelSurface->SetupAttachment(CartonVisual);
+	UBotanicusCartonLabelSubsystem::ConfigureSurface(LabelSurface);
 	SetActorEnableCollision(false);
 }
 
@@ -54,6 +59,9 @@ ABotanicusParcelOpeningVisualActor* ABotanicusParcelOpeningVisualActor::Start(AB
 	Data.Mesh = Parcel->SkeletalMeshVisual->GetSkeletalMeshAsset();
 	Data.Animation = Parcel->GetOpeningAnimation();
 	Data.MeshLocalTransform = Parcel->SkeletalMeshVisual->GetRelativeTransform();
+	Data.LabelLocalTransform = Parcel->GetLabelLocalTransform();
+	Data.ItemId = Parcel->GetItemKey();
+	Data.Quantity = Parcel->GetQuantity();
 	Data.HalfExtent = Parcel->GetParcelHalfExtent() * Anchor.GetScale3D().GetAbs();
 	for (auto* Material : Parcel->SkeletalMeshVisual->GetMaterials()) Data.Materials.Add(Material);
 	// E may arrive long after the flaps finished, or on a restored open carton.
@@ -131,7 +139,9 @@ void ABotanicusParcelOpeningVisualActor::InitializeLocalPresentation()
 	CartonVisual->SetSkeletalMesh(Presentation.Mesh);
 	CartonVisual->SetRelativeTransform(Presentation.MeshLocalTransform);
 	for (int32 I=0; I<Presentation.Materials.Num(); ++I) CartonVisual->SetMaterial(I, Presentation.Materials[I]);
-	CartonVisual->SetHiddenInGame(false);
+	LabelSurface->SetRelativeTransform(Presentation.LabelLocalTransform);
+	UBotanicusCartonLabelSubsystem::Apply(LabelSurface, Presentation.ItemId, Presentation.Quantity);
+	CartonVisual->SetHiddenInGame(false, true);
 	if (Presentation.Animation)
 	{
 		CartonVisual->PlayAnimation(Presentation.Animation, false);
@@ -206,7 +216,7 @@ void ABotanicusParcelOpeningVisualActor::BurstAndHide(double Now)
 		CartonVisual->SetPosition(Presentation.Animation->GetPlayLength(), false);
 		CartonVisual->RefreshBoneTransforms();
 	}
-	CartonVisual->SetHiddenInGame(true);
+	CartonVisual->SetHiddenInGame(true, true);
 	CartonVisual->SetVisibility(false);
 	CartonVisual->SetComponentTickEnabled(false);
 	if (HasAuthority()) { SetNetUpdateFrequency(2); ForceNetUpdate(); }

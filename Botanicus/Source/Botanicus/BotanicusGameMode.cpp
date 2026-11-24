@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "BotanicusGameMode.h"
+#include "Growing/BotanicusPlanterSoil.h"
 #include "Tools/BotanicusMultiToolComponent.h"
 #include "Gardening/BotanicusGardeningRobotBase.h"
 
@@ -527,7 +528,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 
 	CurrentSaveGame->MapName =
 		UGameplayStatics::GetCurrentLevelName(this, true);
-	CurrentSaveGame->SaveVersion = 37;
+	CurrentSaveGame->SaveVersion = 38;
 	if (const ABotanicusGameState* BotanicusGameState =
 		World->GetGameState<ABotanicusGameState>())
 	{
@@ -633,12 +634,13 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		FBotanicusSavedWorldItem& SavedItem =
 			CurrentSaveGame->WorldItems.AddDefaulted_GetRef();
 		SavedItem.ActorClass = FSoftClassPath(ParcelIt->GetClass());
-		SavedItem.Transform = ParcelIt->GetActorTransform();
+		SavedItem.Transform = ParcelIt->GetParcelSaveTransform();
 		SavedItem.ItemKey = ParcelIt->GetItemKey();
 		SavedItem.Quantity = ParcelIt->GetQuantity();
 		SavedItem.ParcelCutCoverageMask =
 			ParcelIt->GetCutCoverageMask();
 		SavedItem.bParcelOpened = ParcelIt->IsOpened();
+		SavedItem.ParcelPackaging = ParcelIt->GetPackaging();
 	}
 
 	for (TActorIterator<ABotanicusLargeEquipmentActor> EquipmentIt(World);
@@ -686,6 +688,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		if (!IsValid(*ItemIt) ||
 			ItemIt->IsActorBeingDestroyed() ||
 			ItemIt->IsA<ABotanicusCashRegisterActor>() ||
+			ItemIt->GetItemKey() == ABotanicusComputerActor::LegacyItemKey() ||
             (ABotanicusStorageShelfActor::IsCatalogItemCompatible(this,ItemIt->GetItemKey()) &&
                 !ABotanicusStorageShelfActor::IsStoredWorldItem(*ItemIt)) ||
             // Equipped sale-pot models and display previews are views of existing inventory, never world items.
@@ -715,6 +718,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 			for (const FBotanicusIllegalPlantSlotState& Slot : IllegalPlanter->GetPlantSlots())
 			{
 				SavedItem.IllegalPlanterPlantIds.Add(Slot.PlantId);
+                SavedItem.PlanterPlantPlacementVariations.Add(Slot.PlantPlacementVariation);
 				SavedItem.IllegalPlanterGrowthProgress.Add(Slot.GrowthProgress);
 				SavedItem.IllegalPlanterSlotWaterAmounts.Add(Slot.WaterAmount);
 			}
@@ -729,6 +733,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 				MultiPlanter->GetPlantSlots())
 			{
 				SavedItem.MultiPlanterPlantKeys.Add(Slot.PlantKey);
+                SavedItem.PlanterPlantPlacementVariations.Add(Slot.PlantPlacementVariation);
 				SavedItem.MultiPlanterWaterLevels.Add(
 					Slot.WaterLevel);
 				SavedItem.MultiPlanterGrowthProgress.Add(
@@ -1138,8 +1143,7 @@ void ABotanicusGameMode::RestoreWorldState()
 	for (const FBotanicusSavedWorldItem& SavedItem :
 		 CurrentSaveGame->WorldItems)
 	{
-		if (SavedItem.ActorClass.IsNull() ||
-			SavedItem.ItemKey == TEXT("CashRegister"))
+		if (SavedItem.ActorClass.IsNull())
 		{
 			continue;
 		}
@@ -1154,15 +1158,25 @@ void ABotanicusGameMode::RestoreWorldState()
 					: SavedItem.ItemKey;
 
 		UClass* ItemClass = SavedItem.ActorClass.TryLoadClass<AActor>();
-		if (ItemClass && ItemClass->IsChildOf(
-			ABotanicusCashRegisterActor::StaticClass()))
+		// The key of a parcel describes its contents; migration of placed
+		// furniture and planters must not replace the parcel class.
+		const bool bIsParcel = ItemClass && ItemClass->IsChildOf(ABotanicusDeliveryParcelActor::StaticClass());
+		if (!bIsParcel && SavedItem.ItemKey == TEXT("CashRegister"))
+		{
+			continue;
+		}
+		if (ItemClass &&
+			(ItemClass->IsChildOf(ABotanicusCashRegisterActor::StaticClass()) ||
+			 ItemClass->IsChildOf(ABotanicusComputerActor::StaticClass()) ||
+			 (SavedItem.ItemKey == ABotanicusComputerActor::LegacyItemKey() &&
+			  ItemClass->IsChildOf(ABotanicusPlaceableItemActor::StaticClass()))))
 		{
 			continue;
 		}
 		// The item catalogue is authoritative for every culture-pot variant.
 		// This also migrates elemental pots saved before their individual
 		// Blueprints existed, so their editable soil settings are applied.
-		if (RestoredItemKey.ToString().StartsWith(TEXT("PlantPot")))
+		if (!bIsParcel && RestoredItemKey.ToString().StartsWith(TEXT("PlantPot")))
 		{
 			const UBotanicusItemCatalogSubsystem* Catalog =
 				World->GetGameInstance()
@@ -1183,7 +1197,7 @@ void ABotanicusGameMode::RestoreWorldState()
 		}
 		// Migrate clandestine planters created before the editable Blueprint
 		// existed so old saves receive the same authored appearance.
-		else if (RestoredItemKey == TEXT("IllegalPlanter_L1"))
+		else if (!bIsParcel && RestoredItemKey == TEXT("IllegalPlanter_L1"))
 		{
 			const UBotanicusItemCatalogSubsystem* Catalog =
 				World->GetGameInstance()
@@ -1204,7 +1218,7 @@ void ABotanicusGameMode::RestoreWorldState()
 		}
 		// SalePot used to be restored as its native fallback class, which
 		// discarded the mesh authored in BP_Item_SalePot.
-		else if (SavedItem.ItemKey == TEXT("SalePot"))
+		else if (!bIsParcel && SavedItem.ItemKey == TEXT("SalePot"))
 		{
 			if (UClass* SalePotBlueprintClass =
 					LoadClass<ABotanicusSalePotActor>(
@@ -1218,7 +1232,7 @@ void ABotanicusGameMode::RestoreWorldState()
 		// The catalogue is authoritative for every shelf variant. This preserves
 		// renamed base Blueprints and child classes with extra slots when loading
 		// an existing save.
-		else if (RestoredItemKey.ToString().StartsWith(TEXT("StorageShelf")))
+		else if (!bIsParcel && RestoredItemKey.ToString().StartsWith(TEXT("StorageShelf")))
 		{
 			const UBotanicusItemCatalogSubsystem* Catalog =
 				World->GetGameInstance()
@@ -1259,6 +1273,10 @@ void ABotanicusGameMode::RestoreWorldState()
 		FActorSpawnParameters SpawnParameters;
 		SpawnParameters.SpawnCollisionHandlingOverride =
 			ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+		if (ItemClass == ABotanicusDeliveryParcelActor::StaticClass())
+			ItemClass = ABotanicusDeliveryParcelActor::ResolveParcelClass(*World, SavedItem.ItemKey,
+				SavedItem.Quantity, SavedItem.ParcelPackaging);
 		AActor* RestoredItem = World->SpawnActor<AActor>(
 			ItemClass,
 			SavedItem.Transform,
@@ -1279,7 +1297,8 @@ void ABotanicusGameMode::RestoreWorldState()
 					: 0,
 				CurrentSaveGame->SaveVersion >= 16
 					? SavedItem.bParcelOpened
-					: true);
+					: true,
+				SavedItem.ParcelPackaging);
 		}
 		else if (ABotanicusPlaceableItemActor* PlacedItem =
 			Cast<ABotanicusPlaceableItemActor>(RestoredItem))
@@ -1295,6 +1314,7 @@ void ABotanicusGameMode::RestoreWorldState()
 				{
 					FBotanicusIllegalPlantSlotState& Slot = Slots.AddDefaulted_GetRef();
 					Slot.PlantId = SavedItem.IllegalPlanterPlantIds[Index];
+                    Slot.PlantPlacementVariation = BotanicusPlanterSoil::ReadSavedPlantVariation(SavedItem.PlanterPlantPlacementVariations, Index);
 					Slot.GrowthProgress = SavedItem.IllegalPlanterGrowthProgress.IsValidIndex(Index)
 						? SavedItem.IllegalPlanterGrowthProgress[Index]
 						: 0.0f;
@@ -1322,6 +1342,7 @@ void ABotanicusGameMode::RestoreWorldState()
 						Slots.AddDefaulted_GetRef();
 					Slot.PlantKey =
 						SavedItem.MultiPlanterPlantKeys[Index];
+                    Slot.PlantPlacementVariation = BotanicusPlanterSoil::ReadSavedPlantVariation(SavedItem.PlanterPlantPlacementVariations, Index);
 					Slot.WaterLevel =
 						SavedItem.MultiPlanterWaterLevels.
 							IsValidIndex(Index)
@@ -1641,91 +1662,6 @@ void ABotanicusGameMode::RestorePlayerInventory(AController* Controller)
 		return;
 	}
     const auto GrantStarterMultiTool=[QuickBar](){QuickBar->NormalizeMultiToolSlots();};
-	const auto GrantStarterComputer =
-		[this, Controller, QuickBar]()
-		{
-			constexpr int32 ComputerSlotIndex = 1;
-			UWorld* World = GetWorld();
-			if (!World || Controller != World->GetFirstPlayerController())
-			{
-				return;
-			}
-
-			const TArray<FBotanicusQuickBarSlot> CurrentSlots =
-				QuickBar->GetSlots();
-			const int32 ExistingComputerSlot =
-				CurrentSlots.IndexOfByPredicate(
-					[](const FBotanicusQuickBarSlot& Slot)
-					{
-						return !Slot.IsEmpty() &&
-							Slot.ItemKey == TEXT("CommandComputer");
-					});
-			if (ExistingComputerSlot != INDEX_NONE)
-			{
-				if (ExistingComputerSlot != ComputerSlotIndex)
-				{
-					// Preserve the former contents of slot 2 by swapping them
-					// into the computer's previous slot.
-					QuickBar->SwapSlotsAuthoritative(
-						ExistingComputerSlot,
-						ComputerSlotIndex);
-				}
-				return;
-			}
-
-			// A computer restored from a save remains the unique shared shop
-			// computer. Do not give player one a replacement after it was placed.
-			for (TActorIterator<ABotanicusComputerActor> It(World); It; ++It)
-			{
-				if (IsValid(*It) &&
-					!It->ActorHasTag(TEXT("BotanicusPlacementPreview")))
-				{
-					return;
-				}
-			}
-
-			if (CurrentSlots.IsValidIndex(ComputerSlotIndex) &&
-				!CurrentSlots[ComputerSlotIndex].IsEmpty())
-			{
-				const int32 EmptySlot = CurrentSlots.IndexOfByPredicate(
-					[](const FBotanicusQuickBarSlot& Slot)
-					{
-						return Slot.IsEmpty();
-					});
-				if (EmptySlot == INDEX_NONE)
-				{
-					UE_LOG(
-						LogBotanicus,
-						Warning,
-						TEXT(
-							"Could not reserve quickbar slot 2 for the starter computer: the quickbar has no free slot."));
-					return;
-				}
-				QuickBar->SwapSlotsAuthoritative(
-					ComputerSlotIndex,
-					EmptySlot);
-			}
-
-			if (QuickBar->SetSlotItem(
-				ComputerSlotIndex,
-				TEXT("CommandComputer")))
-			{
-				UE_LOG(
-					LogBotanicus,
-					Display,
-					TEXT(
-						"Added the starter computer to player one's quickbar slot 2."));
-			}
-			else
-			{
-				UE_LOG(
-					LogBotanicus,
-					Warning,
-					TEXT(
-						"Could not add the starter computer: player one's quickbar has no free slot."));
-			}
-		};
-
 	FBotanicusSavedPlayerInventory* SavedInventory =
 		CurrentSaveGame->PlayerInventories.FindByPredicate(
 			[&PlayerKey](const FBotanicusSavedPlayerInventory& Entry)
@@ -1735,7 +1671,6 @@ void ABotanicusGameMode::RestorePlayerInventory(AController* Controller)
 	if (!SavedInventory)
 	{
 		GrantStarterMultiTool();
-		GrantStarterComputer();
 		return;
 	}
 	if (SavedInventory->bHasPawnTransform)
@@ -1747,6 +1682,14 @@ void ABotanicusGameMode::RestorePlayerInventory(AController* Controller)
 			ETeleportType::TeleportPhysics);
 	}
 
+	// The editor-authored terminal replaces the old inventory item. Keep other slots in place.
+	for (FBotanicusQuickBarSlot& Slot : SavedInventory->Slots)
+	{
+		if (Slot.ItemKey == ABotanicusComputerActor::LegacyItemKey())
+		{
+			Slot = FBotanicusQuickBarSlot();
+		}
+	}
 	QuickBar->ApplySavedState(
 		SavedInventory->Slots,
 		SavedInventory->SelectedSlotIndex);
@@ -1765,7 +1708,6 @@ void ABotanicusGameMode::RestorePlayerInventory(AController* Controller)
 	// delivery cartons. This also repairs version-16 saves made before the
 	// cutter could be inserted into an available quickbar slot.
 	GrantStarterMultiTool();
-	GrantStarterComputer();
 
 	int32 RestoredSlotCount = 0;
 	int32 RestoredItemQuantity = 0;

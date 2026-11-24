@@ -41,6 +41,9 @@
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerState.h"
 #include "InputMappingContext.h"
+#include "EnhancedInputComponent.h"
+#include "EnhancedPlayerInput.h"
+#include "InputAction.h"
 #include "InputKeyEventArgs.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -705,6 +708,16 @@ void ABotanicusPlayerController::BeginPlay()
 	}
 }
 
+void ABotanicusPlayerController::SetPawn(APawn* InPawn)
+{
+	if (InPawn != GetPawn())
+	{
+		ClearLocalDeliveryParcelCarry();
+		ReleaseServerDeliveryParcelCarry();
+	}
+	Super::SetPawn(InPawn);
+}
+
 void ABotanicusPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	if (bFurnitureMoveModeActive || LocalHighlightedFurniture.Num() > 0)
@@ -724,7 +737,8 @@ void ABotanicusPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReaso
 	CancelPlaceableItemMoveCharge();
 	CancelDisplayedSalePotPickup();
 	CancelStorageCollectionQuantitySelection(true);
-	CancelParcelMoveCharge();
+	ClearLocalDeliveryParcelCarry();
+	ReleaseServerDeliveryParcelCarry();
 	EndWateringCanRefill(true);
 	EndPlantPotAction();
 	CancelQuickBarItemPlacement();
@@ -736,7 +750,6 @@ void ABotanicusPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReaso
 			&ABotanicusPlayerController::HandleEquippedQuickBarChanged);
 	}
 	LocalEquippedQuickBarSource.Reset();
-	CancelDeliveryParcelPlacement();
 	CancelLargeEquipmentPlacement();
 
 	if (OrderCatalogWidget)
@@ -922,7 +935,6 @@ void ABotanicusPlayerController::PlayerTick(float DeltaTime)
 	UpdateEquipmentCarryCharge(DeltaTime);
 	UpdatePlaceableItemMoveCharge(DeltaTime);
 	UpdateDisplayedSalePotPickup(DeltaTime);
-	UpdateParcelMoveCharge(DeltaTime);
 	UpdateWateringCanRefill(DeltaTime);
 	UpdateGardenTrowelTransplantHold(DeltaTime);
 	if (bPlantPotActionHeld)
@@ -956,7 +968,7 @@ void ABotanicusPlayerController::PlayerTick(float DeltaTime)
     UpdateCheckoutEquipmentPresentation();
 	UpdateWateringCanSpray(DeltaTime);
 	UpdateThrowPowerWidget();
-	UpdateDeliveryParcelPlacement(DeltaTime);
+	UpdateDeliveryParcelCarry(DeltaTime);
 	if (InteractionTargetWidget && CarryProgressWidget &&
 		CarryProgressWidget->GetVisibility() ==
 			ESlateVisibility::HitTestInvisible)
@@ -973,6 +985,14 @@ void ABotanicusPlayerController::SetupInputComponent()
 	// only add IMCs for local player controllers
 	if (IsLocalPlayerController())
 	{
+		if (auto* EnhancedInput = Cast<UEnhancedInputComponent>(InputComponent))
+		{
+			if (!ToggleFlashlightInputAction)
+				ToggleFlashlightInputAction = NewObject<UInputAction>(this, TEXT("IA_ToggleFlashlight"), RF_Transient);
+			EnhancedInput->BindAction(ToggleFlashlightInputAction, ETriggerEvent::Triggered, this,
+				&ABotanicusPlayerController::HandleToggleFlashlightInput);
+		}
+
 		// Add Input Mapping Context
 		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
 		{
@@ -994,8 +1014,23 @@ void ABotanicusPlayerController::SetupInputComponent()
 	
 }
 
+void ABotanicusPlayerController::HandleToggleFlashlightInput()
+{
+	if (auto* BotanicusPawn = Cast<ABotanicusCharacter>(GetPawn()))
+		BotanicusPawn->ToggleHeadFlashlight();
+}
+
+void ABotanicusPlayerController::FlushPressedKeys()
+{
+	StopParcelInspectionRotation();
+	Super::FlushPressedKeys();
+}
+
 bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 {
+	if (HandleParcelInspectionMouse(Params))
+		return true;
+
 	if (Params.Key == EKeys::I)
 	{
 		if (Params.Event == IE_Pressed)
@@ -1160,7 +1195,7 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 
 		!IsValid(LocalLargeEquipmentPlacement) &&
 		!IsValid(LocalQuickBarItemPreview) &&
-		!IsValid(LocalParcelMovePreview))
+		!IsValid(LocalMovedDeliveryParcel))
 	{
 		if (ABotanicusCharacter* BotanicusCharacter =
 				Cast<ABotanicusCharacter>(GetPawn()))
@@ -1234,12 +1269,20 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		return true;
 	}
 
+    if(HandleDeliveryParcelInput(Params)) return true;
+	if (Params.Key == EKeys::E && Params.Event == IE_Pressed && TryCollectNearbyDeliveryParcel())
+		return true;
     if(TryWaterReserveInput(Params)) return true;
     if(TryCheckoutInput(Params)) return true;
 
-	// Old Blueprint input mappings cannot re-enable construction.
+	// Route T through Enhanced Input while keeping the old EBS construction key suppressed.
 	if (Params.Key == EKeys::T)
 	{
+		if (Params.Event == IE_Pressed && ToggleFlashlightInputAction)
+		{
+			if (auto* EnhancedInput = Cast<UEnhancedPlayerInput>(PlayerInput))
+				EnhancedInput->InjectInputForAction(ToggleFlashlightInputAction, FInputActionValue(true));
+		}
 		return true;
 	}
 
@@ -1260,11 +1303,6 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		if (IsValid(LocalDisplayedSalePotPickupCandidate))
 		{
 			CancelDisplayedSalePotPickup();
-			return true;
-		}
-		if (IsValid(LocalParcelMoveCandidate))
-		{
-			CancelParcelMoveCharge();
 			return true;
 		}
 	}
@@ -1328,7 +1366,6 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		 TryPlacePlantOnNearbySalesDisplay() ||
 		 TryBeginDisplayedSalePotPickup() ||
 		 TryHandleNearbyLargeEquipment() ||
-		 TryCollectNearbyDeliveryParcel() ||
 		 TryMoveNearbyPlaceableItem()))
 	{
 		return true;
@@ -1442,40 +1479,12 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		}
 	}
 
-	if (IsValid(LocalParcelMovePreview))
-	{
-		if (Params.Event == IE_Pressed &&
-			(Params.Key == EKeys::MouseScrollUp ||
-			 Params.Key == EKeys::MouseScrollDown))
-		{
-			RotateDeliveryParcelPlacement(
-				Params.Key == EKeys::MouseScrollUp ? 1.0f : -1.0f);
-			return true;
-		}
-
-		if (Params.Key == EKeys::LeftMouseButton &&
-			Params.Event == IE_Pressed)
-		{
-			ConfirmDeliveryParcelPlacement();
-			return true;
-		}
-
-		if ((Params.Key == EKeys::RightMouseButton ||
-			 Params.Key == EKeys::Escape) &&
-			Params.Event == IE_Pressed)
-		{
-			CancelDeliveryParcelPlacement();
-			return true;
-		}
-	}
-
 	if (Params.Key == EKeys::A)
 	{
 		if (Params.Event == IE_Pressed &&
 
 			!IsValid(LocalLargeEquipmentPlacement) &&
-			!IsValid(LocalQuickBarItemPreview) &&
-			!IsValid(LocalParcelMovePreview))
+			!IsValid(LocalQuickBarItemPreview))
 		{
 			if (IsValid(LocalMovedPlaceableItem))
 			{
@@ -1602,7 +1611,8 @@ bool ABotanicusPlayerController::IsQuickBarInputBlocked() const
 {
 	return bQuickBarReorganizationMode ||
 		IsValid(LocalQuickBarItemPreview) ||
-		IsValid(LocalParcelMovePreview) ||
+		IsValid(LocalMovedDeliveryParcel) ||
+		IsValid(ServerMovedDeliveryParcel) ||
 		IsValid(LocalMovedPlaceableItem) ||
 		IsValid(ServerMovedPlaceableItem);
 }
@@ -1662,7 +1672,6 @@ bool ABotanicusPlayerController::IsFurnitureActor(
 		ItemKey = Item->GetItemKey();
 	}
 	return ItemKey == TEXT("PreparationWorkbench") ||
-		ItemKey == TEXT("CommandComputer") ||
 		ItemKey == TEXT("CashRegister") ||
 		ItemKey == TEXT("SelfCheckout") ||
 		ItemKey == TEXT("SalesDisplay") ||
@@ -1856,7 +1865,7 @@ void ABotanicusPlayerController::RefreshInteractionTargetHighlight()
 		IsValid(LocalLargeEquipmentPlacement) ||
 		IsValid(LocalMovedPlaceableItem) ||
 		IsValid(LocalQuickBarItemPreview) ||
-		IsValid(LocalParcelMovePreview) ||
+		IsValid(LocalMovedDeliveryParcel) ||
 		(DevelopmentPanelWidget &&
 		 DevelopmentPanelWidget->GetVisibility() ==
 			 ESlateVisibility::Visible) ||
@@ -1919,8 +1928,6 @@ void ABotanicusPlayerController::RefreshInteractionTargetHighlight()
 					Computer,
 					MaximumWorldInteractionDistance))
 			{
-				// The command computer is furniture for move mode, but remains
-				// directly usable when the player looks at it in normal mode.
 				NewTarget = Computer;
 			}
 			else if (ABotanicusSalesDisplayActor* SalesDisplay =
@@ -2125,8 +2132,8 @@ void ABotanicusPlayerController::RefreshInteractionTargetName(
 				"UTILISER"),
 			NSLOCTEXT(
 				"BotanicusInteraction",
-				"ComputerTargetName",
-				"Ordinateur"));
+				"FixedComputerTargetName",
+				"Borne de commande"));
 		return;
 	}
 	if (const ABotanicusClimateDeviceActor* ClimateDevice =
@@ -2288,7 +2295,8 @@ void ABotanicusPlayerController::RefreshInteractionTargetName(
 			UBotanicusMultiToolComponent::HasTool(const_cast<ABotanicusCharacter*>(BotanicusCharacter),TEXT("BoxCutter"),Parcel);
 		if (!bCutterSelected)
 		{
-			InteractionTargetWidget->ClearTarget();
+			const auto Prompt = Parcel->GetInteractionPrompt_Implementation(GetPawn());
+			InteractionTargetWidget->SetKeyboardPrompt(Prompt.ActionText, Prompt.TargetName);
 			return;
 		}
 
@@ -5042,7 +5050,8 @@ void ABotanicusPlayerController::UpdateEquippedQuickBarItem()
 		BotanicusCharacter &&
 
 		!IsValid(LocalQuickBarItemPreview) &&
-		!IsValid(LocalMovedPlaceableItem);
+		!IsValid(LocalMovedPlaceableItem) &&
+		!IsValid(LocalMovedDeliveryParcel);
 	if (!bCanDisplayEquippedItem)
 	{
 		DestroyEquippedQuickBarItem();
@@ -7041,414 +7050,6 @@ void ABotanicusPlayerController::DrawQuickBarItemAlignmentGuides(
 	}
 }
 
-bool ABotanicusPlayerController::TryCollectNearbyDeliveryParcel()
-{
-	if (!IsLocalPlayerController() || !GetPawn() || !GetWorld())
-	{
-		return false;
-	}
-
-	ABotanicusDeliveryParcelActor* NearestParcel = nullptr;
-	float BestDistanceSquared = FMath::Square(400.0f);
-	for (TActorIterator<ABotanicusDeliveryParcelActor> ParcelIt(
-			 GetWorld());
-		 ParcelIt;
-		 ++ParcelIt)
-	{
-		const float DistanceSquared = FVector::DistSquared(
-			GetPawn()->GetActorLocation(),
-			ParcelIt->GetActorLocation());
-		if (DistanceSquared <= BestDistanceSquared &&
-			IsLookingAtWorldItem(*ParcelIt, 400.0f))
-		{
-			BestDistanceSquared = DistanceSquared;
-			NearestParcel = *ParcelIt;
-		}
-	}
-
-	if (!NearestParcel)
-	{
-		return false;
-	}
-
-	if (NearestParcel->IsOpened())
-	{
-		ServerCollectDeliveryParcel(NearestParcel);
-	}
-	else
-	{
-		BeginParcelMoveCharge(NearestParcel);
-	}
-	return true;
-}
-
-void ABotanicusPlayerController::BeginParcelMoveCharge(
-	ABotanicusDeliveryParcelActor* Parcel)
-{
-	if (!IsLocalPlayerController() ||
-		!IsValid(Parcel) ||
-		Parcel->IsOpened() ||
-		IsValid(LocalParcelMoveCandidate) ||
-		IsValid(LocalParcelMovePreview) ||
-		IsValid(LocalQuickBarItemPreview) ||
-		IsValid(LocalLargeEquipmentPlacement))
-	{
-		return;
-	}
-
-	LocalParcelMoveCandidate = Parcel;
-	ParcelMoveChargeElapsed = 0.0f;
-	bEquipmentCarryKeyHeld = true;
-	InitializeInteractionTargetWidget();
-	if (InteractionTargetWidget)
-	{
-		InteractionTargetWidget->BeginLocalHoldProgress(
-			PlaceableItemMoveHoldDuration);
-	}
-
-	if (!CarryProgressWidget)
-	{
-		CarryProgressWidget =
-			CreateWidget<UBotanicusCarryProgressWidget>(
-				this,
-				UBotanicusCarryProgressWidget::StaticClass());
-		if (CarryProgressWidget)
-		{
-			CarryProgressWidget->AddToPlayerScreen(50);
-			CarryProgressWidget->SetAlignmentInViewport(
-				FVector2D(0.5f, 0.5f));
-			CarryProgressWidget->SetDesiredSizeInViewport(
-				FVector2D(68.0f, 68.0f));
-		}
-	}
-
-	if (CarryProgressWidget)
-	{
-		int32 ViewportWidth = 0;
-		int32 ViewportHeight = 0;
-		GetViewportSize(ViewportWidth, ViewportHeight);
-		CarryProgressWidget->SetPositionInViewport(
-			FVector2D(
-				static_cast<float>(ViewportWidth) * 0.5f,
-				static_cast<float>(ViewportHeight) * 0.5f + 85.0f),
-			true);
-		CarryProgressWidget->SetCarryProgress(0.0f);
-		CarryProgressWidget->SetVisibility(
-			ESlateVisibility::HitTestInvisible);
-	}
-}
-
-void ABotanicusPlayerController::UpdateParcelMoveCharge(
-	float DeltaTime)
-{
-	if (!IsLocalPlayerController() ||
-		!IsValid(LocalParcelMoveCandidate))
-	{
-		return;
-	}
-
-	if (!bEquipmentCarryKeyHeld ||
-		LocalParcelMoveCandidate->IsOpened() ||
-		!IsLookingAtWorldItem(LocalParcelMoveCandidate, 450.0f))
-	{
-		CancelParcelMoveCharge();
-		return;
-	}
-
-	ParcelMoveChargeElapsed += DeltaTime;
-	const float ChargeProgress = FMath::Clamp(
-		ParcelMoveChargeElapsed /
-			FMath::Max(0.1f, PlaceableItemMoveHoldDuration),
-		0.0f,
-		1.0f);
-	if (CarryProgressWidget)
-	{
-		CarryProgressWidget->SetCarryProgress(ChargeProgress);
-	}
-	if (InteractionTargetWidget)
-	{
-		InteractionTargetWidget->SetHoldProgress(ChargeProgress);
-	}
-	if (ChargeProgress < 1.0f)
-	{
-		return;
-	}
-
-	ABotanicusDeliveryParcelActor* ParcelToMove =
-		LocalParcelMoveCandidate;
-	LocalParcelMoveCandidate = nullptr;
-	ParcelMoveChargeElapsed = 0.0f;
-	bEquipmentCarryKeyHeld = false;
-	if (InteractionTargetWidget)
-	{
-		InteractionTargetWidget->EndLocalHoldProgress();
-	}
-	if (CarryProgressWidget)
-	{
-		CarryProgressWidget->SetVisibility(
-			ESlateVisibility::Collapsed);
-		CarryProgressWidget->SetCarryProgress(0.0f);
-	}
-	BeginDeliveryParcelMove(ParcelToMove);
-}
-
-void ABotanicusPlayerController::CancelParcelMoveCharge()
-{
-	LocalParcelMoveCandidate = nullptr;
-	ParcelMoveChargeElapsed = 0.0f;
-	bEquipmentCarryKeyHeld = false;
-	if (InteractionTargetWidget)
-	{
-		InteractionTargetWidget->EndLocalHoldProgress();
-	}
-	if (CarryProgressWidget)
-	{
-		CarryProgressWidget->SetVisibility(
-			ESlateVisibility::Collapsed);
-		CarryProgressWidget->SetCarryProgress(0.0f);
-	}
-}
-
-void ABotanicusPlayerController::BeginDeliveryParcelMove(
-	ABotanicusDeliveryParcelActor* Parcel)
-{
-	UWorld* World = GetWorld();
-	if (!IsLocalPlayerController() ||
-		!World ||
-		!GetPawn() ||
-		!IsValid(Parcel) ||
-		Parcel->IsOpened() ||
-		IsValid(LocalParcelMovePreview))
-	{
-		return;
-	}
-
-	FActorSpawnParameters SpawnParameters;
-	SpawnParameters.SpawnCollisionHandlingOverride =
-		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	SpawnParameters.ObjectFlags |= RF_Transient;
-	ABotanicusDeliveryParcelActor* Preview =
-		World->SpawnActor<ABotanicusDeliveryParcelActor>(
-			ABotanicusDeliveryParcelActor::StaticClass(),
-			Parcel->GetActorTransform(),
-			SpawnParameters);
-	if (!Preview)
-	{
-		ClientMessage(TEXT("Impossible de deplacer ce colis."));
-		return;
-	}
-
-	Preview->SetReplicates(false);
-	Preview->Tags.AddUnique(TEXT("BotanicusPlacementPreview"));
-	Preview->RestoreParcelState(
-		Parcel->GetItemKey(),
-		Parcel->GetQuantity(),
-		Parcel->GetCutCoverageMask(),
-		false);
-	Preview->SetActorEnableCollision(false);
-
-	LocalParcelMovePreview = Preview;
-	LocalMovedDeliveryParcel = Parcel;
-	ParcelPlacementYaw = Parcel->GetActorRotation().Yaw;
-	ParcelPreviewUpdateAccumulator = 1.0f;
-	bLocalParcelPlacementValid = false;
-	ServerBeginDeliveryParcelMove(Parcel);
-	ClientMessage(
-		TEXT(
-			"Deplacement du colis : le placement suit votre regard, molette pour tourner, clic gauche pour poser."));
-}
-
-void ABotanicusPlayerController::UpdateDeliveryParcelPlacement(
-	float DeltaTime)
-{
-	if (!IsLocalPlayerController() ||
-
-		!IsValid(LocalParcelMovePreview) ||
-		!IsValid(LocalMovedDeliveryParcel) ||
-		!GetPawn())
-	{
-		return;
-	}
-
-	ParcelPreviewUpdateAccumulator += DeltaTime;
-	if (ParcelPreviewUpdateAccumulator < (1.0f / 30.0f))
-	{
-		return;
-	}
-	ParcelPreviewUpdateAccumulator = 0.0f;
-
-	const FVector RequestedLocation =
-		GetViewDirectedGroundPlacementLocation(
-			MinimumQuickBarItemPlacementDistance,
-			MaximumQuickBarItemPlacementDistance);
-	FTransform PlacementTransform;
-	bLocalParcelPlacementValid =
-		ResolveDeliveryParcelPlacement(
-			LocalMovedDeliveryParcel,
-			RequestedLocation,
-			ParcelPlacementYaw,
-			PlacementTransform);
-	LocalParcelMovePreview->SetActorTransform(
-		PlacementTransform,
-		false,
-		nullptr,
-		ETeleportType::TeleportPhysics);
-}
-
-void ABotanicusPlayerController::RotateDeliveryParcelPlacement(
-	float Direction)
-{
-	if (!IsValid(LocalParcelMovePreview))
-	{
-		return;
-	}
-
-	const bool bFineRotation =
-		IsInputKeyDown(EKeys::LeftShift) ||
-		IsInputKeyDown(EKeys::RightShift);
-	ParcelPlacementYaw =
-		FMath::UnwindDegrees(
-			ParcelPlacementYaw +
-			Direction *
-				(bFineRotation
-					? FineEquipmentRotationStep
-					: EquipmentRotationStep));
-	ParcelPreviewUpdateAccumulator = 1.0f;
-}
-
-void ABotanicusPlayerController::ConfirmDeliveryParcelPlacement()
-{
-	if (!IsValid(LocalParcelMovePreview) ||
-		!IsValid(LocalMovedDeliveryParcel))
-	{
-		return;
-	}
-	if (!bLocalParcelPlacementValid)
-	{
-		ClientMessage(
-			TEXT("Position invalide : le colis ne peut pas etre pose ici."));
-		return;
-	}
-	DismissInteractionPromptAfterConfirmation();
-
-	ServerConfirmDeliveryParcelMove(
-		LocalMovedDeliveryParcel,
-		LocalParcelMovePreview->GetActorLocation(),
-		ParcelPlacementYaw);
-	LocalParcelMovePreview->Destroy();
-	LocalParcelMovePreview = nullptr;
-	LocalMovedDeliveryParcel = nullptr;
-	bLocalParcelPlacementValid = false;
-}
-
-void ABotanicusPlayerController::CancelDeliveryParcelPlacement()
-{
-	if (IsValid(LocalMovedDeliveryParcel))
-	{
-		ServerCancelDeliveryParcelMove(LocalMovedDeliveryParcel);
-	}
-	if (IsValid(LocalParcelMovePreview))
-	{
-		LocalParcelMovePreview->Destroy();
-	}
-	LocalParcelMovePreview = nullptr;
-	LocalMovedDeliveryParcel = nullptr;
-	bLocalParcelPlacementValid = false;
-}
-
-bool ABotanicusPlayerController::ResolveDeliveryParcelPlacement(
-	const ABotanicusDeliveryParcelActor* Parcel,
-	const FVector& RequestedLocation,
-	float RequestedYaw,
-	FTransform& OutTransform) const
-{
-	UWorld* World = GetWorld();
-	APawn* ControlledPawn = GetPawn();
-	if (!World || !ControlledPawn || !IsValid(Parcel) ||
-		Parcel->IsOpened() ||
-		FVector::DistSquared2D(
-			ControlledPawn->GetActorLocation(),
-			RequestedLocation) >
-			FMath::Square(MaximumQuickBarItemPlacementDistance))
-	{
-		OutTransform = FTransform(
-			FRotator(0.0f, RequestedYaw, 0.0f),
-			RequestedLocation);
-		return false;
-	}
-
-	const FVector BoxExtent = Parcel->GetParcelHalfExtent().GetAbs();
-	FCollisionQueryParams FloorQuery(
-		SCENE_QUERY_STAT(BotanicusDeliveryParcelPlacementFloor),
-		false);
-	FloorQuery.AddIgnoredActor(ControlledPawn);
-	FloorQuery.AddIgnoredActor(Parcel);
-	if (IsValid(LocalParcelMovePreview))
-	{
-		FloorQuery.AddIgnoredActor(LocalParcelMovePreview);
-	}
-
-	const float PawnBaseZ = ControlledPawn->GetActorLocation().Z;
-	const FVector TraceStart(
-		RequestedLocation.X,
-		RequestedLocation.Y,
-		PawnBaseZ + 160.0f);
-	const FVector TraceEnd(
-		RequestedLocation.X,
-		RequestedLocation.Y,
-		PawnBaseZ - 450.0f);
-	FHitResult FloorHit;
-	const bool bFoundFloor = World->LineTraceSingleByChannel(
-		FloorHit,
-		TraceStart,
-		TraceEnd,
-		ECC_Visibility,
-		FloorQuery);
-
-	const FVector PlacementLocation(
-		RequestedLocation.X,
-		RequestedLocation.Y,
-		bFoundFloor
-			? FloorHit.ImpactPoint.Z + BoxExtent.Z + 3.0f
-			: RequestedLocation.Z);
-	const FQuat PlacementRotation =
-		FRotator(0.0f, RequestedYaw, 0.0f).Quaternion();
-	OutTransform = FTransform(
-		PlacementRotation,
-		PlacementLocation);
-	if (!bFoundFloor || FloorHit.ImpactNormal.Z < 0.7f)
-	{
-		return false;
-	}
-
-	FCollisionObjectQueryParams ObjectQuery;
-	ObjectQuery.AddObjectTypesToQuery(ECC_WorldStatic);
-	ObjectQuery.AddObjectTypesToQuery(ECC_WorldDynamic);
-	ObjectQuery.AddObjectTypesToQuery(ECC_Pawn);
-	FCollisionQueryParams OverlapQuery(
-		SCENE_QUERY_STAT(BotanicusDeliveryParcelPlacementOverlap),
-		false);
-	OverlapQuery.AddIgnoredActor(ControlledPawn);
-	OverlapQuery.AddIgnoredActor(Parcel);
-	if (IsValid(LocalParcelMovePreview))
-	{
-		OverlapQuery.AddIgnoredActor(LocalParcelMovePreview);
-	}
-
-	const FVector TestExtent(
-		FMath::Max(5.0f, BoxExtent.X - 3.0f),
-		FMath::Max(5.0f, BoxExtent.Y - 3.0f),
-		FMath::Max(5.0f, BoxExtent.Z - 3.0f));
-	TArray<FOverlapResult> Overlaps;
-	return !World->OverlapMultiByObjectType(
-		Overlaps,
-		PlacementLocation,
-		PlacementRotation,
-		ObjectQuery,
-		FCollisionShape::MakeBox(TestExtent),
-		OverlapQuery);
-}
-
 bool ABotanicusPlayerController::TryHandleNearbyWateringCan()
 {
 	if (!IsLocalPlayerController() || !GetPawn() || !GetWorld())
@@ -8911,8 +8512,7 @@ float ABotanicusPlayerController::GetMoveHoldDurationForActor(
 	const AActor* Actor,
 	float DefaultDuration) const
 {
-	return Cast<ABotanicusComputerActor>(Actor) ||
-			Cast<ABotanicusCashRegisterActor>(Actor) ||
+	return Cast<ABotanicusCashRegisterActor>(Actor) ||
 			Cast<ABotanicusPreparationWorkbenchActor>(Actor)
 		? StarterFixtureMoveHoldDuration
 		: DefaultDuration;
@@ -8992,9 +8592,13 @@ void ABotanicusPlayerController::ServerOrderTestDelivery_Implementation()
 	FActorSpawnParameters ParcelSpawnParameters;
 	ParcelSpawnParameters.SpawnCollisionHandlingOverride =
 		ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+	const FName TestItemKey(TEXT("SeedPacket_AureliaSweet"));
+	const FBotanicusItemDefinition* Definition = FindItemDefinition(this, TestItemKey);
+	const int32 TestQuantity = Definition ? FMath::Max(1, Definition->DeliveryQuantity) : 10;
+	UClass* ParcelClass = ABotanicusDeliveryParcelActor::ResolveParcelClass(*World, TestItemKey, TestQuantity);
 	ABotanicusDeliveryParcelActor* Parcel =
 		World->SpawnActor<ABotanicusDeliveryParcelActor>(
-			DeliveryZone->GetParcelSpawnLocation(ParcelIndex),
+			ParcelClass, DeliveryZone->GetParcelSpawnLocation(ParcelIndex),
 			FRotator::ZeroRotator,
 			ParcelSpawnParameters);
 	if (!Parcel)
@@ -9003,14 +8607,7 @@ void ABotanicusPlayerController::ServerOrderTestDelivery_Implementation()
 		return;
 	}
 
-	const FName TestItemKey(TEXT("SeedPacket_AureliaSweet"));
-	const FBotanicusItemDefinition* Definition =
-		FindItemDefinition(this, TestItemKey);
-	Parcel->InitializeParcel(
-		TestItemKey,
-		Definition
-			? FMath::Max(1, Definition->DeliveryQuantity)
-			: 10);
+	Parcel->InitializeParcel(TestItemKey, TestQuantity);
 	bool bGroundFallback = false;
 	if (!DeliveryZone->StartParcelDelivery(Parcel, ParcelIndex, bGroundFallback))
 	{
@@ -10016,6 +9613,11 @@ void ABotanicusPlayerController::
 		int32 ShelfSlotIndex,
 		int32 Quantity)
 {
+	if (ItemKey == ABotanicusComputerActor::LegacyItemKey())
+	{
+		return;
+	}
+
 	ABotanicusCharacter* BotanicusCharacter =
 		Cast<ABotanicusCharacter>(GetPawn());
 	UBotanicusQuickBarComponent* QuickBar = BotanicusCharacter
@@ -10166,6 +9768,11 @@ void ABotanicusPlayerController::
 		int32 Quantity,
 		bool bFloorOnlyPlacement)
 {
+	if (ItemKey == ABotanicusComputerActor::LegacyItemKey())
+	{
+		return;
+	}
+
 	ABotanicusCharacter* BotanicusCharacter =
 		Cast<ABotanicusCharacter>(GetPawn());
 	UBotanicusQuickBarComponent* QuickBar =
@@ -10369,6 +9976,11 @@ void ABotanicusPlayerController::
 		FVector_NetQuantizeNormal ThrowDirection,
 		float HoldDuration)
 {
+	if (ItemKey == ABotanicusComputerActor::LegacyItemKey())
+	{
+		return;
+	}
+
     if(ABotanicusSalesShelfActor::CapacityForKey(ItemKey))return;
 
 	ABotanicusCharacter* BotanicusCharacter =
@@ -10492,7 +10104,7 @@ void ABotanicusPlayerController::
 		ABotanicusPlaceableItemActor* WorldItem)
 {
     if(auto* Slot=Cast<ABotanicusSalesDisplayActor>(WorldItem);Slot && Slot->IsShelfSlot()){ClientEndPlaceableItemHold();return;}
-    if(auto* Shelf=Cast<ABotanicusSalesShelfActor>(WorldItem);Shelf && Shelf->HasContents()){ClientMessage(TEXT("Reprenez les pots avant de déplacer cette étagère."));ClientEndPlaceableItemHold();return;}
+    if(auto* Shelf=Cast<ABotanicusSalesShelfActor>(WorldItem);Shelf && Shelf->HasContents()){ClientMessage(TEXT("Reprenez les pots avant de dï¿½placer cette ï¿½tagï¿½re."));ClientEndPlaceableItemHold();return;}
 
 	if (WorldItem &&
 		(WorldItem->GetItemKey() == TEXT("CashRegister") ||
@@ -10873,95 +10485,6 @@ void ABotanicusPlayerController::
 	if (ServerMovedPlaceableItem == WorldItem)
 	{
 		ServerMovedPlaceableItem = nullptr;
-	}
-}
-
-void ABotanicusPlayerController::
-	ServerBeginDeliveryParcelMove_Implementation(
-		ABotanicusDeliveryParcelActor* Parcel)
-{
-	if (!IsValid(Parcel) ||
-		Parcel->IsOpened() ||
-		Parcel->ActorHasTag(TEXT("BotanicusPlacementPreview")) ||
-		!IsLookingAtWorldItem(Parcel, 450.0f))
-	{
-		ClientMessage(
-			TEXT(
-				"Regardez le colis ferme et rapprochez-vous pour le deplacer."));
-		return;
-	}
-
-	for (TActorIterator<ABotanicusPlayerController> ControllerIt(
-			 GetWorld());
-		 ControllerIt;
-		 ++ControllerIt)
-	{
-		if (*ControllerIt != this &&
-			ControllerIt->ServerMovedDeliveryParcel == Parcel)
-		{
-			ClientMessage(
-				TEXT("Ce colis est deja deplace par un autre joueur."));
-			return;
-		}
-	}
-
-	Parcel->EndCutting(GetPawn());
-	ServerMovedDeliveryParcel = Parcel;
-}
-
-void ABotanicusPlayerController::
-	ServerConfirmDeliveryParcelMove_Implementation(
-		ABotanicusDeliveryParcelActor* Parcel,
-		FVector_NetQuantize10 RequestedLocation,
-		float RequestedYaw)
-{
-	if (!IsValid(Parcel) ||
-		Parcel->IsOpened() ||
-		ServerMovedDeliveryParcel != Parcel)
-	{
-		ClientMessage(TEXT("Deplacement refuse : colis non reserve."));
-		return;
-	}
-
-	FTransform PlacementTransform;
-	if (!ResolveDeliveryParcelPlacement(
-			Parcel,
-			FVector(RequestedLocation),
-			RequestedYaw,
-			PlacementTransform))
-	{
-		ClientMessage(
-			TEXT("Deplacement refuse : position du colis invalide."));
-		return;
-	}
-
-	Parcel->StopDeliveryPhysics();
-	Parcel->SetActorTransform(
-		PlacementTransform,
-		false,
-		nullptr,
-		ETeleportType::TeleportPhysics);
-	Parcel->SetNetDormancy(DORM_Awake);
-	Parcel->FlushNetDormancy();
-	Parcel->ForceNetUpdate();
-	ServerMovedDeliveryParcel = nullptr;
-
-	if (ABotanicusGameMode* GameMode =
-			GetWorld()
-				? GetWorld()->GetAuthGameMode<ABotanicusGameMode>()
-				: nullptr)
-	{
-		GameMode->ScheduleInventoryAutosave();
-	}
-}
-
-void ABotanicusPlayerController::
-	ServerCancelDeliveryParcelMove_Implementation(
-		ABotanicusDeliveryParcelActor* Parcel)
-{
-	if (ServerMovedDeliveryParcel == Parcel)
-	{
-		ServerMovedDeliveryParcel = nullptr;
 	}
 }
 

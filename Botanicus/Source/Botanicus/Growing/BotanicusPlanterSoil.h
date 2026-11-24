@@ -12,6 +12,71 @@
  * into a paid bag during migration. Each contribution still costs exactly one bag. */
 namespace BotanicusPlanterSoil
 {
+
+struct FPlantLayout
+{
+    FVector2D Extent;
+    int32 Count;
+    bool bAlongX;
+    double HalfLength;
+    double CellLength;
+
+    FPlantLayout(FVector2D InExtent, int32 InCount, double EdgeMargin)
+        : Extent(InExtent), Count(InCount), bAlongX(Extent.X >= Extent.Y)
+    {
+        const double InnerHalfLength = bAlongX ? Extent.X : Extent.Y;
+        HalfLength = InnerHalfLength - FMath::Clamp(EdgeMargin, 0.0, InnerHalfLength * 0.25);
+        CellLength = 2.0 * HalfLength / Count;
+    }
+
+    int32 ResolveSlot(const FVector& LocalHit) const
+    {
+        const double Along = bAlongX ? LocalHit.X : LocalHit.Y;
+        return FMath::Clamp(FMath::FloorToInt((Along + HalfLength) / CellLength), 0, Count - 1);
+    }
+
+    FVector Position(int32 Slot, double SoilHeight, const FVector& Variation, const FVector& Amplitude) const
+    {
+        const double Center = -HalfLength + (Slot + 0.5) * CellLength;
+        // Each root stays in the central 40% of its cell, even at maximum variation.
+        const double Along = FMath::Min(CellLength * 0.2, bAlongX ? Amplitude.X : Amplitude.Y);
+        const double InnerHalfWidth = bAlongX ? Extent.Y : Extent.X;
+        const double Across = FMath::Min(InnerHalfWidth * 0.5, bAlongX ? Amplitude.Y : Amplitude.X);
+        const double X = (bAlongX ? Center : 0.0) + Variation.X * (bAlongX ? Along : Across);
+        const double Y = (bAlongX ? 0.0 : Center) + Variation.Y * (bAlongX ? Across : Along);
+        return FVector(X, Y, SoilHeight - Variation.Z * Amplitude.Z);
+    }
+};
+
+inline FVector MakePlantVariation()
+{
+    return FVector(FMath::FRandRange(-1.f, 1.f), FMath::FRandRange(-1.f, 1.f), FMath::FRand());
+}
+
+inline FVector ReadSavedPlantVariation(const TArray<FVector>& Saved, int32 Slot)
+{
+    if (!Saved.IsValidIndex(Slot) || Saved[Slot].ContainsNaN())
+    {
+        return FVector::ZeroVector;
+    }
+
+    const FVector& V = Saved[Slot];
+    return FVector(FMath::Clamp(V.X, -1.0, 1.0), FMath::Clamp(V.Y, -1.0, 1.0), FMath::Clamp(V.Z, 0.0, 1.0));
+}
+
+inline FVector PlantVariationAmplitude(bool bEnabled, double X, double Y, double Z)
+{
+    return bEnabled ? FVector(FMath::Max(0.0, X), FMath::Max(0.0, Y), FMath::Clamp(Z, 0.0, 0.5))
+        : FVector::ZeroVector;
+}
+
+inline FVector2D FitHeightRange(float Minimum, float Maximum, float Floor, float Rim)
+{
+    const float Ceiling = FMath::Max(Floor + 0.5f, Rim - 0.5f);
+    const float Base = FMath::Clamp(Minimum, Floor, Ceiling - 0.5f);
+    return FVector2D(Base, FMath::Clamp(Maximum, Base + 0.5f, Ceiling));
+}
+
 inline FVector2D ClassicExtent(int32 Capacity)
 {
     // Two-centimetre blockout walls plus 2.5 mm of clearance against their inner faces.

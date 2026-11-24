@@ -5,14 +5,17 @@
 #include "BotanicusCharacter.h"
 #include "BotanicusPlayerController.h"
 #include "Camera/CameraComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/CollisionProfile.h"
 #include "Preparation/BotanicusTerminalEyesComponent.h"
 
 ABotanicusComputerActor::ABotanicusComputerActor()
 {
-	// Computers are always authored through BP_Item_CommandComputer. Keep its
-	// meshes, materials and component transforms instead of applying the native
-	// catalogue's primitive fallback at runtime.
 	bUseBlueprintAppearance = true;
+	bAlwaysRelevant = true;
+	SetReplicateMovement(false);
+	SceneRoot->SetMobility(EComponentMobility::Static);
+	Mesh->SetMobility(EComponentMobility::Static);
 	TerminalEyes = CreateDefaultSubobject<UBotanicusTerminalEyesComponent>(TEXT("Terminal Eyes"));
 
 	InteractionAction =
@@ -24,14 +27,8 @@ ABotanicusComputerActor::ABotanicusComputerActor()
 	InteractionName =
 		NSLOCTEXT(
 			"BotanicusComputer",
-			"ComputerName",
-			"Ordinateur de commande");
-
-	// Le composant Mesh est fourni par ABotanicusPlaceableItemActor.
-	// Le véritable mesh du PC sera choisi dans le Blueprint.
-	Mesh->SetRelativeLocation(FVector::ZeroVector);
-	Mesh->SetRelativeRotation(FRotator::ZeroRotator);
-	Mesh->SetRelativeScale3D(FVector::OneVector);
+			"FixedTerminalName",
+			"Borne de commande");
 
 	InteractionCamera = CreateDefaultSubobject<UCameraComponent>(
 		TEXT("Computer Interaction Camera"));
@@ -42,6 +39,22 @@ ABotanicusComputerActor::ABotanicusComputerActor()
 	InteractionCamera->SetRelativeRotation(FRotator(-7.0f, 180.0f, 0.0f));
 	InteractionCamera->SetFieldOfView(48.0f);
 	InteractionCamera->bUsePawnControlRotation = false;
+}
+
+FName ABotanicusComputerActor::LegacyItemKey()
+{
+	static const FName Key(TEXT("CommandComputer"));
+	return Key;
+}
+
+void ABotanicusComputerActor::PostInitializeComponents()
+{
+	Super::PostInitializeComponents();
+
+	// Old Blueprint and instance defaults may still carry the former furniture settings.
+	SetReplicateMovement(false);
+	Mesh->SetSimulatePhysics(false);
+	Mesh->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
 }
 
 FBotanicusInteractionPrompt

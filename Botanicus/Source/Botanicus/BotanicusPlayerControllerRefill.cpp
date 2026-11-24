@@ -33,7 +33,7 @@ bool ABotanicusPlayerController::TraceRefillStationAim(FHitResult& Hit) const
 }
 bool ABotanicusPlayerController::TryWaterReserveInput(const FInputKeyEventArgs& Params)
 {
-    if(!IsLocalController() || bCheckoutContextBlocked || !GetPawn() || LocalQuickBarItemPreview || LocalMovedPlaceableItem || LocalLargeEquipmentPlacement || LocalParcelMovePreview)return false;
+    if(!IsLocalController() || bCheckoutContextBlocked || !GetPawn() || LocalQuickBarItemPreview || LocalMovedPlaceableItem || LocalLargeEquipmentPlacement || LocalMovedDeliveryParcel)return false;
     FHitResult Hit;if(!TraceRefillStationAim(Hit))return false;
     auto* Station=Cast<ABotanicusWaterReserveActor>(Hit.GetActor());if(!Station || !Station->IsRealStation())return false;
     // Left click cannot start the retired held-can refill (or inadvertently spray at the reserve).

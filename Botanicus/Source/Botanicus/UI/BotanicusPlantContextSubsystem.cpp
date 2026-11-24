@@ -124,7 +124,7 @@ FVector UBotanicusPlantContextSubsystem::PlantPoint(const FTarget& Target) const
     if(auto* Multi=Cast<ABotanicusMultiPlantPotActor>(Actor)) Local=Multi->GetSlotLocalLocation(Target.Slot);
     else if(auto* Pot=Cast<ABotanicusPlantPotActor>(Actor)) Local.Z=Pot->GetSoilMaximumHeight();
     else if(auto* Sale=Cast<ABotanicusSalePotActor>(Actor)) Local.Z=Sale->GetConfiguredSoilMaximumHeight();
-    else if(auto* Illegal=Cast<ABotanicusIllegalPlanterActor>(Actor)) Local=FVector((Target.Slot-(Illegal->PlantSlots.Num()-1)*.5f)*Illegal->GetPlantSlotSpacing(),0,Illegal->SoilBottomHeight+Illegal->SoilVolumeHeight);
+    else if(auto* Illegal=Cast<ABotanicusIllegalPlanterActor>(Actor)) Local=Illegal->GetSlotLocalLocation(Target.Slot);
     return Actor->GetActorTransform().TransformPosition(Local);
 }
 
