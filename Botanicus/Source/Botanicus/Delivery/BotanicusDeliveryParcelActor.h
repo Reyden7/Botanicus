@@ -9,6 +9,7 @@
 
 class UNiagaraSystem;
 class USoundBase;
+class UAudioComponent;
 class USoundAttenuation;
 class UBoxComponent;
 class UPhysicalMaterial;
@@ -17,6 +18,20 @@ class UAnimSequence;
 class UMaterialInterface;
 class UStaticMeshComponent;
 class UMeshComponent;
+
+/** Cosmetic playback sample, published only when the accepted tape coverage advances. */
+USTRUCT()
+struct FBotanicusParcelCuttingAudio
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	double ProgressAt = -1.0;
+	UPROPERTY()
+	float ActiveWindow = 0.f;
+	UPROPERTY()
+	float SpeedRatio = 1.f;
+};
 
 /** Replicated delivery carton opened by tracing a cutter along its tape. */
 UCLASS()
@@ -31,6 +46,7 @@ public:
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 	virtual void OnConstruction(const FTransform& Transform) override;
 
 	static UClass* ResolveParcelClass(const UWorld& World, FName ItemId, int32 Count,
@@ -150,6 +166,19 @@ private:
 	FBotanicusParcelPackaging Packaging;
 	EBotanicusParcelShape AppliedShape = EBotanicusParcelShape::Automatic;
 	float AppliedMassKg = 0.f;
+	UPROPERTY(Replicated)
+	FBotanicusParcelCuttingAudio CuttingAudio;
+	UPROPERTY(Transient)
+	TObjectPtr<USoundBase> LoadedCuttingTapeSound;
+	UPROPERTY(Transient)
+	TObjectPtr<UAudioComponent> CuttingVoice;
+	float CuttingVoiceGain = 0.f;
+	float CuttingVoicePitch = 1.f;
+	bool bCuttingVoicePaused = false;
+	double GetCuttingAudioTime() const;
+	void RecordCuttingAudioProgress(int32 AddedSegments);
+	void UpdateCuttingAudio(float DeltaSeconds);
+
 	void UpdateCutterTrace();
 	void MarkTapeSegment(int32 SegmentIndex);
 	int32 CountCutSegments() const;

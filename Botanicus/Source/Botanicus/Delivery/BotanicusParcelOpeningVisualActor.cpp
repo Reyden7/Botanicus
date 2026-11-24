@@ -16,6 +16,7 @@
 #include "NiagaraSystem.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Sound/SoundBase.h"
+#include "Sound/SoundAttenuation.h"
 #include "EngineUtils.h"
 
 namespace {
@@ -109,7 +110,9 @@ void ABotanicusParcelOpeningVisualActor::InitializeLocalPresentation()
 	bInitialized = true;
 	HideLogicalSource();
 	if (GetNetMode() == NM_DedicatedServer) return;
-	LoadedSystem = GetDefault<UBotanicusParcelOpeningSettings>()->ConfettiSystem.LoadSynchronous();
+	const auto* Settings = GetDefault<UBotanicusParcelOpeningSettings>();
+	LoadedBoxOpenedSound = Settings->BoxOpenedSound.LoadSynchronous();
+	LoadedSystem = Settings->ConfettiSystem.LoadSynchronous();
 	// Prepare real particles behind a zero-opacity material during the opening.
 	// Revealing an existing renderer and hiding the carton then share one frame.
 	if (LoadedSystem)
@@ -219,6 +222,13 @@ void ABotanicusParcelOpeningVisualActor::BurstAndHide(double Now)
 	CartonVisual->SetHiddenInGame(true, true);
 	CartonVisual->SetVisibility(false);
 	CartonVisual->SetComponentTickEnabled(false);
+	if (LoadedBoxOpenedSound)
+	{
+		// A world-positioned voice has no attachment to either carton actor.
+		UGameplayStatics::SpawnSoundAtLocation(this, LoadedBoxOpenedSound, GetActorLocation(),
+			FRotator::ZeroRotator, Settings->BoxOpenedSoundVolume, 1.f, 0.f,
+			Settings->CartonAudioAttenuation.LoadSynchronous());
+	}
 	if (HasAuthority()) { SetNetUpdateFrequency(2); ForceNetUpdate(); }
 }
 

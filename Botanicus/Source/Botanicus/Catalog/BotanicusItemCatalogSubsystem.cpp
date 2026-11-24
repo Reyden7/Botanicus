@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Catalog/BotanicusItemCatalogSubsystem.h"
+#include "Delivery/BotanicusBotanistBookActor.h"
 
 #include "Decoration/BotanicusBrokenFlowerPotActor.h"
 #include "Environment/BotanicusClimateDeviceActor.h"
@@ -462,6 +463,8 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	PottingSoil.WorldMesh = TSoftObjectPtr<UStaticMesh>(
 		FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube.Cube")));
 	PottingSoil.WorldScale = FVector(0.24f);
+	PottingSoil.WorldActorClass = TSoftClassPtr<AActor>(FSoftObjectPath(
+		TEXT("/Game/Botanicus/blueprints/BP_Item_PottingSoil.BP_Item_PottingSoil_C")));
 	PottingSoil.MaximumStack = 5;
 	PottingSoil.bSaleSoil = true;
 	PottingSoil.WeightClass = EBotanicusItemWeightClass::Hotbar;
@@ -471,6 +474,18 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	PottingSoil.AllowedPlacementSurfaces =
 		static_cast<int32>(
 			EBotanicusPlacementSurface::Floor);
+
+	FBotanicusItemDefinition& BotanistBook = NativeFallbackItems.AddDefaulted_GetRef();
+	BotanistBook.ItemKey = ABotanicusBotanistBookActor::BookKey();
+	BotanistBook.DisplayName = NSLOCTEXT("BotanicusCatalog", "BotanistBook", "Carnet du botaniste");
+	BotanistBook.Category = EBotanicusItemCategory::Tool;
+	BotanistBook.WeightClass = EBotanicusItemWeightClass::Hotbar;
+	BotanistBook.MaximumStack = 1;
+	BotanistBook.bPurchasable = false;
+	BotanistBook.AllowedPlacementSurfaces =
+		static_cast<int32>(EBotanicusPlacementSurface::Floor | EBotanicusPlacementSurface::Table);
+	BotanistBook.WorldActorClass = TSoftClassPtr<AActor>(FSoftObjectPath(
+		TEXT("/Game/Botanicus/Items/livreDeBotanist/BP_Item_BotanistBook.BP_Item_BotanistBook_C")));
 
 	const auto AddPlantTreatment =
 		[this](FName ItemKey, const FText& DisplayName, int32 Price)
@@ -770,7 +785,7 @@ void UBotanicusItemCatalogSubsystem::Initialize(
     for(int32 Count=1;Count<=6;++Count)
     {
         auto Shelf=BaseShelf;Shelf.ItemKey=FName(*FString::Printf(TEXT("SalesShelfS%d"),Count));
-        Shelf.DisplayName=FText::FromString(FString::Printf(TEXT("Étagère murale S%d"),Count));
+        Shelf.DisplayName=FText::FromString(FString::Printf(TEXT("ï¿½tagï¿½re murale S%d"),Count));
         Shelf.WorldActorClass=ABotanicusSalesShelfActor::StaticClass();Shelf.WorldScale=FVector(.44f,ABotanicusSalesShelfActor::LengthForCapacity(Count)/100.f,.04f);
         Shelf.MaximumStack=1;Shelf.Price=BaseShelf.Price*Count;Shelf.AllowedPlacementSurfaces=static_cast<int32>(EBotanicusPlacementSurface::Wall);
         NativeFallbackItems.Add(MoveTemp(Shelf));

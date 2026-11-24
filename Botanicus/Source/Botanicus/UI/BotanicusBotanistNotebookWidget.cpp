@@ -100,18 +100,22 @@ void UBotanicusBotanistNotebookWidget::NativeOnInitialized()
 	BindDesignerWidgets();
 }
 
+FReply UBotanicusBotanistNotebookWidget::NativeOnPreviewKeyDown(
+	const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
+{
+	if (InKeyEvent.GetKey() == EKeys::E || InKeyEvent.GetKey() == EKeys::Escape)
+	{
+		if (BotanicusController && !InKeyEvent.IsRepeat())
+			BotanicusController->RequestCloseBotanistNotebook();
+		return FReply::Handled();
+	}
+	return Super::NativeOnPreviewKeyDown(InGeometry, InKeyEvent);
+}
+
 FReply UBotanicusBotanistNotebookWidget::NativeOnKeyDown(
 	const FGeometry& InGeometry,
 	const FKeyEvent& InKeyEvent)
 {
-	if (InKeyEvent.GetKey() == EKeys::I || InKeyEvent.GetKey() == EKeys::Escape)
-	{
-		if (BotanicusController)
-		{
-			BotanicusController->ToggleBotanistNotebook();
-		}
-		return FReply::Handled();
-	}
 	if (InKeyEvent.GetKey() == EKeys::Left)
 	{
 		HandlePreviousPageClicked();
@@ -618,7 +622,7 @@ void UBotanicusBotanistNotebookWidget::HandleCloseClicked()
 {
 	if (BotanicusController)
 	{
-		BotanicusController->ToggleBotanistNotebook();
+		BotanicusController->RequestCloseBotanistNotebook();
 	}
 }
 

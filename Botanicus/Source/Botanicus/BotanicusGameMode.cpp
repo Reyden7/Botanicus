@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "BotanicusGameMode.h"
+#include "Delivery/BotanicusBotanistBookActor.h"
 #include "Growing/BotanicusPlanterSoil.h"
 #include "Tools/BotanicusMultiToolComponent.h"
 #include "Gardening/BotanicusGardeningRobotBase.h"
@@ -479,6 +480,7 @@ void ABotanicusGameMode::Logout(AController* Exiting)
 				WateringCan->Drop();
 			}
 		}
+		ReturnBotanistBookFrom(Exiting);
 		CapturePlayerInventory(Exiting);
 		CapturePlayerEconomy(Exiting);
 		BotanicusSaveNow();
@@ -528,7 +530,7 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 
 	CurrentSaveGame->MapName =
 		UGameplayStatics::GetCurrentLevelName(this, true);
-	CurrentSaveGame->SaveVersion = 38;
+	CurrentSaveGame->SaveVersion = 39;
 	if (const ABotanicusGameState* BotanicusGameState =
 		World->GetGameState<ABotanicusGameState>())
 	{
@@ -584,6 +586,14 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 	CurrentSaveGame->RefundZones.Reset();
 	CurrentSaveGame->bHasDeliveryZone = false;
 	CurrentSaveGame->DeliveryZoneTransform = FTransform::Identity;
+	// EndPlay can save again after the level has already released its actors.
+	const auto* PreviousBook = World->bIsTearingDown
+		? CurrentSaveGame->WorldItems.FindByPredicate(IsSavedBotanistBook) : nullptr;
+	TOptional<FBotanicusSavedWorldItem> BookBeforeTeardown;
+	if (PreviousBook)
+	{
+		BookBeforeTeardown = *PreviousBook;
+	}
 	CurrentSaveGame->WorldItems.Reset();
     CurrentSaveGame->CashRegisters.Reset();
     for(TActorIterator<ABotanicusCashRegisterActor> It(World);It;++It) if(!It->ActorHasTag(TEXT("BotanicusPlacementPreview"))) CurrentSaveGame->CashRegisters.Add(It->CaptureCheckout());
@@ -688,8 +698,10 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		if (!IsValid(*ItemIt) ||
 			ItemIt->IsActorBeingDestroyed() ||
 			ItemIt->IsA<ABotanicusCashRegisterActor>() ||
+			(ItemIt->IsA<ABotanicusBotanistBookActor>() && !ABotanicusStorageShelfActor::IsStoredWorldItem(*ItemIt)) ||
 			ItemIt->GetItemKey() == ABotanicusComputerActor::LegacyItemKey() ||
-            (ABotanicusStorageShelfActor::IsCatalogItemCompatible(this,ItemIt->GetItemKey()) &&
+            ((ItemIt->GetItemKey() == TEXT("PottingSoil") ||
+              ABotanicusStorageShelfActor::IsCatalogItemCompatible(this,ItemIt->GetItemKey())) &&
                 !ABotanicusStorageShelfActor::IsStoredWorldItem(*ItemIt)) ||
             // Equipped sale-pot models and display previews are views of existing inventory, never world items.
             ((ItemIt->IsA<ABotanicusSalePotActor>() || ItemIt->IsA<ABotanicusSalesDisplayActor>()) &&
@@ -708,6 +720,10 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 		SavedItem.Transform = ItemIt->GetActorTransform();
 		SavedItem.ItemKey = ItemIt->GetItemKey();
 		SavedItem.Quantity = ItemIt->GetQuantity();
+		if (ItemIt->IsA<ABotanicusBotanistBookActor>())
+		{
+			SavedItem.BotanistBookInstanceId = ABotanicusBotanistBookActor::BookId();
+		}
 		if (const ABotanicusIllegalPlanterActor* IllegalPlanter =
 			Cast<ABotanicusIllegalPlanterActor>(*ItemIt))
 		{
@@ -801,6 +817,12 @@ bool ABotanicusGameMode::BotanicusSaveNow()
 	{
 		CapturePlayerInventory(ControllerIt->Get());
 		CapturePlayerEconomy(ControllerIt->Get());
+	}
+
+	if (BookBeforeTeardown.IsSet() && !CurrentSaveGame->WorldItems.ContainsByPredicate(IsSavedBotanistBook) &&
+		!HasSavedBotanistBookInInventory())
+	{
+		CurrentSaveGame->WorldItems.Add(MoveTemp(BookBeforeTeardown.GetValue()));
 	}
 
 	const FString SlotName = GetAutosaveSlotName();
@@ -1133,7 +1155,8 @@ void ABotanicusGameMode::RestoreWorldState()
 	for (AActor* ExistingWorldItem : ExistingWorldItems)
 	{
 		if (IsValid(ExistingWorldItem) &&
-			!ExistingWorldItem->IsA<ABotanicusCashRegisterActor>())
+			!ExistingWorldItem->IsA<ABotanicusCashRegisterActor>() &&
+			!ExistingWorldItem->IsA<ABotanicusBotanistBookActor>())
 		{
 			ExistingWorldItem->Destroy();
 		}
@@ -1143,7 +1166,7 @@ void ABotanicusGameMode::RestoreWorldState()
 	for (const FBotanicusSavedWorldItem& SavedItem :
 		 CurrentSaveGame->WorldItems)
 	{
-		if (SavedItem.ActorClass.IsNull())
+		if (IsSavedBotanistBook(SavedItem) || SavedItem.ActorClass.IsNull())
 		{
 			continue;
 		}
@@ -1467,6 +1490,7 @@ void ABotanicusGameMode::RestoreWorldState()
 		RestoredItem->ForceNetUpdate();
 		++RestoredWorldItemCount;
 	}
+	RestoredWorldItemCount += RestoreBotanistBook();
 
 	UE_LOG(
 		LogBotanicus,

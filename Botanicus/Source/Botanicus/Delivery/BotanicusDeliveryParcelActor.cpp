@@ -212,7 +212,9 @@ void ABotanicusDeliveryParcelActor::BeginPlay()
 	{
 		// Load while the carton is still closed, before the player cuts its tape.
 		// First-use compilation/resource setup must not delay the disappearance frame.
-		PreloadedConfetti = GetDefault<UBotanicusParcelOpeningSettings>()->ConfettiSystem.LoadSynchronous();
+		const auto* Settings = GetDefault<UBotanicusParcelOpeningSettings>();
+		PreloadedConfetti = Settings->ConfettiSystem.LoadSynchronous();
+		if (!bOpened) LoadedCuttingTapeSound = Settings->CuttingTapeSound.LoadSynchronous();
 #if WITH_EDITOR
 		if (PreloadedConfetti) PreloadedConfetti->RequestCompile(false);
 #endif
@@ -230,6 +232,7 @@ void ABotanicusDeliveryParcelActor::GetLifetimeReplicatedProps(
 	DOREPLIFETIME(ABotanicusDeliveryParcelActor, Packaging);
 	DOREPLIFETIME(ABotanicusDeliveryParcelActor, Quantity);
 	DOREPLIFETIME(ABotanicusDeliveryParcelActor, CutCoverageMask);
+	DOREPLIFETIME(ABotanicusDeliveryParcelActor, CuttingAudio);
 	DOREPLIFETIME(ABotanicusDeliveryParcelActor, bOpened);
 	DOREPLIFETIME(ABotanicusDeliveryParcelActor, OpeningVisualId);
 	DOREPLIFETIME(ABotanicusDeliveryParcelActor, OpeningStartedAt);
@@ -270,7 +273,16 @@ void ABotanicusDeliveryParcelActor::Tick(float DeltaSeconds)
 
 	if (HasAuthority() && ActiveCutter.IsValid() && !bOpened)
 	{
+		const uint16 PreviousCoverage = CutCoverageMask;
 		UpdateCutterTrace();
+		if (!bOpened && CutCoverageMask != PreviousCoverage)
+		{
+			RecordCuttingAudioProgress(FPlatformMath::CountBits(CutCoverageMask & ~PreviousCoverage));
+		}
+	}
+	if (GetNetMode() != NM_DedicatedServer && (CuttingAudio.ProgressAt >= 0.0 || CuttingVoice))
+	{
+		UpdateCuttingAudio(DeltaSeconds);
 	}
 
 	if (ActorHasTag(TEXT("BotanicusPlacementPreview")))
@@ -562,6 +574,91 @@ void ABotanicusDeliveryParcelActor::EndCutting(AActor* Interactor)
 	}
 	ActiveCutter.Reset();
 	bHasLastCutSample = false;
+	if (CuttingAudio.ActiveWindow > 0.f)
+	{
+		CuttingAudio = {};
+		ForceNetUpdate();
+	}
+}
+
+double ABotanicusDeliveryParcelActor::GetCuttingAudioTime() const
+{
+	const AGameStateBase* State = GetWorld()->GetGameState();
+	return State ? State->GetServerWorldTimeSeconds() : GetWorld()->GetTimeSeconds();
+}
+
+void ABotanicusDeliveryParcelActor::RecordCuttingAudioProgress(int32 AddedSegments)
+{
+	// A segment every 100 ms is the reference speed, in either carton format.
+	constexpr float ReferenceSecondsPerSegment = .10f;
+	const double Now = GetCuttingAudioTime();
+	const double Elapsed = Now - CuttingAudio.ProgressAt;
+	const bool bContinuous = CuttingAudio.ProgressAt >= 0.0 && Elapsed > 0.0 &&
+		Elapsed <= CuttingAudio.ActiveWindow;
+	const float SecondsPerSegment = bContinuous ? static_cast<float>(Elapsed) / AddedSegments : ReferenceSecondsPerSegment;
+	CuttingAudio.ProgressAt = Now;
+	CuttingAudio.SpeedRatio = FMath::Clamp(ReferenceSecondsPerSegment / SecondsPerSegment, .1f, 4.f);
+	// Hold through the gaps in the discrete coverage mask, then fade if it stalls.
+	CuttingAudio.ActiveWindow = FMath::Clamp(SecondsPerSegment * 1.65f, .20f, .45f);
+	if (!bContinuous) CuttingAudio.ActiveWindow = .32f;
+}
+
+void ABotanicusDeliveryParcelActor::UpdateCuttingAudio(float DeltaSeconds)
+{
+	const double Age = GetCuttingAudioTime() - CuttingAudio.ProgressAt;
+	const bool bAdvancing = !bOpened && !Carrier && CuttingAudio.ProgressAt >= 0.0 &&
+		Age <= CuttingAudio.ActiveWindow;
+	if (!CuttingVoice && (!bAdvancing || !LoadedCuttingTapeSound)) return;
+	if (!bAdvancing && bCuttingVoicePaused && !bOpened) return;
+
+	const auto* Settings = GetDefault<UBotanicusParcelOpeningSettings>();
+	const float TargetPitch = FMath::Clamp(Settings->CuttingSoundReferencePlayRate * CuttingAudio.SpeedRatio,
+		Settings->CuttingSoundMinPlayRate, FMath::Max(Settings->CuttingSoundMinPlayRate, Settings->CuttingSoundMaxPlayRate));
+	if (!CuttingVoice)
+	{
+		CuttingVoice = UGameplayStatics::SpawnSoundAttached(LoadedCuttingTapeSound, GetRootComponent(),
+			NAME_None, FVector::ZeroVector, EAttachLocation::KeepRelativeOffset, true,
+			.001f, TargetPitch, 0.f, Settings->CartonAudioAttenuation.LoadSynchronous(), nullptr, false);
+		if (!CuttingVoice) return;
+		CuttingVoicePitch = TargetPitch;
+	}
+	if (bAdvancing && bCuttingVoicePaused)
+	{
+		CuttingVoice->SetPaused(false);
+		bCuttingVoicePaused = false;
+	}
+	if (bAdvancing)
+	{
+		const float Blend = 1.f - FMath::Exp(-Settings->CuttingSoundSpeedSmoothing * DeltaSeconds);
+		CuttingVoicePitch = FMath::Lerp(CuttingVoicePitch, TargetPitch, Blend);
+		CuttingVoice->SetPitchMultiplier(CuttingVoicePitch);
+	}
+	CuttingVoiceGain = FMath::FInterpConstantTo(CuttingVoiceGain, bAdvancing ? 1.f : 0.f,
+		DeltaSeconds, 1.f / FMath::Max(.001f, Settings->CuttingSoundFadeDuration));
+	CuttingVoice->SetVolumeMultiplier(CuttingVoiceGain * Settings->CuttingSoundVolume);
+	if (!bAdvancing && CuttingVoiceGain <= 0.f)
+	{
+		if (bOpened)
+		{
+			CuttingVoice->DestroyComponent();
+			CuttingVoice = nullptr;
+		}
+		else
+		{
+			CuttingVoice->SetPaused(true);
+			bCuttingVoicePaused = true;
+		}
+	}
+}
+
+void ABotanicusDeliveryParcelActor::EndPlay(const EEndPlayReason::Type Reason)
+{
+	if (CuttingVoice)
+	{
+		CuttingVoice->DestroyComponent();
+		CuttingVoice = nullptr;
+	}
+	Super::EndPlay(Reason);
 }
 
 void ABotanicusDeliveryParcelActor::UpdateCutterTrace()
@@ -700,8 +797,7 @@ void ABotanicusDeliveryParcelActor::MarkTapeSegment(
 		ABotanicusCharacter* CutterCharacter = ActiveCutter.Get();
 		bOpened = true;
 		OpeningStartedAt = GetWorld()->GetGameState()->GetServerWorldTimeSeconds();
-		ActiveCutter.Reset();
-		bHasLastCutSample = false;
+		EndCutting(CutterCharacter);
 		SendInteractorMessage(
 			CutterCharacter,
 			TEXT("Scotch coupe : appuyez sur E pour deballer le carton."));

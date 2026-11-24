@@ -50,6 +50,8 @@ private:
 	void InitializeLocalPresentation();
 	void HideLogicalSource();
 	void PrepareConfetti();
+	UPROPERTY(Transient)
+	TObjectPtr<class USoundBase> LoadedBoxOpenedSound;
 	void BurstAndHide(double Now);
 	UFUNCTION() void OnRep_Presentation();
 	UPROPERTY(ReplicatedUsing=OnRep_Presentation) FBotanicusParcelOpeningPresentation Presentation;

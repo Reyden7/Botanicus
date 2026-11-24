@@ -29,12 +29,24 @@ public:
 	virtual void ConfigureAsLocalPreview(bool bIsValid);
 	void ConfigureAsLocalInspection();
 	void LaunchItem(const FVector& InitialVelocity);
-	FVector GetPlacementBoxExtent() const;
+	virtual FVector GetPlacementBoxExtent() const;
 	/** Signed vertical offset from the visual mesh bottom to the actor pivot. */
-	float GetPlacementPivotToBottomOffset() const;
+	virtual float GetPlacementPivotToBottomOffset() const;
 
 	FName GetItemKey() const { return ItemKey; }
 	int32 GetQuantity() const { return Quantity; }
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Soil Bag Stack")
+	bool bCanStackSoilBags = true;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Soil Bag Stack", meta=(ClampMin="1", EditCondition="bCanStackSoilBags"))
+	int32 MaxSoilBagStackCount = 10;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Soil Bag Stack", meta=(ClampMin="-2", ClampMax="4", Units="cm", EditCondition="bCanStackSoilBags"))
+	float StackVerticalOffset = 0.2f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Soil Bag Stack", meta=(ClampMin="0", Units="cm", EditCondition="bCanStackSoilBags"))
+	float StackSnapDistance = 45.f;
 
 protected:
 	/** Lets specialized placeable actors refine the catalogue appearance. */

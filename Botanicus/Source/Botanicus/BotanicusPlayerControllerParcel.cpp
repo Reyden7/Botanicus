@@ -420,6 +420,11 @@ bool ABotanicusPlayerController::ResolveDeliveryParcelPlacement(
 	}
 
 	const FVector BoxExtent = Parcel->GetParcelHalfExtent().GetAbs();
+	if (const auto Furniture = ResolveFurniturePlacement(TEXT("DeliveryParcel"), RequestedYaw,
+		[&BoxExtent] { return FBox(-BoxExtent, BoxExtent); }, Parcel->GetActorScale3D(), Parcel, OutTransform); Furniture.IsSet())
+	{
+		return Furniture.GetValue();
+	}
 	FCollisionQueryParams FloorQuery(
 		SCENE_QUERY_STAT(BotanicusDeliveryParcelPlacementFloor),
 		false);

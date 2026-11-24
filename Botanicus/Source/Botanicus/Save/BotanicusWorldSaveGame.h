@@ -172,6 +172,8 @@ USTRUCT()
 struct BOTANICUS_API FBotanicusSavedWorldItem
 {
 	GENERATED_BODY()
+
+	UPROPERTY() FGuid BotanistBookInstanceId;
     UPROPERTY() FBotanicusGardeningSave GardeningRobot;
     UPROPERTY() TArray<FBotanicusSavedSalesShelfSlot> SalesShelfSlots;
     UPROPERTY() FGuid DisplayedPotInstanceId;
@@ -309,7 +311,7 @@ class BOTANICUS_API UBotanicusWorldSaveGame : public USaveGame
 
 public:
 	UPROPERTY()
-	int32 SaveVersion = 38;
+	int32 SaveVersion = 39;
 
     UPROPERTY() bool bElectricWhipUnlocked=false;
 

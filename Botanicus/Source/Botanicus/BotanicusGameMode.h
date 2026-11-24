@@ -8,6 +8,7 @@
 
 class AController;
 class APlayerController;
+struct FBotanicusSavedWorldItem;
 class UBotanicusWorldSaveGame;
 
 /**
@@ -26,6 +27,7 @@ public:
 		const FString& Options,
 		FString& ErrorMessage) override;
 	virtual void BeginPlay() override;
+	void ReturnBotanistBookFrom(AController* Controller);
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void PostLogin(APlayerController* NewPlayer) override;
 	virtual void RestartPlayer(AController* NewPlayer) override;
@@ -63,6 +65,9 @@ private:
 	void LoadAutosave();
 	void InitializeSharedEconomy();
 	void RestoreWorldState();
+	int32 RestoreBotanistBook();
+	static bool IsSavedBotanistBook(const FBotanicusSavedWorldItem& Item);
+	bool HasSavedBotanistBookInInventory() const;
 	void CapturePlayerInventory(const AController* Controller);
 	void RestorePlayerInventory(AController* Controller);
 	void CapturePlayerEconomy(const AController* Controller);

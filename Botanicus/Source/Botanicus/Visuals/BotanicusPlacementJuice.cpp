@@ -8,6 +8,7 @@
 #include "Delivery/BotanicusPlaceableItemActor.h"
 #include "Delivery/BotanicusLargeEquipmentActor.h"
 #include "Delivery/BotanicusDeliveryParcelActor.h"
+#include "Delivery/BotanicusBotanistBookActor.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
@@ -80,13 +81,16 @@ FVector UBotanicusJuiceWorldSubsystem::PlacementHandPosition(APawn* Pawn,FName E
         return Character->GetMesh()->GetSocketLocation(TEXT("hand_r"));
     return Pawn->GetPawnViewLocation()+Pawn->GetBaseAimRotation().Vector()*45.f-FVector(0,0,25);
 }
-void UBotanicusJuiceWorldSubsystem::PlacementSucceeded(AActor* Item,APawn* Placer,bool bContentsOnly)
+void UBotanicusJuiceWorldSubsystem::PlacementSucceeded(AActor* Item, APawn* Placer, bool bContentsOnly, bool bPlaySound)
 {
     if(!IsValid(Item) || Item->GetWorld()->GetNetMode()==NM_Client || !Item->HasAuthority())return;
     auto* Display=bContentsOnly ? Cast<ABotanicusSalesDisplayActor>(Item):nullptr;
     const FName Key=Display ? Display->GetDisplayedPlantItemKey():PlacementKey(Item);
+    const FName Sound = bPlaySound
+        ? (Display ? FName(TEXT("PotPlace")) : UBotanicusAudioWorldSubsystem::PlacementEvent(Item))
+        : NAME_None;
     if(auto* Juice=Item->GetWorld()->GetSubsystem<UBotanicusJuiceWorldSubsystem>())
-        if(auto* Events=Juice->GetRelay())Events->Placement(Item,Placer,Key,Item->GetActorTransform(),PlacementHandPosition(Placer,Key),Display ? FName(TEXT("PotPlace")):UBotanicusAudioWorldSubsystem::PlacementEvent(Item),bContentsOnly);
+        if(auto* Events=Juice->GetRelay())Events->Placement(Item,Placer,Key,Item->GetActorTransform(),PlacementHandPosition(Placer,Key),Sound,bContentsOnly);
 }
 bool UBotanicusJuiceWorldSubsystem::SetPlacementHologram(AActor* Preview,bool bValid)
 {
@@ -96,11 +100,11 @@ bool UBotanicusJuiceWorldSubsystem::SetPlacementHologram(AActor* Preview,bool bV
     if(!Hologram)
     {
         UMaterialInterface* BaseMaterial = PlacementHologramMaterial;
-        if (Preview->IsA<ABotanicusDeliveryParcelActor>())
+        if (Preview->IsA<ABotanicusDeliveryParcelActor>() || Preview->IsA<ABotanicusBotanistBookActor>())
         {
-            static const TSoftObjectPtr<UMaterialInterface> CartonHologram(FSoftObjectPath(TEXT(
+            static const TSoftObjectPtr<UMaterialInterface> SkeletalHologram(FSoftObjectPath(TEXT(
                 "/Game/Botanicus/Materials/Juice/Placement/M_PlacementHologram_Carton.M_PlacementHologram_Carton")));
-            if (auto* RigMaterial = CartonHologram.LoadSynchronous())
+            if (auto* RigMaterial = SkeletalHologram.LoadSynchronous())
                 BaseMaterial = RigMaterial;
         }
         auto& New = PlacementHolograms.Add(Preview);

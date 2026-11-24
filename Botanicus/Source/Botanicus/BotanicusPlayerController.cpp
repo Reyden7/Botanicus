@@ -1,6 +1,8 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "BotanicusPlayerController.h"
+#include "Building/BotanicusPlacementSurfaceComponent.h"
+#include "Delivery/BotanicusBotanistBookActor.h"
 #include "Tools/BotanicusMultiToolComponent.h"
 #include "UI/BotanicusPlantContextSubsystem.h"
 #include "UI/BotanicusPlantContextSettings.h"
@@ -94,7 +96,6 @@
 
 namespace
 {
-	constexpr int32 PottingSoilGroundStackLimit = 5;
 
 	bool IsSeedPacketItemKey(FName ItemKey)
 	{
@@ -710,16 +711,21 @@ void ABotanicusPlayerController::BeginPlay()
 
 void ABotanicusPlayerController::SetPawn(APawn* InPawn)
 {
-	if (InPawn != GetPawn())
+	const bool bPawnChanged = InPawn != GetPawn();
+	if (bPawnChanged)
 	{
+		ClearBotanistBookEquipment();
 		ClearLocalDeliveryParcelCarry();
 		ReleaseServerDeliveryParcelCarry();
 	}
 	Super::SetPawn(InPawn);
+	if (bPawnChanged)
+		BindBotanistBookQuickBar();
 }
 
 void ABotanicusPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	ClearBotanistBookEquipment();
 	if (bFurnitureMoveModeActive || LocalHighlightedFurniture.Num() > 0)
 	{
 		bFurnitureMoveModeActive = false;
@@ -1032,13 +1038,9 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		return true;
 
 	if (Params.Key == EKeys::I)
-	{
-		if (Params.Event == IE_Pressed)
-		{
-			ToggleBotanistNotebook();
-		}
 		return true;
-	}
+	if (bLocalBookSessionActive)
+		return HandleBotanistBookInput(Params);
 
 	if (Params.Key == EKeys::LeftAlt)
 	{
@@ -1173,15 +1175,8 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		}
 	}
 
-	if (BotanistNotebookWidget &&
-		BotanistNotebookWidget->GetVisibility() == ESlateVisibility::Visible)
-	{
-		if (Params.Key == EKeys::Escape && Params.Event == IE_Pressed)
-		{
-			ToggleBotanistNotebook();
-		}
+	if (HandleBotanistBookInput(Params))
 		return true;
-	}
 
 	// While a prepared pot is held outside the inventory, E cannot trigger
 	// another world interaction. Placement controls are handled below.
@@ -1435,7 +1430,7 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		if (Params.Key == EKeys::LeftMouseButton &&
 			Params.Event == IE_Pressed)
 		{
-			if (IsValid(LocalMovedPlaceableItem))
+			if (IsValid(LocalMovedPlaceableItem) || IsPlacingBotanistBook())
 			{
 				ConfirmQuickBarItemPlacement();
 			}
@@ -1850,7 +1845,7 @@ void ABotanicusPlayerController::SetInteractionTargetHighlighted(
 		{
 			Mesh->SetOverlayMaterial(
 				bHighlighted
-					? InteractionHighlightMaterial
+					? (Actor->IsA<ABotanicusBotanistBookActor>() ? nullptr : InteractionHighlightMaterial)
 					: nullptr);
 		}
 	}
@@ -3241,19 +3236,15 @@ ClientOpenOrderCatalogFromComputer_Implementation(
 	}
 }
 
-void ABotanicusPlayerController::ToggleBotanistNotebook()
+void ABotanicusPlayerController::SetBotanistNotebookVisible(bool bOpening)
 {
 	if (!IsLocalPlayerController())
-	{
 		return;
-	}
-	InitializeBotanistNotebookWidget();
-	if (!BotanistNotebookWidget)
-	{
+	if (bOpening)
+		InitializeBotanistNotebookWidget();
+	if (!BotanistNotebookWidget ||
+		bOpening == (BotanistNotebookWidget->GetVisibility() == ESlateVisibility::Visible))
 		return;
-	}
-	const bool bOpening =
-		BotanistNotebookWidget->GetVisibility() != ESlateVisibility::Visible;
 	BotanistNotebookWidget->SetVisibility(
 		bOpening ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	if (bOpening)
@@ -4748,8 +4739,8 @@ void ABotanicusPlayerController::BeginQuickBarItemPlacement()
 		return;
 	}
 
-	UClass* PreviewClass =
-		Definition->WorldActorClass.LoadSynchronous();
+	UClass* PreviewClass = SelectedSlot.ItemKey == ABotanicusBotanistBookActor::BookKey()
+		? ABotanicusBotanistBookActor::ResolveBookClass() : Definition->WorldActorClass.LoadSynchronous();
 	if (!PreviewClass ||
 		!PreviewClass->IsChildOf(
 			ABotanicusPlaceableItemActor::StaticClass()))
@@ -4778,7 +4769,7 @@ void ABotanicusPlayerController::BeginQuickBarItemPlacement()
 		IsSeedPacketItemKey(SelectedSlot.ItemKey);
 	const int32 GroundQuantityLimit =
 		SelectedSlot.ItemKey == TEXT("PottingSoil")
-			? PottingSoilGroundStackLimit
+			? GetSoilBagPlacementLimit(Definition)
 			: bIsSeedPacket
 				? FMath::Max(1, Definition->MaximumStack)
 				: 1;
@@ -5067,6 +5058,13 @@ void ABotanicusPlayerController::UpdateEquippedQuickBarItem()
 		!CarriedTransplantItemKey.IsNone()
 			? CarriedTransplantItemKey
 			: SelectedSlot.ItemKey;
+
+	// The replicated book presents its animation for the holder and observers.
+	if (SelectedSlot.ItemKey == ABotanicusBotanistBookActor::BookKey())
+	{
+		DestroyEquippedQuickBarItem();
+		return;
+	}
 
 	// Empty selection and presentation modes still remove the held actor immediately.
 	if (SelectedSlot.IsEmpty())
@@ -5975,7 +5973,7 @@ void ABotanicusPlayerController::UpdateQuickBarItemPlacement(
 				FindItemDefinition(this, LocalQuickBarItemKey);
 			const int32 ItemGroundLimit =
 				LocalQuickBarItemKey == TEXT("PottingSoil")
-					? PottingSoilGroundStackLimit
+					? GetSoilBagPlacementLimit(Definition)
 					: Definition
 						? FMath::Max(1, Definition->MaximumStack)
 						: 1;
@@ -6152,7 +6150,7 @@ void ABotanicusPlayerController::AdjustQuickBarPlacementQuantity(
 				FindItemDefinition(this, LocalQuickBarItemKey);
 			const int32 GroundQuantityLimit =
 				LocalQuickBarItemKey == TEXT("PottingSoil")
-					? PottingSoilGroundStackLimit
+					? GetSoilBagPlacementLimit(Definition)
 					: Definition
 						? FMath::Max(1, Definition->MaximumStack)
 						: 1;
@@ -6523,10 +6521,19 @@ bool ABotanicusPlayerController::ResolveQuickBarItemPlacement(
 	int32 RequestedQuantity,
 	bool bFloorOnlyPlacement) const
 {
+	if (ItemKey == ABotanicusBotanistBookActor::BookKey())
+		return ResolveBotanistBookPlacement(RequestedLocation, RequestedYaw, OutTransform);
+
 	UWorld* World = GetWorld();
 	APawn* ControlledPawn = GetPawn();
 	const FBotanicusItemDefinition* Definition =
 		FindItemDefinition(this, ItemKey);
+	if (!IgnoredWorldItem && Definition && ItemKey == TEXT("PottingSoil"))
+	{
+		FSoilBagPlacement Plan;
+		return ResolveSoilBagPlacement(*Definition, RequestedLocation, RequestedYaw, RequestedQuantity,
+			OutTransform, Plan);
+	}
     if(ABotanicusSalesShelfActor::CapacityForKey(ItemKey))
         return ABotanicusSalesShelfActor::ResolveWallPlacement(const_cast<ABotanicusPlayerController*>(this),ItemKey,OutTransform,IsValid(IgnoredWorldItem) ? IgnoredWorldItem:LocalQuickBarItemPreview.Get());
 
@@ -6879,6 +6886,44 @@ bool ABotanicusPlayerController::ResolveQuickBarItemPlacement(
 				OutTransform = WorkbenchTransform;
 				return true;
 			}
+		}
+	}
+
+	if (!IsFurnitureActor(PlacementPlaceable))
+	{
+		const auto GetFurnitureBounds = [&]()
+		{
+			UClass* ItemClass = !PlacementPlaceable && Definition ? Definition->WorldActorClass.LoadSynchronous() : nullptr;
+			const auto* Defaults = ItemClass ? Cast<ABotanicusPlaceableItemActor>(ItemClass->GetDefaultObject()) : nullptr;
+			FBox Bounds(FVector(-EffectiveBoxExtent.X, -EffectiveBoxExtent.Y, -PlacementBottomOffset),
+				FVector(EffectiveBoxExtent.X, EffectiveBoxExtent.Y, 2 * EffectiveBoxExtent.Z - PlacementBottomOffset));
+			const auto* GeometryActor = PlacementPlaceable ? PlacementPlaceable : Defaults;
+			if (!bCalibratedWateringCan && (!Definition || Definition->CollisionHalfExtentOverride.IsNearlyZero()))
+			{
+				if (GeometryActor && GeometryActor->UsesBlueprintAppearance() && GeometryActor->Mesh &&
+					GeometryActor->Mesh->GetStaticMesh())
+				{
+					Bounds = GeometryActor->Mesh->GetStaticMesh()->GetBounds().GetBox().TransformBy(
+						GeometryActor->Mesh->GetRelativeTransform() * FTransform(FQuat::Identity, FVector::ZeroVector, PlacementScale));
+				}
+				else if (Definition)
+				{
+					const UItemDataAsset* Data = UItemDataSubsystem::Get(this).GetItemDataAsset(ItemKey);
+					const auto* ItemMesh = Data ? Data->GetItemStaticMesh().LoadSynchronous() : nullptr;
+					const auto* SurfaceMesh = ItemMesh ? ItemMesh : Definition->WorldMesh.LoadSynchronous();
+					if (SurfaceMesh)
+					{
+						Bounds = SurfaceMesh->GetBounds().GetBox().TransformBy(FTransform(FQuat::Identity,
+							FVector::ZeroVector, PlacementScale * (ItemMesh ? FVector::OneVector : Definition->WorldScale)));
+					}
+				}
+			}
+			return Bounds;
+		};
+		if (const auto Furniture = ResolveFurniturePlacement(ItemKey, RequestedYaw, GetFurnitureBounds, PlacementScale,
+			IgnoredWorldItem, OutTransform); Furniture.IsSet())
+		{
+			return Furniture.GetValue();
 		}
 	}
 
@@ -7256,6 +7301,11 @@ bool ABotanicusPlayerController::TryMoveNearbyPlaceableItem()
 		return false;
 	}
 
+	if (HasSoilBagAbove(NearestItem))
+	{
+		ClientMessage(TEXT("Reprenez d'abord le sac du dessus."));
+		return true;
+	}
 	BeginPlaceableItemMoveCharge(NearestItem);
 	return true;
 }
@@ -9177,6 +9227,11 @@ void ABotanicusPlayerController::
 		return;
 	}
 
+	if (UBotanicusPlacementSurfaceComponent::HasSupportedItems(Equipment))
+	{
+		ClientMessage(TEXT("Retirez les objets poses avant de deplacer ce meuble."));
+		return;
+	}
 	if (IsFurnitureActor(Equipment) &&
 		!bServerFurnitureMoveModeActive)
 	{
@@ -9425,6 +9480,11 @@ void ABotanicusPlayerController::
 		}
 	}
 
+	if (UBotanicusPlacementSurfaceComponent::HasSupportedItems(Equipment))
+	{
+		ClientMessage(TEXT("Retirez les objets poses avant de deplacer ce meuble."));
+		return;
+	}
 	Equipment->BeginCooperativeHold(BotanicusCharacter);
 	if (Equipment->GetCarrier() == BotanicusCharacter &&
 		!IsValid(Equipment->GetHelper()))
@@ -9811,6 +9871,10 @@ void ABotanicusPlayerController::
 	}
 
 	const FBotanicusQuickBarSlot Slot = QuickBar->GetSlot(SlotIndex);
+	const bool bBook = ItemKey == ABotanicusBotanistBookActor::BookKey();
+	if (bBook && (Quantity != 1 || Slot.InstanceId != ABotanicusBotanistBookActor::BookId() ||
+		ServerBookSession.IsValid()))
+		return;
 	if (Slot.IsEmpty() ||
 		Slot.ItemKey != ItemKey ||
 		Slot.InstanceId != InstanceId ||
@@ -9823,6 +9887,19 @@ void ABotanicusPlayerController::
 	}
 
 	FTransform PlacementTransform;
+	if (ItemKey == TEXT("PottingSoil"))
+	{
+		FSoilBagPlacement Plan;
+		if (!ResolveSoilBagPlacement(*Definition, RequestedLocation, RequestedYaw, Quantity, PlacementTransform, Plan) ||
+			!PlacementTransform.GetLocation().Equals(FVector(RequestedLocation), 3.f))
+		{
+			ClientMessage(TEXT("Placement refuse : position ou pile modifiee."));
+			return;
+		}
+		PlaceSoilBags(*QuickBar, SlotIndex, InstanceId, *Definition, PlacementTransform, Plan, Quantity);
+		return;
+	}
+
 	const FTransform RequestedShelfPose(FRotator(0,RequestedYaw,0),FVector(RequestedLocation));
 	if (!(ABotanicusSalesShelfActor::CapacityForKey(ItemKey) ? ABotanicusSalesShelfActor::ResolveWallPlacement(this,ItemKey,PlacementTransform,nullptr,&RequestedShelfPose):ResolveQuickBarItemPlacement(
 			ItemKey,
@@ -9837,6 +9914,9 @@ void ABotanicusPlayerController::
 			TEXT("Placement refuse : position invalide."));
 		return;
 	}
+
+	if (bBook && FVector::DistSquared(PlacementTransform.GetLocation(), FVector(RequestedLocation)) > FMath::Square(12.f))
+		return;
 
 	const FVector StorageItemExtent =
 		!Definition->CollisionHalfExtentOverride.IsNearlyZero()
@@ -9856,16 +9936,11 @@ void ABotanicusPlayerController::
 			DestinationShelf,
 			DestinationSlotIndex,
 			ExistingStack);
-	const bool bValidGroundSoilStack =
-		!bStorageDestination &&
-		ItemKey == TEXT("PottingSoil") &&
-		Quantity <= PottingSoilGroundStackLimit;
 	const bool bValidGroundSeedStack =
 		!bStorageDestination &&
 		IsSeedPacketItemKey(ItemKey) &&
 		Quantity <= FMath::Max(1, Definition->MaximumStack);
 	if (!bStorageDestination && Quantity != 1 &&
-		!bValidGroundSoilStack &&
 		!bValidGroundSeedStack)
 	{
 		ClientMessage(
@@ -9910,8 +9985,8 @@ void ABotanicusPlayerController::
 	FActorSpawnParameters SpawnParameters;
 	SpawnParameters.SpawnCollisionHandlingOverride =
 		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	UClass* PlacedItemClass =
-		Definition->WorldActorClass.LoadSynchronous();
+	UClass* PlacedItemClass = bBook
+		? ABotanicusBotanistBookActor::ResolveBookClass() : Definition->WorldActorClass.LoadSynchronous();
 	if (!PlacedItemClass ||
 		!PlacedItemClass->IsChildOf(
 			ABotanicusPlaceableItemActor::StaticClass()))
@@ -9977,7 +10052,8 @@ void ABotanicusPlayerController::
 		FVector_NetQuantizeNormal ThrowDirection,
 		float HoldDuration)
 {
-	if (ItemKey == ABotanicusComputerActor::LegacyItemKey())
+	if (ItemKey == ABotanicusComputerActor::LegacyItemKey() ||
+		ItemKey == ABotanicusBotanistBookActor::BookKey())
 	{
 		return;
 	}
@@ -10107,6 +10183,18 @@ void ABotanicusPlayerController::
     if(auto* Slot=Cast<ABotanicusSalesDisplayActor>(WorldItem);Slot && Slot->IsShelfSlot()){ClientEndPlaceableItemHold();return;}
     if(auto* Shelf=Cast<ABotanicusSalesShelfActor>(WorldItem);Shelf && Shelf->HasContents()){ClientMessage(TEXT("Reprenez les pots avant de d�placer cette �tag�re."));ClientEndPlaceableItemHold();return;}
 
+	if (UBotanicusPlacementSurfaceComponent::HasSupportedItems(WorldItem))
+	{
+		ClientMessage(TEXT("Retirez les objets poses avant de deplacer ce meuble."));
+		ClientEndPlaceableItemHold();
+		return;
+	}
+
+	if (IsValid(Cast<ABotanicusBotanistBookActor>(WorldItem)))
+	{
+		ClientEndPlaceableItemHold();
+		return;
+	}
 	if (WorldItem &&
 		(WorldItem->GetItemKey() == TEXT("CashRegister") ||
 		 WorldItem->IsA<ABotanicusCashRegisterActor>()))
@@ -10158,6 +10246,12 @@ void ABotanicusPlayerController::
 		}
 	}
 
+	if (HasSoilBagAbove(WorldItem))
+	{
+		ClientMessage(TEXT("Reprenez d'abord le sac du dessus."));
+		ClientEndPlaceableItemHold();
+		return;
+	}
 	if (ServerMovedPlaceableItem != WorldItem)
 	{
 		bServerPlaceablePickupAudioConfirmed = false;
@@ -10243,6 +10337,19 @@ void ABotanicusPlayerController::
 		ClientMessage(
 			TEXT(
 				"Impossible de prendre cet objet dans l'etagere."));
+		ServerMovedPlaceableItem = nullptr;
+		return;
+	}
+	if (UBotanicusPlacementSurfaceComponent::HasSupportedItems(WorldItem))
+	{
+		ClientMessage(TEXT("Retirez les objets poses avant de deplacer ce meuble."));
+		ClientEndPlaceableItemHold();
+		ServerMovedPlaceableItem = nullptr;
+		return;
+	}
+	if (HasSoilBagAbove(WorldItem))
+	{
+		ClientMessage(TEXT("Reprenez d'abord le sac du dessus."));
 		ServerMovedPlaceableItem = nullptr;
 		return;
 	}
@@ -10393,7 +10500,21 @@ void ABotanicusPlayerController::
 		return;
 	}
 
+	if (UBotanicusPlacementSurfaceComponent::HasSupportedItems(WorldItem))
+	{
+		ClientMessage(TEXT("Retirez les objets poses avant de deplacer ce meuble."));
+		ClientEndPlaceableItemHold();
+		ServerMovedPlaceableItem = nullptr;
+		return;
+	}
+
 	FTransform PlacementTransform;
+	if (HasSoilBagAbove(WorldItem))
+	{
+		ClientMessage(TEXT("Reprenez d'abord le sac du dessus."));
+		ServerMovedPlaceableItem = nullptr;
+		return;
+	}
 	const FTransform RequestedShelfPose(FRotator(0,RequestedYaw,0),FVector(RequestedLocation));
 	if (!(ABotanicusSalesShelfActor::CapacityForKey(WorldItem->GetItemKey()) ? ABotanicusSalesShelfActor::ResolveWallPlacement(this,WorldItem->GetItemKey(),PlacementTransform,WorldItem,&RequestedShelfPose):ResolveQuickBarItemPlacement(
 			WorldItem->GetItemKey(),

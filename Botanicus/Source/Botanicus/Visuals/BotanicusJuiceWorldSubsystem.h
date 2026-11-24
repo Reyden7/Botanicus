@@ -88,7 +88,7 @@ public:
     UFUNCTION(BlueprintPure) int32 GetPickupCopyCount() const;
     UFUNCTION(BlueprintPure) FVector GetPickupPhaseSample() const;
     /** Reuses the existing successful placement branches and cosmetic relay. */
-    static void PlacementSucceeded(AActor* Item,APawn* Placer,bool bContentsOnly=false);
+    static void PlacementSucceeded(AActor* Item, APawn* Placer, bool bContentsOnly = false, bool bPlaySound = true);
     static FVector PlacementHandPosition(APawn* Pawn,FName ExpectedItem);
     void ReceivePlacement(uint32 Sequence,AActor* Item,APawn* Placer,FName ItemKey,const FTransform& Final,const FVector& Start,FName AudioId,bool bContentsOnly=false);
     bool SetPlacementHologram(AActor* Preview,bool bValid);

@@ -29,6 +29,8 @@ class UBotanicusHudMessageWidget;
 class UBotanicusHudLayoutWidget;
 class UBotanicusThrowPowerWidget;
 class ABotanicusGameState;
+class ABotanicusBotanistBookActor;
+struct FBotanicusItemDefinition;
 class ACameraActor;
 class AActor;
 class ABotanicusDeliveryParcelActor;
@@ -223,7 +225,10 @@ public:
 	void ToggleDevelopmentPanel();
 
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Botanist Notebook")
-	void ToggleBotanistNotebook();
+	void RequestCloseBotanistNotebook();
+	void ShowBotanistBookSession(ABotanicusBotanistBookActor* Book);
+	void FinishBotanistBookSession(ABotanicusBotanistBookActor* Book);
+	bool IsPlacingBotanistBook() const;
 
 	UFUNCTION(Client, Reliable)
 	void ClientOpenOrderCatalogFromComputer(
@@ -429,6 +434,7 @@ protected:
 	virtual void BeginPlay() override;
 
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void Destroyed() override;
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
@@ -471,6 +477,22 @@ protected:
 	void InitializeWorkbenchUpgradeWidget();
 	void InitializeDevelopmentPanelWidget();
 	void InitializeBotanistNotebookWidget();
+	void SetBotanistNotebookVisible(bool bVisible);
+	bool HandleBotanistBookInput(const FInputKeyEventArgs& Params);
+	ABotanicusBotanistBookActor* FindAimedBotanistBook() const;
+	bool CanReachBotanistBook(const ABotanicusBotanistBookActor* Book) const;
+	bool ResolveBotanistBookPlacement(const FVector& RequestedLocation, float RequestedYaw, FTransform& OutTransform) const;
+	TOptional<bool> ResolveFurniturePlacement(FName Key, float Yaw, TFunctionRef<FBox()> GetBounds, const FVector& Scale,
+		const AActor* MovingItem, FTransform& OutTransform, int32 Count = 1, float StackStep = 0.f) const;
+	void BindBotanistBookQuickBar();
+	void ClearBotanistBookEquipment();
+	UFUNCTION() void RefreshHeldBotanistBook(int32 SlotIndex, FBotanicusQuickBarSlot Slot);
+	UFUNCTION(Server, Reliable) void ServerUseBotanistBook(ABotanicusBotanistBookActor* WorldBook, bool bUseHeldBook);
+	UFUNCTION(Server, Reliable) void ServerCloseBotanistBook();
+	UFUNCTION(Client, Reliable) void ClientUpdateBotanistBookSession(bool bActive, bool bShow);
+	TWeakObjectPtr<ABotanicusBotanistBookActor> ServerHeldBook;
+	TWeakObjectPtr<ABotanicusBotanistBookActor> ServerBookSession;
+	bool bLocalBookSessionActive = false;
 	void HideEbsDemoHud();
 	void HideLegacyWorldGuidance();
 	bool TryCollectNearbyDeliveryParcel();
@@ -601,6 +623,21 @@ protected:
 		FName ItemKey,
 		int32 Quantity,
 		int32 MaximumQuantity);
+	struct FSoilBagPlacement
+	{
+		int32 Count = 0;
+		double Step = 0.0;
+	};
+	static const ABotanicusPlaceableItemActor* GetSoilBagDefaults(const FBotanicusItemDefinition* Definition);
+	static int32 GetSoilBagPlacementLimit(const FBotanicusItemDefinition* Definition);
+	static bool HasSoilBagAbove(const ABotanicusPlaceableItemActor* Bag);
+	bool ResolveSoilBagPlacement(const FBotanicusItemDefinition& Definition,
+		const FVector& RequestedLocation, float RequestedYaw, int32 RequestedQuantity,
+		FTransform& OutTransform, FSoilBagPlacement& OutPlan) const;
+	void PlaceSoilBags(UBotanicusQuickBarComponent& QuickBar, int32 SlotIndex, FGuid InstanceId,
+		const FBotanicusItemDefinition& Definition, const FTransform& FirstTransform,
+		const FSoilBagPlacement& Plan, int32 RequestedQuantity);
+
 	bool ResolveQuickBarItemPlacement(
 		FName ItemKey,
 		const FVector& RequestedLocation,
