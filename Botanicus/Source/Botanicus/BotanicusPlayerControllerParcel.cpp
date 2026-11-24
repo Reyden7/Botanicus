@@ -6,6 +6,7 @@
 #include "Delivery/BotanicusPlaceableItemActor.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/World.h"
+#include "Audio/BotanicusAudioWorldSubsystem.h"
 #include "EngineUtils.h"
 #include "GameFramework/Pawn.h"
 #include "InputKeyEventArgs.h"
@@ -376,6 +377,7 @@ void ABotanicusPlayerController::ServerBeginDeliveryParcelMove_Implementation(AB
 		return;
 	}
 	ServerMovedDeliveryParcel = Parcel;
+	UBotanicusAudioWorldSubsystem::ConfirmPickup(GetPawn(), Parcel);
 	ClientBeginDeliveryParcelInspection(Parcel);
 }
 

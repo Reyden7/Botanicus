@@ -3,6 +3,7 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "BotanicusAudioWorldSubsystem.generated.h"
 class ABotanicusAudioRelay;
+class APawn;
 class UBotanicusAudioCatalog;
 class UAudioComponent;
 class USoundBase;
@@ -28,6 +29,8 @@ public:
 	virtual void OnWorldBeginPlay(UWorld& World) override;
 	virtual void Deinitialize() override;
 	static void Emit(UObject* Context,FName Id,const FVector& Position);
+	static void ConfirmPickup(APawn* Picker, AActor* Source);
+	void ReceivePickupFeedback(const FVector& Position);
 	static void Growth(UObject* Context,float Before,float After,const FVector& Position);
 	static void WaterPulse(AActor* Source);
 	static void WaterEnd(AActor* Source);
@@ -62,6 +65,14 @@ private:
 	UPROPERTY(Transient) TObjectPtr<UAudioComponent> Insects;
 	UPROPERTY(Transient) TMap<TWeakObjectPtr<AActor>,FBotanicusWaterVoice> WaterVoices;
 	TWeakObjectPtr<ABotanicusAudioRelay> Relay;
+	struct FPickupConfirmation
+	{
+		TWeakObjectPtr<APawn> Picker;
+		double Time = 0.0;
+	};
+
+	TMap<TWeakObjectPtr<AActor>, FPickupConfirmation> RecentPickups;
+	UPROPERTY(Transient) TObjectPtr<USoundBase> LastPickupSound;
 	TMap<uint32,double> Cooldowns;
 	TMap<FName,int32> PlayCounts;
 	FTimerHandle LocalTimer;

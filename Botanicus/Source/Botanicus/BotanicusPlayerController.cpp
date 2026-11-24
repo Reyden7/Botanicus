@@ -5652,6 +5652,7 @@ void ABotanicusPlayerController::BeginWorldItemMove(
 	{
 		ServerBeginPlaceableItemMove(WorldItem);
 	}
+	ServerConfirmPlaceablePickupAudio(WorldItem);
 	if (bPreparedPot)
 	{
 		ClientMessage(
@@ -10157,11 +10158,31 @@ void ABotanicusPlayerController::
 		}
 	}
 
+	if (ServerMovedPlaceableItem != WorldItem)
+	{
+		bServerPlaceablePickupAudioConfirmed = false;
+	}
 	ServerMovedPlaceableItem = WorldItem;
 	ClientBeginPlaceableItemHold(
 		GetMoveHoldDurationForActor(
 			WorldItem,
 			PlaceableItemMoveHoldDuration));
+}
+
+void ABotanicusPlayerController::ServerConfirmPlaceablePickupAudio_Implementation(
+	ABotanicusPlaceableItemActor* WorldItem)
+{
+	if (!IsValid(WorldItem) || !GetPawn() || ServerMovedPlaceableItem != WorldItem ||
+		bServerPlaceablePickupAudioConfirmed ||
+		(!IsPreparedPotActor(WorldItem) && !(bServerFurnitureMoveModeActive && IsFurnitureActor(WorldItem))))
+	{
+		return;
+	}
+
+	// The reservation starts at key-down. The client reports this only once
+	// the normal hold has completed and its held preview was created.
+	bServerPlaceablePickupAudioConfirmed = true;
+	UBotanicusAudioWorldSubsystem::ConfirmPickup(GetPawn(), WorldItem);
 }
 
 void ABotanicusPlayerController::
@@ -10316,6 +10337,7 @@ void ABotanicusPlayerController::
 	QuickBar->SetCarriedItemState(
 		AddedSlotIndex,
 		CarriedState);
+	UBotanicusAudioWorldSubsystem::ConfirmPickup(GetPawn(), WorldItem);
 
 	const FString ItemName =
 		Definition->DisplayName.ToString();

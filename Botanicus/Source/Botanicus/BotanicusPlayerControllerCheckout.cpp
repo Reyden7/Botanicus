@@ -1,4 +1,5 @@
 #include "BotanicusPlayerController.h"
+#include "Audio/BotanicusAudioWorldSubsystem.h"
 #include "BotanicusCharacter.h"
 #include "Sales/BotanicusCashRegisterActor.h"
 #include "Sales/Checkout/BotanicusCheckoutScanner.h"
@@ -81,7 +82,11 @@ void ABotanicusPlayerController::ServerTakeCheckoutScanner_Implementation(ABotan
     auto* Register=Scanner->GetRegister();
     const bool bDock=Register && Register->GetDockScanner()==Scanner && Hit.GetActor()==Register && Register->IsScannerDockHit(Hit.GetComponent());
     if(Hit.GetActor()!=Scanner && !bDock)return;
-    if(Scanner->TryTake(this)) SetCheckoutScannerReference(Scanner);
+    if (Scanner->TryTake(this))
+    {
+        SetCheckoutScannerReference(Scanner);
+        UBotanicusAudioWorldSubsystem::ConfirmPickup(GetPawn(), Scanner);
+    }
 }
 void ABotanicusPlayerController::ServerReturnCheckoutScanner_Implementation(ABotanicusCheckoutScanner* Scanner)
 {

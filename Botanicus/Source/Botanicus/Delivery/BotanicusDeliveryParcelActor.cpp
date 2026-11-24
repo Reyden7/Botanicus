@@ -996,6 +996,7 @@ bool ABotanicusDeliveryParcelActor::ReleaseContents(
 					"Hotbar pleine : liberez de la place avant de deballer."));
 			return false;
 		}
+		UBotanicusAudioWorldSubsystem::ConfirmPickup(Character, this);
 		return true;
 	}
 

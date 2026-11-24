@@ -39,6 +39,16 @@ public:
     UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Refill") TObjectPtr<USoundBase> RefillLoop;
     UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Refill") TObjectPtr<USoundAttenuation> RefillAttenuation;
     UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Refill",meta=(ClampMin="0",ClampMax="1")) float RefillVolume=.25f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Pickup")
+	TArray<TObjectPtr<USoundBase>> PickupSounds;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Pickup", meta=(ClampMin="0", ClampMax="2"))
+	float PickupSoundVolume = 0.75f;
+
+	/** Suppresses duplicate confirmations for the same source and player. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Pickup", meta=(ClampMin="0", ClampMax="0.2", Units="s"))
+	float PickupSoundCooldown = 0.04f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Feedback") TMap<FName,FBotanicusSoundFeedback> Feedback;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Feedback") TObjectPtr<USoundAttenuation> InteractionAttenuation;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Loops") TObjectPtr<USoundBase> WaterLoop;

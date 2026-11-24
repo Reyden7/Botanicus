@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Growing/BotanicusWateringCanActor.h"
+#include "Audio/BotanicusAudioWorldSubsystem.h"
 #include "Growing/BotanicusWaterReserveActor.h"
 
 #include "BotanicusCharacter.h"
@@ -141,6 +142,7 @@ bool ABotanicusWateringCanActor::TryPickUp(
 	SetOwner(Character->GetController());
 	ApplyCarrierState();
 	ForceNetUpdate();
+	UBotanicusAudioWorldSubsystem::ConfirmPickup(Character, this);
     UBotanicusJuiceWorldSubsystem::PickupSucceeded(GetWorld(),Character,GetItemKey(),PickupVisual,this);
 	return true;
 }

@@ -25,6 +25,8 @@ public:
 	void EndWater(AActor* Source);
 	const TArray<FBotanicusWaterAudioState>& GetWaterStates() const { return WaterStates; }
 	UFUNCTION(NetMulticast, Unreliable) void MulticastFeedback(uint32 Sequence,FName EventId,FVector_NetQuantize Location);
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastPickupFeedback(FVector_NetQuantize Location);
 private:
 	UFUNCTION() void OnRep_WaterStates();
 	void ExpireWater();

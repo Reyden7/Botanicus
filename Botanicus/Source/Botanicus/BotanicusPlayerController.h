@@ -854,6 +854,9 @@ protected:
 	void ServerBeginPlaceableItemMove(
 		ABotanicusPlaceableItemActor* WorldItem);
 
+	UFUNCTION(Server, Reliable)
+	void ServerConfirmPlaceablePickupAudio(ABotanicusPlaceableItemActor* WorldItem);
+
 	UFUNCTION(Client, Reliable)
 	void ClientBeginPlaceableItemHold(float DurationSeconds);
 
@@ -1125,6 +1128,7 @@ protected:
 	UPROPERTY(Transient)
 	TObjectPtr<ABotanicusPlaceableItemActor>
 		ServerMovedPlaceableItem;
+	bool bServerPlaceablePickupAudioConfirmed = false;
 
 	UPROPERTY(Transient)
 	TObjectPtr<ABotanicusPlantPotActor>

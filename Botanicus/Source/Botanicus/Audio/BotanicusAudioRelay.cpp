@@ -31,6 +31,17 @@ void ABotanicusAudioRelay::MulticastFeedback_Implementation(uint32 Sequence,FNam
 	if (GetNetMode()!=NM_DedicatedServer)
 		if (auto* Audio=GetWorld()->GetSubsystem<UBotanicusAudioWorldSubsystem>()) Audio->ReceiveFeedback(Sequence,EventId,Location);
 }
+void ABotanicusAudioRelay::MulticastPickupFeedback_Implementation(FVector_NetQuantize Location)
+{
+	if (GetNetMode() != NM_DedicatedServer)
+	{
+		if (auto* Audio = GetWorld()->GetSubsystem<UBotanicusAudioWorldSubsystem>())
+		{
+			Audio->ReceivePickupFeedback(Location);
+		}
+	}
+}
+
 void ABotanicusAudioRelay::PulseWater(AActor* Source)
 {
 	if (!HasAuthority() || !IsValid(Source)) return;

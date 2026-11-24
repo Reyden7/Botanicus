@@ -852,6 +852,7 @@ bool ABotanicusSalesDisplayActor::TryRetrieveDisplayedSalePot(
 		ReservedVisitor->BeginDeparture(false);
 	}
 
+	UBotanicusAudioWorldSubsystem::ConfirmPickup(Character, this);
     UBotanicusJuiceWorldSubsystem::PickupSucceeded(GetWorld(),Character,PickupKey,PickupVisual);
 	DisplayedPlantItemKey = NAME_None;
 	DisplayedSoilItemKey = NAME_None;

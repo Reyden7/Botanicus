@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Delivery/BotanicusLargeEquipmentActor.h"
+#include "Audio/BotanicusAudioWorldSubsystem.h"
 #include "Visuals/BotanicusJuiceWorldSubsystem.h"
 
 #include "BotanicusCharacter.h"
@@ -263,6 +264,7 @@ void ABotanicusLargeEquipmentActor::PickUp(
 	SetOwner(Character ? Character->GetController() : nullptr);
 	ApplyCarryState();
 	ForceNetUpdate();
+	UBotanicusAudioWorldSubsystem::ConfirmPickup(Character, this);
 }
 
 void ABotanicusLargeEquipmentActor::BeginCooperativeHold(
@@ -289,6 +291,7 @@ void ABotanicusLargeEquipmentActor::BeginCooperativeHold(
 		bPlacementMode = true;
 		bPlacementValid = false;
 		ApplyCarrierMovementPenalty();
+		UBotanicusAudioWorldSubsystem::ConfirmPickup(Character, this);
 	}
 
 	ApplyCarryState();

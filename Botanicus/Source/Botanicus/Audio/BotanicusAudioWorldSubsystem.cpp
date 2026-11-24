@@ -9,6 +9,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
 #include "Growing/BotanicusPlantPotActor.h"
 #include "IllegalTrade/BotanicusIllegalPlanterActor.h"
 #include "Sales/BotanicusSalePotActor.h"
@@ -17,6 +18,8 @@
 #include "Sound/SoundBase.h"
 #include "Sound/SoundConcurrency.h"
 #include "TimerManager.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogBotanicusPickupAudio, Log, All);
 
 bool UBotanicusAudioWorldSubsystem::DoesSupportWorldType(EWorldType::Type Type) const
 {
@@ -52,6 +55,94 @@ void UBotanicusAudioWorldSubsystem::Emit(UObject* Context,FName Id,const FVector
 			if (auto* Audio=World->GetSubsystem<UBotanicusAudioWorldSubsystem>())
 				if (auto* Events=Audio->GetRelay()) Events->Emit(Id,Position);
 }
+void UBotanicusAudioWorldSubsystem::ConfirmPickup(APawn* Picker, AActor* Source)
+{
+	if (!IsValid(Picker) || !Picker->HasAuthority() || !IsValid(Source) ||
+		Source->GetWorld() != Picker->GetWorld())
+	{
+		return;
+	}
+
+	auto* Audio = Picker->GetWorld()->GetSubsystem<UBotanicusAudioWorldSubsystem>();
+	if (!Audio)
+	{
+		return;
+	}
+	Audio->LoadCatalog();
+	if (!Audio->Catalog || Audio->Catalog->PickupSounds.IsEmpty())
+	{
+		return;
+	}
+
+	const double Now = FPlatformTime::Seconds();
+	const float Cooldown = Audio->Catalog->PickupSoundCooldown;
+	if (const FPickupConfirmation* Previous = Audio->RecentPickups.Find(Source);
+		Previous && Previous->Picker == Picker && Now - Previous->Time < Cooldown)
+	{
+		return;
+	}
+	if (auto* Events = Audio->GetRelay())
+	{
+		if (Audio->RecentPickups.Num() >= 128)
+		{
+			for (auto It = Audio->RecentPickups.CreateIterator(); It; ++It)
+			{
+				if (!It.Key().IsValid() || Now - It.Value().Time >= Cooldown)
+				{
+					It.RemoveCurrent();
+				}
+			}
+		}
+		Audio->RecentPickups.Add(Source, {Picker, Now});
+		Events->MulticastPickupFeedback(Source->GetActorLocation());
+	}
+}
+
+void UBotanicusAudioWorldSubsystem::ReceivePickupFeedback(const FVector& Position)
+{
+	if (GetWorld()->GetNetMode() == NM_DedicatedServer ||
+		FVector::DistSquared(ListenerPosition(), Position) > FMath::Square(1800.f))
+	{
+		return;
+	}
+	LoadCatalog();
+	if (!Catalog)
+	{
+		return;
+	}
+
+	TArray<USoundBase*, TInlineAllocator<4>> Candidates;
+	USoundBase* Previous = nullptr;
+	for (USoundBase* Sound : Catalog->PickupSounds)
+	{
+		if (Sound == LastPickupSound)
+		{
+			Previous = Sound;
+		}
+		else if (IsValid(Sound))
+		{
+			Candidates.AddUnique(Sound);
+		}
+	}
+	USoundBase* Sound = Candidates.IsEmpty()
+		? Previous : Candidates[FMath::RandHelper(Candidates.Num())];
+	if (!IsValid(Sound))
+	{
+		return;
+	}
+
+	if (UAudioComponent* Voice = UGameplayStatics::SpawnSoundAtLocation(
+		GetWorld(), Sound, Position, FRotator::ZeroRotator, Catalog->PickupSoundVolume,
+		1.f, 0.f, Catalog->InteractionAttenuation);
+		Voice && Voice->IsPlaying())
+	{
+		LastPickupSound = Sound;
+		++PlayCounts.FindOrAdd(TEXT("Pickup"));
+		UE_LOG(LogBotanicusPickupAudio, Verbose, TEXT("%s played %s"),
+			*GetWorld()->GetPackage()->GetName(), *Sound->GetName());
+	}
+}
+
 FName UBotanicusAudioWorldSubsystem::GrowthEvent(float Before,float After)
 {
 	if (Before<1.0f-KINDA_SMALL_NUMBER && After>=1.0f-KINDA_SMALL_NUMBER) return TEXT("Mature");
