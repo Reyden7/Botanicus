@@ -6,6 +6,7 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/SpotLightComponent.h"
+#include "Engine/CollisionProfile.h"
 #include "EnhancedInputComponent.h"
 #include "InputActionValue.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -35,6 +36,15 @@ ABotanicusCharacter::ABotanicusCharacter()
 	FirstPersonMesh->SetOnlyOwnerSee(true);
 	FirstPersonMesh->FirstPersonPrimitiveType = EFirstPersonPrimitiveType::FirstPerson;
 	FirstPersonMesh->SetCollisionProfileName(FName("NoCollision"));
+
+	// Follow the movement mesh's crouch offset and network smoothing, without following its bones.
+	RobotMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("RobotMesh"));
+	RobotMesh->SetupAttachment(GetMesh());
+	RobotMesh->SetOwnerNoSee(true);
+	RobotMesh->SetCollisionProfileName(UCollisionProfile::NoCollision_ProfileName);
+	RobotMesh->SetGenerateOverlapEvents(false);
+	RobotMesh->SetCanEverAffectNavigation(false);
+	RobotMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::OnlyTickPoseWhenRendered;
 
 	// Create the Camera Component	
 	FirstPersonCameraComponent = CreateDefaultSubobject<UCameraComponent>(TEXT("First Person Camera"));
