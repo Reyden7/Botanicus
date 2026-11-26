@@ -6,6 +6,7 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/SpotLightComponent.h"
+#include "Delivery/BotanicusDeliveryParcelActor.h"
 #include "Engine/CollisionProfile.h"
 #include "EnhancedInputComponent.h"
 #include "InputActionValue.h"
@@ -184,6 +185,33 @@ void ABotanicusCharacter::ServerSetSprinting_Implementation(
 	bool bNewSprinting)
 {
 	SetSprinting(bNewSprinting);
+}
+
+ABotanicusDeliveryParcelActor* ABotanicusCharacter::GetCarriedParcelForAnimation() const
+{
+	ABotanicusDeliveryParcelActor* Parcel = CarriedParcelForAnimation.Get();
+	return Parcel && Parcel->GetCarrier() == this ? Parcel : nullptr;
+}
+
+void ABotanicusCharacter::UpdateCarriedParcelForAnimation(ABotanicusDeliveryParcelActor* Parcel, bool bIsCarrier)
+{
+	if (bIsCarrier)
+	{
+		if (ABotanicusDeliveryParcelActor* Previous = CarriedParcelForAnimation.Get(); Previous && Previous != Parcel)
+		{
+			RobotMesh->RemoveTickPrerequisiteActor(Previous);
+		}
+		CarriedParcelForAnimation = Parcel;
+		RobotMesh->AddTickPrerequisiteActor(Parcel);
+	}
+	else
+	{
+		RobotMesh->RemoveTickPrerequisiteActor(Parcel);
+		if (CarriedParcelForAnimation.Get() == Parcel)
+		{
+			CarriedParcelForAnimation.Reset();
+		}
+	}
 }
 
 void ABotanicusCharacter::SetHeldWateringCan(

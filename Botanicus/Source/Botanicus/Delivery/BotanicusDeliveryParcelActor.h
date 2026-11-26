@@ -66,6 +66,9 @@ public:
 	bool TryBeginCarry(APawn* Pawn);
 	void EndCarry(const FTransform& DropTransform);
 	void SetCarriedInspectionOrientation(const FRotator& WorldRotation);
+	void SetCarriedPlacementPreview(bool bPreview);
+	bool IsCarriedPlacementPreview() const { return bCarriedPlacementPreview; }
+	FTransform GetHandGripTransform(bool bLeftHand) const;
 	APawn* GetCarrier() const { return Carrier; }
 	const FTransform& GetParcelSaveTransform() const;
 	FTransform GetParcelPresentation() const;
@@ -135,7 +138,7 @@ private:
 	void RefreshAnimatedCarton(bool bPlayOpeningAnimation, bool bModelChanged);
 	bool ApplyParcelPackaging();
 	void RefreshParcelLabel();
-	UFUNCTION() void OnRep_Carrier();
+	UFUNCTION() void OnRep_Carrier(APawn* PreviousCarrier);
 
 	UPROPERTY(ReplicatedUsing=OnRep_Carrier)
 	TObjectPtr<APawn> Carrier;
@@ -143,11 +146,31 @@ private:
 	FRotator CarriedInspectionOrientation = FRotator::ZeroRotator;
 	UPROPERTY(Replicated)
 	bool bHasCarriedInspectionOrientation = false;
+
+	// Mirrors the carrier's placement UI mode for observers only.
+	UPROPERTY(Replicated)
+	bool bCarriedPlacementPreview = false;
 	FTransform PickupTransform;
 	TOptional<FTransform> VisualHomeTransform;
 	TOptional<FTransform> LocalParcelPresentation;
 	void RefreshParcelVisualAttachment();
 	void ApplyLocalParcelPresentation();
+	void RefreshHandGripFrame();
+	void UpdateRobotCarryOffset();
+
+	/** Normalizes the grip children to the closed carton dimensions and label-facing basis. */
+	UPROPERTY(VisibleAnywhere, Category="Botanicus|Parcel|Grip")
+	TObjectPtr<USceneComponent> HandGripFrame;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Botanicus|Parcel|Grip", meta=(AllowPrivateAccess="true"))
+	TObjectPtr<USceneComponent> LeftHandGrip;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Botanicus|Parcel|Grip", meta=(AllowPrivateAccess="true"))
+	TObjectPtr<USceneComponent> RightHandGrip;
+
+	/** Third-person carry offset in cm. X adds clearance in front of the chest to the box depth. */
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Parcel|Grip")
+	FVector RobotCarryOffset = FVector(17.0, 0.0, 6.0);
 	static FBotanicusParcelPackaging ResolvePackaging(const UWorld& World, FName ItemId, int32 Count);
 
 	UPROPERTY(VisibleAnywhere, Category="Botanicus|Parcel|Label")

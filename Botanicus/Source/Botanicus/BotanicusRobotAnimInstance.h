@@ -6,6 +6,8 @@
 #include "BotanicusRobotAnimInstance.generated.h"
 
 class ABotanicusCharacter;
+class ABotanicusDeliveryParcelActor;
+class USkeletalMeshComponent;
 class UBotanicusMultiToolComponent;
 class UCharacterMovementComponent;
 
@@ -177,6 +179,68 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Transient, Category = "Locomotion|Look")
 	FRotator SkullRotation = FRotator::ZeroRotator;
 
+	UPROPERTY(BlueprintReadOnly, Transient, Category="Locomotion|Box")
+	bool bIsCarryingBox = false;
+
+	UPROPERTY(BlueprintReadOnly, Transient, Category="Locomotion|Box")
+	bool bIsInspectingBox = false;
+
+	/** Hand effector positions in robot mesh component space. */
+	UPROPERTY(BlueprintReadOnly, Transient, Category="Locomotion|Box")
+	FVector LeftHandIKTarget = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly, Transient, Category="Locomotion|Box")
+	FVector RightHandIKTarget = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly, Transient, Category="Locomotion|Box")
+	float CarryPoseAlpha = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Transient, Category="Locomotion|Box")
+	float HandIKAlpha = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Transient, Category="Locomotion|Box")
+	float LeftHandIKAlpha = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Transient, Category="Locomotion|Box")
+	float RightHandIKAlpha = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Transient, Category="Locomotion|Box")
+	FVector LeftElbowIKTarget = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly, Transient, Category="Locomotion|Box")
+	FVector RightElbowIKTarget = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly, Transient, Category="Locomotion|Box")
+	FRotator LeftWristIKRotation = FRotator::ZeroRotator;
+
+	UPROPERTY(BlueprintReadOnly, Transient, Category="Locomotion|Box")
+	FRotator RightWristIKRotation = FRotator::ZeroRotator;
+
+	UPROPERTY(EditDefaultsOnly, Category="Locomotion|Box", meta=(ClampMin="0.01", Units="s"))
+	float CarryPoseBlendDuration = 0.20f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Locomotion|Box", meta=(ClampMin="0.01", Units="s"))
+	float HandIKBlendDuration = 0.20f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Locomotion|Box", meta=(ClampMin="1"))
+	float HandIKInterpolationSpeed = 28.0f;
+
+	/** Fraction of the natural arm length before the IK starts to release. */
+	UPROPERTY(EditDefaultsOnly, Category="Locomotion|Box", meta=(ClampMin="0.80", ClampMax="1.0"))
+	float MaxArmStretch = 1.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Locomotion|Box", meta=(Units="cm"))
+	FVector LeftElbowDirection = FVector(34.0, 8.0, -28.0);
+
+	UPROPERTY(EditDefaultsOnly, Category="Locomotion|Box", meta=(Units="cm"))
+	FVector RightElbowDirection = FVector(-34.0, 8.0, -28.0);
+
+	UPROPERTY(EditDefaultsOnly, Category="Locomotion|Box", meta=(ClampMin="0", ClampMax="120", Units="Degrees"))
+	float WristRotationLimit = 68.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Locomotion|Box", meta=(ClampMin="90", ClampMax="170", Units="Degrees"))
+	float MaxElbowFlexion = 150.0f;
+
 private:
 	void UpdateAirPose(const UCharacterMovementComponent& CharacterMovement, float DeltaSeconds);
 	void UpdateGroundPose(const ABotanicusCharacter& Owner, float ActorYaw, float DeltaSeconds);
@@ -184,6 +248,26 @@ private:
 	bool HasActiveInteractionPose(const ABotanicusCharacter& Owner) const;
 	void AdvanceTurn(float DeltaSeconds);
 	void ResetIdleVariation();
+	void ResetBoxCarry();
+	void UpdateBoxCarryState(const ABotanicusDeliveryParcelActor* Parcel, float DeltaSeconds);
+	void UpdateBoxHandTargets(const ABotanicusDeliveryParcelActor* Parcel, float DeltaSeconds);
+
+	struct FCarryArm
+	{
+		int32 Upper = INDEX_NONE;
+		int32 Forearm = INDEX_NONE;
+		int32 Hand = INDEX_NONE;
+		FQuat ParentSpaceWrist = FQuat::Identity;
+		float ReachWeight = 0.0f;
+		bool bHasTarget = false;
+	};
+
+	void UpdateCarryArm(const USkeletalMeshComponent& Mesh, const FTransform& Grip, const FVector& ElbowDirection,
+		const FQuat& RestWrist, FCarryArm& Arm, FVector& Target, FVector& Elbow,
+		FRotator& Wrist, float& Weight, float DeltaSeconds);
+
+	FCarryArm LeftArm;
+	FCarryArm RightArm;
 
 	TWeakObjectPtr<ABotanicusCharacter> Character;
 	TWeakObjectPtr<UCharacterMovementComponent> Movement;

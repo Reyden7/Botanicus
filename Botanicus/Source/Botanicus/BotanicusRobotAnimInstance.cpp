@@ -2,6 +2,7 @@
 
 #include "BotanicusCharacter.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Delivery/BotanicusDeliveryParcelActor.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerState.h"
 #include "Tools/BotanicusMultiToolComponent.h"
@@ -68,6 +69,7 @@ void UBotanicusRobotAnimInstance::NativeInitializeAnimation()
 	SkullRotation = FRotator::ZeroRotator;
 	LookYaw = 0.0f;
 	LookPitch = 0.0f;
+	ResetBoxCarry();
 	AirborneDuration = 0.0f;
 	TurnCooldownRemaining = 0.0f;
 	JumpTime = JumpLiftTime;
@@ -110,6 +112,8 @@ void UBotanicusRobotAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 		bHasFacing = true;
 	}
 	UpdateAirPose(*CharacterMovement, DeltaSeconds);
+	const ABotanicusDeliveryParcelActor* Parcel = Owner->GetCarriedParcelForAnimation();
+	UpdateBoxCarryState(Parcel, DeltaSeconds);
 	UpdateGroundPose(*Owner, ActorYaw, DeltaSeconds);
 
 	// The mesh inherits network smoothing from the legacy movement mesh.
@@ -119,6 +123,7 @@ void UBotanicusRobotAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	const float SmoothedYaw = FRotator::NormalizeAxis(Mesh->GetComponentRotation().Yaw - BaseRotation.Rotator().Yaw);
 	BodyRotation.Yaw = FMath::FindDeltaAngleDegrees(SmoothedYaw, BodyYaw);
 	UpdateLookPose(*Owner, DeltaSeconds);
+	UpdateBoxHandTargets(Parcel, DeltaSeconds);
 
 	// Preserve the previous heading through the stop, while the Blend Space fades to idle.
 	if (bIsMoving)
@@ -182,7 +187,7 @@ bool UBotanicusRobotAnimInstance::HasActiveInteractionPose(const ABotanicusChara
 {
 	const UAnimInstance* LegacyAnimation = Owner.GetMesh()->GetAnimInstance();
 	const UBotanicusMultiToolComponent* Tool = MultiTool.Get();
-	return Owner.IsCarryingEquipment() || Owner.GetHeldWateringCan() ||
+	return bIsCarryingBox || Owner.IsCarryingEquipment() || Owner.GetHeldWateringCan() ||
 		(Tool && Tool->GetMode() != EBotanicusMultiToolMode::Neutral) ||
 		IsAnyMontagePlaying() || (LegacyAnimation && LegacyAnimation->IsAnyMontagePlaying());
 }

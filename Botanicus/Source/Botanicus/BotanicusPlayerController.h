@@ -691,6 +691,9 @@ protected:
 	UFUNCTION(Server, Reliable)
 	void ServerSetParcelInspectionOrientation(ABotanicusDeliveryParcelActor* Parcel, FRotator WorldRotation);
 
+	UFUNCTION(Server, Reliable)
+	void ServerSetParcelPlacementPreview(ABotanicusDeliveryParcelActor* Parcel, bool bPreview);
+
 	UFUNCTION(Client, Reliable)
 	void ClientBeginDeliveryParcelInspection(ABotanicusDeliveryParcelActor* Parcel);
 

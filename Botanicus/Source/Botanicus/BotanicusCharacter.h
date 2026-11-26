@@ -17,6 +17,7 @@ class UBotanicusInteractionComponent;
 class UBotanicusQuickBarComponent;
 class UBotanicusMultiToolComponent;
 class ABotanicusWateringCanActor;
+class ABotanicusDeliveryParcelActor;
 struct FInputActionValue;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogTemplateCharacter, Log, All);
@@ -176,6 +177,10 @@ public:
 	/** Returns the first person mesh **/
 	USkeletalMeshComponent* GetFirstPersonMesh() const { return FirstPersonMesh; }
 
+	USkeletalMeshComponent* GetRobotMesh() const { return RobotMesh; }
+	ABotanicusDeliveryParcelActor* GetCarriedParcelForAnimation() const;
+	void UpdateCarriedParcelForAnimation(ABotanicusDeliveryParcelActor* Parcel, bool bIsCarrier);
+
 	/** Returns first person camera component **/
 	UCameraComponent* GetFirstPersonCameraComponent() const { return FirstPersonCameraComponent; }
 
@@ -264,5 +269,8 @@ private:
 	float CrouchedCameraOffset = 48.0f;
 
 	float DefaultMaxWalkSpeed = 0.0f;
+
+	// Derived from the parcel's replicated Carrier for animation lookup.
+	TWeakObjectPtr<ABotanicusDeliveryParcelActor> CarriedParcelForAnimation;
 };
 

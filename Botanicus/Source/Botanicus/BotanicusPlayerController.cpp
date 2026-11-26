@@ -1190,7 +1190,7 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 
 		!IsValid(LocalLargeEquipmentPlacement) &&
 		!IsValid(LocalQuickBarItemPreview) &&
-		!IsValid(LocalMovedDeliveryParcel))
+		(!IsValid(LocalMovedDeliveryParcel) || ParcelCarryMode == EParcelCarryMode::Inspection))
 	{
 		if (ABotanicusCharacter* BotanicusCharacter =
 				Cast<ABotanicusCharacter>(GetPawn()))

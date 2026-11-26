@@ -163,6 +163,7 @@ void ABotanicusPlayerController::BeginDeliveryParcelPlacement()
 {
 	StopParcelInspectionRotation();
 	ParcelCarryMode = EParcelCarryMode::Placement;
+	ServerSetParcelPlacementPreview(LocalMovedDeliveryParcel.Get(), true);
 	ParcelPlacementYaw = GetControlRotation().Yaw;
 	ParcelPreviewUpdateAccumulator = 1.f;
 	UpdateDeliveryParcelCarry(0.f);
@@ -173,6 +174,7 @@ void ABotanicusPlayerController::CancelDeliveryParcelPlacement()
 {
 	GetWorld()->GetSubsystem<UBotanicusJuiceWorldSubsystem>()->ClearPlacementHologram(LocalMovedDeliveryParcel);
 	ParcelCarryMode = EParcelCarryMode::Inspection;
+	ServerSetParcelPlacementPreview(LocalMovedDeliveryParcel.Get(), false);
 	bLocalParcelPlacementValid = false;
 }
 
@@ -292,6 +294,14 @@ void ABotanicusPlayerController::ServerSetParcelInspectionOrientation_Implementa
 	if (IsValid(Parcel) && ServerMovedDeliveryParcel == Parcel && GetPawn() && Parcel->GetCarrier() == GetPawn() &&
 		!WorldRotation.ContainsNaN())
 		Parcel->SetCarriedInspectionOrientation(WorldRotation);
+}
+
+void ABotanicusPlayerController::ServerSetParcelPlacementPreview_Implementation(ABotanicusDeliveryParcelActor* Parcel, bool bPreview)
+{
+	if (IsValid(Parcel) && ServerMovedDeliveryParcel == Parcel && GetPawn() && Parcel->GetCarrier() == GetPawn())
+	{
+		Parcel->SetCarriedPlacementPreview(bPreview);
+	}
 }
 
 FTransform ABotanicusPlayerController::UpdateParcelInspectionPose(const ABotanicusDeliveryParcelActor& Parcel, float DeltaTime)
