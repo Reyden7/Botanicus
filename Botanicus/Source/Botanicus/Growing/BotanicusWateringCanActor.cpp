@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Growing/BotanicusWateringCanActor.h"
+#include "Presentation/BotanicusHeldItemComponent.h"
 #include "Audio/BotanicusAudioWorldSubsystem.h"
 #include "Growing/BotanicusWaterReserveActor.h"
 
@@ -22,10 +23,18 @@
 
 ABotanicusWateringCanActor::ABotanicusWateringCanActor()
 {
+	HeldItemGrip->GripSettings = {EBotanicusHeldItemProfile::RightHand, FVector(15, 44, 9), FRotator(0, 180, 0), true, 20.f, true, true};
+	RightHandGrip->SetRelativeLocationAndRotation(FVector(13, 0, 30.5),
+		(FRotator(0, 180, 0).Quaternion().Inverse() * FRotator(-56.43, 148.97, -58.95).Quaternion()).Rotator());
+
 	PrimaryActorTick.bCanEverTick = false;
+	HeldVisualRoot = CreateDefaultSubobject<USceneComponent>(TEXT("HeldCanVisualRoot"));
+	HeldVisualRoot->SetupAttachment(SceneRoot);
+	Mesh->SetupAttachment(HeldVisualRoot);
+	SkeletalMeshVisual->SetupAttachment(HeldVisualRoot);
 
 	WaterNozzle = CreateDefaultSubobject<USceneComponent>(TEXT("Water Nozzle"));
-	WaterNozzle->SetupAttachment(SceneRoot);
+	WaterNozzle->SetupAttachment(HeldVisualRoot);
 	WaterNozzle->bEditableWhenInherited = true;
     WateringCanFillTarget=CreateDefaultSubobject<USceneComponent>(TEXT("WateringCanFillTarget"));
     WateringCanFillTarget->SetupAttachment(Mesh);WateringCanFillTarget->SetRelativeLocation(FVector(8,0,16));WateringCanFillTarget->bEditableWhenInherited=true;
@@ -255,6 +264,13 @@ void ABotanicusWateringCanActor::RestoreWaterLevel(float InWaterLevel)
 	ForceNetUpdate();
 }
 
+void ABotanicusWateringCanActor::EquipForRobot(ABotanicusCharacter* Character, EBotanicusHeldItemSource Source,
+	const FBotanicusHeldItemSettings& Catalogue)
+{
+	HeldItemGrip->Bind(Character, *HeldVisualRoot, *Mesh, LeftHandGrip, RightHandGrip, Source,
+		HeldItemGrip->ResolveSettings(Catalogue));
+}
+
 void ABotanicusWateringCanActor::OnRep_Carrier()
 {
 	ApplyCarrierState();
@@ -278,6 +294,7 @@ void ABotanicusWateringCanActor::ApplyCarrierState()
 		SetActorEnableCollision(true);
 	}
     UpdatePresentationPose();
+	EquipForRobot(Carrier, EBotanicusHeldItemSource::WateringCan);
     if(Carrier)if(auto* J=GetWorld()->GetSubsystem<UBotanicusJuiceWorldSubsystem>())J->MaskPickupHand(Carrier,GetItemKey(),this);
 }
 

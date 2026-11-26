@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "Engine/DeveloperSettings.h"
+#include "Presentation/BotanicusHeldItemProfile.h"
 #include "BotanicusItemCatalog.generated.h"
 
 class AActor;
@@ -83,6 +84,9 @@ struct BOTANICUS_API FBotanicusItemDefinition
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Presentation")
 	FVector WorldScale = FVector(1.0f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Presentation")
+	FBotanicusHeldItemSettings HeldItemSettings;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="World")
 	TSoftClassPtr<AActor> WorldActorClass;

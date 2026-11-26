@@ -409,6 +409,8 @@ void ABotanicusIllegalPlanterActor::Interact_Implementation(AActor* Interactor)
 					UE_LOG(LogBotanicusIllegalTrade, Display,
 						TEXT("Plant harvested: %s x%d."),
 						*Plant->ProductItemKey.ToString(), Plant->HarvestQuantity);
+					if (auto* Character = Cast<ABotanicusCharacter>(Interactor))
+						Character->PlayRobotAction(EBotanicusRobotAction::Harvest, GetSoilSurfaceForSlot(SlotIndex), SelectedItem);
 					UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Harvest"), GetActorLocation());
 					UBotanicusJuiceWorldSubsystem::HarvestSucceeded(this, PlantVisuals.IsValidIndex(SlotIndex) ? PlantVisuals[SlotIndex].Get() : nullptr);
 					*Slot = FBotanicusIllegalPlantSlotState();
@@ -424,6 +426,8 @@ void ABotanicusIllegalPlanterActor::Interact_Implementation(AActor* Interactor)
 				{
 					Slot->PlantId = Plant->PlantId;
                     Slot->PlantPlacementVariation = bEnableRandomPlantPlacement ? BotanicusPlanterSoil::MakePlantVariation() : FVector::ZeroVector;
+					if (auto* Character = Cast<ABotanicusCharacter>(Interactor))
+						Character->PlayRobotAction(EBotanicusRobotAction::Plant, GetSoilSurfaceForSlot(SlotIndex), SelectedItem);
 					UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Plant"), GetActorLocation());
 					UBotanicusJuiceWorldSubsystem::PlantSucceeded(this, GetSoilSurfaceForSlot(SlotIndex));
 					Slot->GrowthProgress = 0.0f;

@@ -3,10 +3,13 @@
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
 #include "Curves/CurveFloat.h"
+#include "Presentation/BotanicusRobotInteraction.h"
 #include "BotanicusRobotAnimInstance.generated.h"
 
 class ABotanicusCharacter;
 class ABotanicusDeliveryParcelActor;
+class UBotanicusHeldItemComponent;
+struct FBotanicusHeldItemPose;
 class USkeletalMeshComponent;
 class UBotanicusMultiToolComponent;
 class UCharacterMovementComponent;
@@ -182,6 +185,15 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Transient, Category="Locomotion|Box")
 	bool bIsCarryingBox = false;
 
+	UPROPERTY(EditDefaultsOnly, Category="Locomotion|Interaction")
+	TMap<EBotanicusRobotAction, FBotanicusRobotActionProfile> ActionProfiles;
+
+	UPROPERTY(BlueprintReadOnly, Transient, Category="Locomotion|Interaction")
+	EBotanicusRobotAction RobotAction = EBotanicusRobotAction::None;
+
+	UPROPERTY(BlueprintReadOnly, Transient, Category="Locomotion|Interaction")
+	float RobotActionAlpha = 0.f;
+
 	UPROPERTY(BlueprintReadOnly, Transient, Category="Locomotion|Box")
 	bool bIsInspectingBox = false;
 
@@ -194,6 +206,12 @@ protected:
 
 	UPROPERTY(BlueprintReadOnly, Transient, Category="Locomotion|Box")
 	float CarryPoseAlpha = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Transient, Category="Locomotion|Held Item")
+	float LeftHeldPoseAlpha = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Transient, Category="Locomotion|Held Item")
+	float RightHeldPoseAlpha = 0.0f;
 
 	UPROPERTY(BlueprintReadOnly, Transient, Category="Locomotion|Box")
 	float HandIKAlpha = 0.0f;
@@ -217,13 +235,17 @@ protected:
 	FRotator RightWristIKRotation = FRotator::ZeroRotator;
 
 	UPROPERTY(EditDefaultsOnly, Category="Locomotion|Box", meta=(ClampMin="0.01", Units="s"))
-	float CarryPoseBlendDuration = 0.20f;
+	float CarryPoseBlendInDuration = 0.08f;
 
 	UPROPERTY(EditDefaultsOnly, Category="Locomotion|Box", meta=(ClampMin="0.01", Units="s"))
-	float HandIKBlendDuration = 0.20f;
+	float CarryPoseBlendOutDuration = 0.10f;
 
+	UPROPERTY(EditDefaultsOnly, Category="Locomotion|Box", meta=(ClampMin="0.01", Units="s"))
+	float HandIKBlendDuration = 0.08f;
+
+	/** Damping for wrist and contact changes. The active position target follows the carton every frame. */
 	UPROPERTY(EditDefaultsOnly, Category="Locomotion|Box", meta=(ClampMin="1"))
-	float HandIKInterpolationSpeed = 28.0f;
+	float HandIKInterpolationSpeed = 38.0f;
 
 	/** Fraction of the natural arm length before the IK starts to release. */
 	UPROPERTY(EditDefaultsOnly, Category="Locomotion|Box", meta=(ClampMin="0.80", ClampMax="1.0"))
@@ -249,8 +271,18 @@ private:
 	void AdvanceTurn(float DeltaSeconds);
 	void ResetIdleVariation();
 	void ResetBoxCarry();
+	void InitializeRobotActionProfiles();
+	FBotanicusRobotToolMotion UpdateRobotAction(const ABotanicusCharacter& Owner, UBotanicusHeldItemComponent* Grip,
+		bool bBox, float DeltaSeconds);
+	void ApplyRobotActionHands(const ABotanicusCharacter& Owner, FBotanicusHeldItemPose& Pose) const;
+	FBotanicusRobotActionCue ActiveRobotCue;
+	TWeakObjectPtr<UBotanicusHeldItemComponent> RobotActionMount;
+	TWeakObjectPtr<UAnimMontage> InteractionMontage;
+	FVector RobotActionDirection = FVector::ForwardVector;
+	bool bApplyRobotActionHands = false;
 	void UpdateBoxCarryState(const ABotanicusDeliveryParcelActor* Parcel, float DeltaSeconds);
-	void UpdateBoxHandTargets(const ABotanicusDeliveryParcelActor* Parcel, float DeltaSeconds);
+	void UpdateHandTargets(const ABotanicusDeliveryParcelActor* Parcel, const FBotanicusHeldItemPose& Held, float DeltaSeconds);
+	bool bHasHeldItem = false;
 
 	struct FCarryArm
 	{
@@ -259,10 +291,13 @@ private:
 		int32 Hand = INDEX_NONE;
 		FQuat ParentSpaceWrist = FQuat::Identity;
 		float ReachWeight = 0.0f;
+		float GripActivation = 0.0f;
 		bool bHasTarget = false;
+		bool bUnder = false;
 	};
 
-	void UpdateCarryArm(const USkeletalMeshComponent& Mesh, const FTransform& Grip, const FVector& ElbowDirection,
+	void UpdateCarryArm(const USkeletalMeshComponent& Mesh, const TOptional<FTransform>& Grip,
+		const TOptional<FTransform>& AlternateGrip, bool bLeft, const FVector& ElbowDirection,
 		const FQuat& RestWrist, FCarryArm& Arm, FVector& Target, FVector& Elbow,
 		FRotator& Wrist, float& Weight, float DeltaSeconds);
 

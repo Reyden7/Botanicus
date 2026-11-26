@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Delivery/BotanicusParcelPackaging.h"
 #include "Interaction/BotanicusInteractableActor.h"
+#include "Engine/NetSerialization.h"
 #include "BotanicusDeliveryParcelActor.generated.h"
 
 class UNiagaraSystem;
@@ -31,6 +32,63 @@ struct FBotanicusParcelCuttingAudio
 	float ActiveWindow = 0.f;
 	UPROPERTY()
 	float SpeedRatio = 1.f;
+};
+
+USTRUCT()
+struct FBotanicusParcelCutContact
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TObjectPtr<APawn> Cutter;
+
+	UPROPERTY()
+	FVector_NetQuantize10 Location = FVector::ZeroVector;
+};
+
+/** Third-person carry adjustments for a measured size of carton. */
+USTRUCT(BlueprintType)
+struct FBotanicusParcelCarryProfile
+{
+	GENERATED_BODY()
+
+	/** Added to RobotCarryOffset. X is the clearance from the chest to the rear of the box. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Carry", meta=(Units="cm"))
+	FVector CarryRelativeLocation = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Carry")
+	FRotator CarryRelativeRotation = FRotator::ZeroRotator;
+
+	/** Offsets relative to the existing grip components, in their dimension-normalized parent frame. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Carry|Hands")
+	FVector LeftGripOffset = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Carry|Hands")
+	FVector RightGripOffset = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Carry|Hands")
+	FRotator LeftWristOffset = FRotator::ZeroRotator;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Carry|Hands")
+	FRotator RightWristOffset = FRotator::ZeroRotator;
+
+	/** X ahead of the rear edge, Y spacing from the middle, Z below the base, in cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Carry|Hands", meta=(Units="cm"))
+	FVector UnderGripPosition = FVector(6.0, 16.0, 1.0);
+
+	/** Wrist rotations in the label-facing frame when supporting the box from below. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Carry|Hands")
+	FRotator LeftUnderWristRotation = FRotator(25.0, 48.0, -107.0);
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Carry|Hands")
+	FRotator RightUnderWristRotation = FRotator(-24.0, 145.0, -30.0);
+
+	/** Added to the corresponding elbow pole direction in robot component space. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Carry|Elbows", meta=(Units="cm"))
+	FVector LeftElbowOffset = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Carry|Elbows", meta=(Units="cm"))
+	FVector RightElbowOffset = FVector::ZeroVector;
 };
 
 /** Replicated delivery carton opened by tracing a cutter along its tape. */
@@ -65,10 +123,13 @@ public:
 	void StopDeliveryPhysics();
 	bool TryBeginCarry(APawn* Pawn);
 	void EndCarry(const FTransform& DropTransform);
-	void SetCarriedInspectionOrientation(const FRotator& WorldRotation);
+	void SetCarriedInspectionOrientation(const FRotator& RelativeRotation);
 	void SetCarriedPlacementPreview(bool bPreview);
 	bool IsCarriedPlacementPreview() const { return bCarriedPlacementPreview; }
-	FTransform GetHandGripTransform(bool bLeftHand) const;
+	FQuat GetDefaultCarryRotation() const;
+	const FBotanicusParcelCarryProfile& GetCarryProfile() const;
+	FTransform GetHandGripTransform(bool bLeftHand, bool bUnder, const FBotanicusParcelCarryProfile& Profile) const;
+	FTransform UpdateCarrySway(const APawn& Pawn, const FQuat& PivotRotation, float DeltaSeconds, bool bEnabled);
 	APawn* GetCarrier() const { return Carrier; }
 	const FTransform& GetParcelSaveTransform() const;
 	FTransform GetParcelPresentation() const;
@@ -143,7 +204,7 @@ private:
 	UPROPERTY(ReplicatedUsing=OnRep_Carrier)
 	TObjectPtr<APawn> Carrier;
 	UPROPERTY(Replicated)
-	FRotator CarriedInspectionOrientation = FRotator::ZeroRotator;
+	FRotator CarriedInspectionRelativeRotation = FRotator::ZeroRotator;
 	UPROPERTY(Replicated)
 	bool bHasCarriedInspectionOrientation = false;
 
@@ -156,7 +217,10 @@ private:
 	void RefreshParcelVisualAttachment();
 	void ApplyLocalParcelPresentation();
 	void RefreshHandGripFrame();
-	void UpdateRobotCarryOffset();
+	void UpdateRemoteCarryPose(float DeltaSeconds);
+	TOptional<FQuat> SmoothedInspectionRelativeRotation;
+	TOptional<FVector> PreviousCarryVelocity;
+	FVector CarrySwayResponse = FVector::ZeroVector;
 
 	/** Normalizes the grip children to the closed carton dimensions and label-facing basis. */
 	UPROPERTY(VisibleAnywhere, Category="Botanicus|Parcel|Grip")
@@ -171,6 +235,32 @@ private:
 	/** Third-person carry offset in cm. X adds clearance in front of the chest to the box depth. */
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Parcel|Grip")
 	FVector RobotCarryOffset = FVector(17.0, 0.0, 6.0);
+
+	/** Profiles use the largest scaled dimension of the closed carton. */
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Parcel|Carry", meta=(ClampMin="1", Units="cm"))
+	float SmallCarryMaxSize = 50.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Parcel|Carry", meta=(ClampMin="1", Units="cm"))
+	float MediumCarryMaxSize = 82.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Parcel|Carry")
+	FBotanicusParcelCarryProfile SmallCarryProfile;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Parcel|Carry")
+	FBotanicusParcelCarryProfile MediumCarryProfile;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Parcel|Carry")
+	FBotanicusParcelCarryProfile LargeCarryProfile;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Parcel|Carry|Sway", meta=(ClampMin="0", Units="cm"))
+	float CarrySwayMaxOffset = 2.5f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Parcel|Carry|Sway", meta=(ClampMin="0", Units="deg"))
+	float CarrySwayMaxAngle = 4.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Parcel|Carry|Sway", meta=(ClampMin="1"))
+	float CarrySwayDamping = 24.0f;
+
 	static FBotanicusParcelPackaging ResolvePackaging(const UWorld& World, FName ItemId, int32 Count);
 
 	UPROPERTY(VisibleAnywhere, Category="Botanicus|Parcel|Label")
@@ -191,6 +281,13 @@ private:
 	float AppliedMassKg = 0.f;
 	UPROPERTY(Replicated)
 	FBotanicusParcelCuttingAudio CuttingAudio;
+
+	UPROPERTY(ReplicatedUsing=OnRep_CutContact)
+	FBotanicusParcelCutContact CutContact;
+	UFUNCTION()
+	void OnRep_CutContact();
+	void SetCutContact(APawn* Cutter, const FVector& Contact = FVector::ZeroVector);
+	TWeakObjectPtr<class ABotanicusCharacter> CutActionCharacter;
 	UPROPERTY(Transient)
 	TObjectPtr<USoundBase> LoadedCuttingTapeSound;
 	UPROPERTY(Transient)

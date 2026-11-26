@@ -3,6 +3,7 @@
 #include "QuickBar/BotanicusQuickBarComponent.h"
 #include "Tools/BotanicusMultiToolComponent.h"
 
+#include "BotanicusCharacter.h"
 #include "BotanicusPlayerController.h"
 #include "BotanicusGameMode.h"
 #include "Catalog/BotanicusItemCatalogSubsystem.h"
@@ -34,10 +35,10 @@ void UBotanicusQuickBarComponent::GetLifetimeReplicatedProps(
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-	// A player's complete quick bar is private. Equipped-world visuals will use
-	// their own replicated state when the equipment system is implemented.
+	// Keep the inventory private. Observers receive only the selected item's identity.
 	DOREPLIFETIME_CONDITION(UBotanicusQuickBarComponent, Slots, COND_OwnerOnly);
 	DOREPLIFETIME_CONDITION(UBotanicusQuickBarComponent, SelectedSlotIndex, COND_OwnerOnly);
+	DOREPLIFETIME_CONDITION(UBotanicusQuickBarComponent, ObservedEquippedItem, COND_SkipOwner);
 }
 
 TArray<FBotanicusQuickBarSlot> UBotanicusQuickBarComponent::GetSlots() const
@@ -825,7 +826,23 @@ void UBotanicusQuickBarComponent::SetSelectedSlotInternal(int32 SlotIndex)
 
 void UBotanicusQuickBarComponent::BroadcastSelection()
 {
-	OnSelectedSlotChanged.Broadcast(SelectedSlotIndex, GetSelectedSlot());
+	const FBotanicusQuickBarSlot Slot = GetSelectedSlot();
+	if (GetOwner()->HasAuthority())
+	{
+		const FName ItemKey = Slot.IsEmpty() ? NAME_None : Slot.ItemKey;
+		if (ObservedEquippedItem != ItemKey)
+		{
+			ObservedEquippedItem = ItemKey;
+			OnRep_ObservedEquippedItem();
+		}
+	}
+	OnSelectedSlotChanged.Broadcast(SelectedSlotIndex, Slot);
+}
+
+void UBotanicusQuickBarComponent::OnRep_ObservedEquippedItem()
+{
+	if (ABotanicusCharacter* Character = Cast<ABotanicusCharacter>(GetOwner()))
+		Character->SetObservedQuickBarItem(ObservedEquippedItem);
 }
 
 void UBotanicusQuickBarComponent::ActivateSelectedSlotOnServer()

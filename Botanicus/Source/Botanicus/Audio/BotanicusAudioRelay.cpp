@@ -1,4 +1,5 @@
 #include "Audio/BotanicusAudioRelay.h"
+#include "BotanicusCharacter.h"
 #include "Audio/BotanicusAudioWorldSubsystem.h"
 #include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
@@ -16,6 +17,9 @@ void ABotanicusAudioRelay::BeginPlay()
 void ABotanicusAudioRelay::EndPlay(const EEndPlayReason::Type Reason)
 {
 	GetWorldTimerManager().ClearTimer(ExpiryTimer);
+	for (const TWeakObjectPtr<ABotanicusCharacter>& Source : WaterActionSources)
+		if (ABotanicusCharacter* Character = Source.Get())
+			Character->SetRobotActionState(EBotanicusRobotAction::Water, this, false);
 	Super::EndPlay(Reason);
 }
 void ABotanicusAudioRelay::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -78,5 +82,21 @@ void ABotanicusAudioRelay::ExpireWater()
 }
 void ABotanicusAudioRelay::OnRep_WaterStates()
 {
+	if (GetNetMode() != NM_DedicatedServer)
+	{
+		TSet<TWeakObjectPtr<ABotanicusCharacter>> Current;
+		for (const FBotanicusWaterAudioState& State : WaterStates)
+		{
+			if (ABotanicusCharacter* Character = Cast<ABotanicusCharacter>(State.Source))
+			{
+				Current.Add(Character);
+				Character->SetRobotActionState(EBotanicusRobotAction::Water, this, true);
+			}
+		}
+		for (const TWeakObjectPtr<ABotanicusCharacter>& Previous : WaterActionSources)
+			if (ABotanicusCharacter* Character = Previous.Get(); Character && !Current.Contains(Previous))
+				Character->SetRobotActionState(EBotanicusRobotAction::Water, this, false);
+		WaterActionSources = MoveTemp(Current);
+	}
 	if (auto* Audio=GetWorld()->GetSubsystem<UBotanicusAudioWorldSubsystem>()) Audio->RefreshWaterLoops(this);
 }

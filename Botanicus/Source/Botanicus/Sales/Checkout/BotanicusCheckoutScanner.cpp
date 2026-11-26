@@ -1,4 +1,5 @@
 #include "Sales/Checkout/BotanicusCheckoutScanner.h"
+#include "Presentation/BotanicusHeldItemComponent.h"
 #include "Engine/World.h"
 #include "Sales/Checkout/BotanicusCheckoutSettings.h"
 #include "Sales/BotanicusCashRegisterActor.h"
@@ -22,6 +23,15 @@ ABotanicusCheckoutScanner::ABotanicusCheckoutScanner()
     DockSlot=CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("Scanner Dock Slot"));DockSlot->SetupAttachment(HitBox);
     DockSlot->SetCollisionEnabled(ECollisionEnabled::NoCollision);DockSlot->SetGenerateOverlapEvents(false);DockSlot->SetCanEverAffectNavigation(false);DockSlot->SetCastShadow(false);
     DockSlot->SetVisibility(false);DockSlot->SetHiddenInGame(true);DockSlot->SetComponentTickEnabled(false);
+    HeldItemGrip = CreateDefaultSubobject<UBotanicusHeldItemComponent>(TEXT("HeldItemGrip"));
+    HeldItemGrip->GripSettings = {EBotanicusHeldItemProfile::RightHand, FVector(32, 21, 5), FRotator::ZeroRotator, true, 30.f};
+    RightHandGrip = CreateDefaultSubobject<USceneComponent>(TEXT("RightHandGrip"));
+    RightHandGrip->SetupAttachment(Handle);
+    const auto* GripModel = GetDefault<UBotanicusCheckoutSettings>();
+    RightHandGrip->SetRelativeLocationAndRotation(GripModel->ScannerGripPoint,
+        (GripModel->ScannerMeshRotation.Quaternion().Inverse() * FRotator(-56.43, 148.97, -58.95).Quaternion()).Rotator());
+    LeftHandGrip = CreateDefaultSubobject<USceneComponent>(TEXT("LeftHandGrip"));
+    LeftHandGrip->SetupAttachment(Handle);
     ScannerMuzzle=CreateDefaultSubobject<USceneComponent>(TEXT("ScannerMuzzle"));ScannerMuzzle->SetupAttachment(HitBox);ScannerMuzzle->SetRelativeLocation(FVector(8,0,11));ScannerMuzzle->bEditableWhenInherited=true;
 }
 void ABotanicusCheckoutScanner::BeginPlay()
@@ -106,6 +116,8 @@ void ABotanicusCheckoutScanner::OnRep_Carry()
     {AttachToComponent(Register->ScannerDock,FAttachmentTransformRules::SnapToTargetNotIncludingScale);const auto* S=GetDefault<UBotanicusCheckoutSettings>();SetActorRelativeLocation(S->ScannerDockPoseOffset);SetActorRelativeRotation(S->ScannerDockPoseRotation);}
     if(GetWorld()) for(FConstPlayerControllerIterator It=GetWorld()->GetPlayerControllerIterator();It;++It) if(auto* PC=Cast<ABotanicusPlayerController>(It->Get());PC && PC->IsLocalController())
     {if(Carrier==PC->GetPawn()) PC->SetCheckoutScannerReference(this);else if(PC->GetCheckoutScanner()==this) PC->SetCheckoutScannerReference(nullptr);}
+    HeldItemGrip->Bind(Cast<ABotanicusCharacter>(Carrier), *HitBox, *Handle, LeftHandGrip, RightHandGrip,
+        EBotanicusHeldItemSource::Scanner, HeldItemGrip->GripSettings);
     UpdatePose();
     RefreshDockSlot();
 }
@@ -121,6 +133,11 @@ void ABotanicusCheckoutScanner::UpdatePose()
             SetActorLocationAndRotation(Eye+Axes.TransformVector(S->ScannerFirstPersonOffset),(Rot.Quaternion()*S->ScannerFirstPersonRotation.Quaternion()).Rotator());
             if(auto* Bot=Cast<ABotanicusPlayerController>(PC)) Bot->SetCheckoutScannerReference(this);return;
         }
+    }
+    if (HeldItemGrip->HasMount())
+    {
+        HeldItemGrip->UpdateMount(0.f);
+        return;
     }
     if(auto* Character=Cast<ABotanicusCharacter>(Carrier);Character && Character->GetMesh() && Character->GetMesh()->DoesSocketExist(TEXT("hand_r")))
     {

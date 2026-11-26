@@ -122,6 +122,8 @@ void ABotanicusCharacter::NotifyControllerChanged()
 {
 	ManualFlashlightOverride.Reset();
 	Super::NotifyControllerChanged();
+	if (QuickBarComponent)
+		SetObservedQuickBarItem(QuickBarComponent->GetObservedEquippedItem());
 	if (HasActorBegunPlay())
 	{
 		ConfigureFlashlightSampling();

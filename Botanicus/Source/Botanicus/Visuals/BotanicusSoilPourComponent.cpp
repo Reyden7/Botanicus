@@ -1,4 +1,6 @@
 #include "Visuals/BotanicusSoilPourComponent.h"
+#include "Delivery/BotanicusPlaceableItemActor.h"
+#include "Components/StaticMeshComponent.h"
 #include "Growing/BotanicusPlantPotActor.h"
 #include "Growing/BotanicusMultiPlantPotActor.h"
 #include "IllegalTrade/BotanicusIllegalPlanterActor.h"
@@ -43,9 +45,23 @@ FVector UBotanicusSoilPourComponent::Surface() const
     if(auto* Pot=Cast<ABotanicusIllegalPlanterActor>(GetOwner()))return Pot->GetSoilPourTarget(Pour.Source);
     return GetOwner()->GetActorLocation();
 }
+FVector UBotanicusSoilPourComponent::BagMouth(const UStaticMeshComponent& Mesh, const FVector& NormalizedOffset)
+{
+    FVector Min, Max;
+    Mesh.GetLocalBounds(Min, Max);
+    return Mesh.GetComponentTransform().TransformPosition((Min + Max) * .5 + (Max - Min) * .5 * NormalizedOffset);
+}
+
 void UBotanicusSoilPourComponent::OnRep_Pour()
 {
     if(GetNetMode()==NM_DedicatedServer || !HasBegunPlay() || !GetWorld())return;
+    auto* Character = Cast<ABotanicusCharacter>(Pour.Source);
+    if (ActionSource.Get() != Character)
+    {
+        if (auto* Previous = ActionSource.Get())
+            Previous->SetRobotActionState(EBotanicusRobotAction::PourSoil, this, false);
+        ActionSource = Character;
+    }
     auto& T=GetWorld()->GetTimerManager();T.ClearTimer(CleanupTimer);
     if(IsValid(Pour.Source))
     {
@@ -62,14 +78,19 @@ void UBotanicusSoilPourComponent::OnRep_Pour()
 void UBotanicusSoilPourComponent::UpdateLocal()
 {
     if(!IsValid(Pour.Source)){ClearVisuals();return;}
-    const auto* C=Cast<ABotanicusCharacter>(Pour.Source);FVector Mouth=Pour.Source->GetPawnViewLocation()+Pour.Source->GetActorForwardVector()*40-FVector(0,0,20);
+    auto* C=Cast<ABotanicusCharacter>(Pour.Source);FVector Mouth=Pour.Source->GetPawnViewLocation()+Pour.Source->GetActorForwardVector()*40-FVector(0,0,20);
     if(C)
     {
         if(C->IsLocallyControlled())
         {if(auto* PC=Cast<ABotanicusPlayerController>(C->GetController()))Mouth=PC->GetSoilBagMouth(BagMouthNormalizedOffset);}
+        else if (const auto* Bag = C->GetObservedQuickBarItem(); Bag && Bag->GetItemKey() == TEXT("PottingSoil"))
+            Mouth = BagMouth(*Bag->Mesh, BagMouthNormalizedOffset);
         else if(C->GetMesh()->DoesSocketExist(TEXT("hand_r")))Mouth=C->GetMesh()->GetSocketLocation(TEXT("hand_r"));
     }
-    const FVector To=Surface();const float Flight=FMath::Clamp(FVector::Dist(Mouth,To)/500.f,.16f,.65f);
+    const FVector To=Surface();
+    if (C)
+        C->SetRobotActionState(EBotanicusRobotAction::PourSoil, this, true, To, true);
+    const float Flight=FMath::Clamp(FVector::Dist(Mouth,To)/500.f,.16f,.65f);
     auto Spawn=[&](TObjectPtr<UNiagaraComponent>& FX,UNiagaraSystem* System,FVector Position)
     {if(!FX && System)FX=UNiagaraFunctionLibrary::SpawnSystemAtLocation(GetWorld(),System,Position,FRotator::ZeroRotator,FVector::OneVector,false,false,ENCPoolMethod::None);};
     Spawn(Stream,LoadedPour.Get(),Mouth);Spawn(Contact,LoadedContact.Get(),To);
@@ -93,4 +114,10 @@ void UBotanicusSoilPourComponent::ClearVisuals()
     for(auto* FX:{Stream.Get(),Contact.Get()})if(FX){FX->SetAutoDestroy(false);FX->DeactivateImmediate();FX->DestroyComponent();}
     Stream=nullptr;Contact=nullptr;
 }
-void UBotanicusSoilPourComponent::EndPlay(const EEndPlayReason::Type Reason){ClearVisuals();Super::EndPlay(Reason);}
+void UBotanicusSoilPourComponent::EndPlay(const EEndPlayReason::Type Reason)
+{
+    if (auto* Character = ActionSource.Get())
+        Character->SetRobotActionState(EBotanicusRobotAction::PourSoil, this, false);
+    ClearVisuals();
+    Super::EndPlay(Reason);
+}

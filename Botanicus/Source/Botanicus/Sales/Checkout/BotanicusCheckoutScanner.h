@@ -8,6 +8,7 @@ class UBoxComponent;
 class ABotanicusVisitorCharacter;
 class UStaticMeshComponent;
 class UInstancedStaticMeshComponent;
+class UBotanicusHeldItemComponent;
 USTRUCT()
 struct FBotanicusCheckoutScan
 {
@@ -42,6 +43,12 @@ public:
     FVector GetMuzzleLocation();
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Scanner") TObjectPtr<USceneComponent> ScannerMuzzle;
     UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Scanner") TSoftObjectPtr<UStaticMesh> FutureScannerMesh;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Scanner|Grip")
+    TObjectPtr<UBotanicusHeldItemComponent> HeldItemGrip;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Scanner|Grip")
+    TObjectPtr<USceneComponent> RightHandGrip;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Scanner|Grip")
+    TObjectPtr<USceneComponent> LeftHandGrip;
 private:
     UFUNCTION() void OnRep_Carry();
     void UpdatePose();

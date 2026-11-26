@@ -4,9 +4,13 @@
 
 #include "CoreMinimal.h"
 #include "Interaction/BotanicusInteractableActor.h"
+#include "Presentation/BotanicusHeldItemProfile.h"
 #include "BotanicusPlaceableItemActor.generated.h"
 
 class UMaterialInterface;
+class ABotanicusCharacter;
+class UBotanicusHeldItemComponent;
+enum class EBotanicusHeldItemSource : uint8;
 class UMeshComponent;
 
 /** Replicated small equipment or decoration placed from a private hotbar. */
@@ -33,6 +37,11 @@ public:
 	/** Signed vertical offset from the visual mesh bottom to the actor pivot. */
 	virtual float GetPlacementPivotToBottomOffset() const;
 
+	UBotanicusHeldItemComponent* GetHeldItemGrip() const { return HeldItemGrip; }
+	virtual bool UsesDedicatedHeldPresentation() const { return false; }
+	virtual void EquipForRobot(ABotanicusCharacter* Carrier, EBotanicusHeldItemSource Source,
+		const FBotanicusHeldItemSettings& Catalogue = {});
+
 	FName GetItemKey() const { return ItemKey; }
 	int32 GetQuantity() const { return Quantity; }
 
@@ -49,6 +58,15 @@ public:
 	float StackSnapDistance = 45.f;
 
 protected:
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Botanicus|Held Item")
+	TObjectPtr<UBotanicusHeldItemComponent> HeldItemGrip;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Botanicus|Held Item")
+	TObjectPtr<USceneComponent> RightHandGrip;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Botanicus|Held Item")
+	TObjectPtr<USceneComponent> LeftHandGrip;
+
 	/** Lets specialized placeable actors refine the catalogue appearance. */
 	virtual void ApplyItemDefinition();
 

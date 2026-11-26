@@ -5,6 +5,7 @@
 #include "Delivery/BotanicusDeliveryParcelActor.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerState.h"
+#include "GameFramework/WorldSettings.h"
 #include "Tools/BotanicusMultiToolComponent.h"
 
 namespace
@@ -36,6 +37,7 @@ namespace
 UBotanicusRobotAnimInstance::UBotanicusRobotAnimInstance()
 {
 	RootMotionMode = ERootMotionMode::IgnoreRootMotion;
+	InitializeRobotActionProfiles();
 }
 
 void UBotanicusRobotAnimInstance::NativeInitializeAnimation()
@@ -70,6 +72,11 @@ void UBotanicusRobotAnimInstance::NativeInitializeAnimation()
 	LookYaw = 0.0f;
 	LookPitch = 0.0f;
 	ResetBoxCarry();
+	RobotAction = EBotanicusRobotAction::None;
+	RobotActionAlpha = 0.f;
+	ActiveRobotCue = {};
+	RobotActionMount.Reset();
+	InteractionMontage.Reset();
 	AirborneDuration = 0.0f;
 	TurnCooldownRemaining = 0.0f;
 	JumpTime = JumpLiftTime;
@@ -83,7 +90,7 @@ void UBotanicusRobotAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
 	Super::NativeUpdateAnimation(DeltaSeconds);
 
-	const ABotanicusCharacter* Owner = Character.Get();
+	ABotanicusCharacter* Owner = Character.Get();
 	const UCharacterMovementComponent* CharacterMovement = Movement.Get();
 	if (!Owner || !CharacterMovement)
 	{
@@ -113,7 +120,22 @@ void UBotanicusRobotAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	}
 	UpdateAirPose(*CharacterMovement, DeltaSeconds);
 	const ABotanicusDeliveryParcelActor* Parcel = Owner->GetCarriedParcelForAnimation();
-	UpdateBoxCarryState(Parcel, DeltaSeconds);
+	const float EffectiveDilation = Owner->GetActorTimeDilation();
+	const float CarryDeltaSeconds = DeltaSeconds / FMath::Max(EffectiveDilation, UE_SMALL_NUMBER);
+	const FBotanicusRobotToolMotion ToolMotion = UpdateRobotAction(*Owner, Owner->GetRobotHeldGrip(), Parcel != nullptr, CarryDeltaSeconds);
+	if (auto* Tool = MultiTool.Get(); Tool && !Owner->IsLocallyControlled())
+	{
+		EBotanicusMultiToolMode VisualMode = EBotanicusMultiToolMode::Neutral;
+		if (bApplyRobotActionHands && RobotAction == EBotanicusRobotAction::Harvest)
+			VisualMode = EBotanicusMultiToolMode::Shovel;
+		else if (bApplyRobotActionHands && RobotAction == EBotanicusRobotAction::Whip)
+			VisualMode = EBotanicusMultiToolMode::ElectricWhip;
+		Tool->SetActionVisualMode(VisualMode);
+	}
+	FBotanicusHeldItemPose Held = Owner->UpdateHeldItemPose(DeltaSeconds, ToolMotion);
+	ApplyRobotActionHands(*Owner, Held);
+	bHasHeldItem = Held.IsSet();
+	UpdateBoxCarryState(Parcel, CarryDeltaSeconds);
 	UpdateGroundPose(*Owner, ActorYaw, DeltaSeconds);
 
 	// The mesh inherits network smoothing from the legacy movement mesh.
@@ -121,9 +143,10 @@ void UBotanicusRobotAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	const USkeletalMeshComponent* Mesh = GetSkelMeshComponent();
 	const FQuat BaseRotation = Owner->GetBaseRotationOffset() * Mesh->GetRelativeRotation().Quaternion();
 	const float SmoothedYaw = FRotator::NormalizeAxis(Mesh->GetComponentRotation().Yaw - BaseRotation.Rotator().Yaw);
-	BodyRotation.Yaw = FMath::FindDeltaAngleDegrees(SmoothedYaw, BodyYaw);
+	// The grip mount and torso share the same smoothed movement-mesh heading.
+	BodyRotation.Yaw = (bIsCarryingBox || bHasHeldItem) ? 0.0f : FMath::FindDeltaAngleDegrees(SmoothedYaw, BodyYaw);
 	UpdateLookPose(*Owner, DeltaSeconds);
-	UpdateBoxHandTargets(Parcel, DeltaSeconds);
+	UpdateHandTargets(Parcel, Held, CarryDeltaSeconds);
 
 	// Preserve the previous heading through the stop, while the Blend Space fades to idle.
 	if (bIsMoving)
@@ -227,6 +250,14 @@ void UBotanicusRobotAnimInstance::UpdateGroundPose(const ABotanicusCharacter& Ow
 	}
 
 	TurnCooldownRemaining = FMath::Max(0.0f, TurnCooldownRemaining - DeltaSeconds);
+	if (bIsCarryingBox || bHasHeldItem)
+	{
+		bWasIdleEligible = false;
+		GroundPose = ERobotGroundPose::Locomotion;
+		BodyYaw = ActorYaw;
+		return;
+	}
+
 	if (bIsMoving || AirPose != ERobotAirPose::Ground)
 	{
 		bWasIdleEligible = false;
@@ -293,7 +324,13 @@ void UBotanicusRobotAnimInstance::UpdateGroundPose(const ABotanicusCharacter& Ow
 
 void UBotanicusRobotAnimInstance::UpdateLookPose(const ABotanicusCharacter& Owner, float DeltaSeconds)
 {
-	const FRotator Aim = Owner.GetBaseAimRotation().GetNormalized();
+	FRotator Aim = Owner.GetBaseAimRotation().GetNormalized();
+	if (const FBotanicusRobotActionProfile* Profile = ActionProfiles.Find(RobotAction); Profile && ActiveRobotCue.bHasTarget)
+	{
+		const FVector TowardTarget = ActiveRobotCue.Target - Owner.GetPawnViewLocation();
+		if (!TowardTarget.IsNearlyZero())
+			Aim = FQuat::Slerp(Aim.Quaternion(), TowardTarget.ToOrientationQuat(), Profile->LookInfluence * RobotActionAlpha).Rotator();
+	}
 	const float Yaw = FMath::Clamp(FMath::FindDeltaAngleDegrees(BodyYaw, Aim.Yaw), -HeadYawLimit, HeadYawLimit);
 	const float Pitch = FMath::Clamp(Aim.Pitch, -HeadPitchDownLimit, HeadPitchUpLimit);
 	LookYaw = FMath::FInterpTo(LookYaw, Yaw, DeltaSeconds, HeadInterpolationSpeed);

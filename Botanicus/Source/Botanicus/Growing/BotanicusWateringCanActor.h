@@ -31,6 +31,8 @@ public:
     void SetRefillStation(ABotanicusWaterReserveActor* Station);
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Botanicus|Water") TObjectPtr<USceneComponent> WateringCanFillTarget;
 	FVector GetJuiceNozzleLocation() const;
+	virtual void EquipForRobot(ABotanicusCharacter* Carrier, EBotanicusHeldItemSource Source,
+		const FBotanicusHeldItemSettings& Catalogue = {}) override;
 
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -54,6 +56,8 @@ public:
 	/** Authored nozzle; the mesh-local calibration is used when this is left at the actor origin. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Botanicus|Water")
 	TObjectPtr<USceneComponent> WaterNozzle;
+	UPROPERTY(VisibleAnywhere, Category="Botanicus|Held Item")
+	TObjectPtr<USceneComponent> HeldVisualRoot;
 
 	ABotanicusCharacter* GetCarrier() const { return Carrier; }
 	float GetWaterLevel() const { return WaterLevel; }

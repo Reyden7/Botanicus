@@ -87,6 +87,9 @@ private:
     UFUNCTION() void OnRep_PendingScan();
     UPROPERTY(Transient,ReplicatedUsing=OnRep_PendingScan) FBotanicusCheckoutScan PendingScan;
     TWeakObjectPtr<ABotanicusPlayerController> ScanOperator;
+    TWeakObjectPtr<class ABotanicusCharacter> PresentedScanOperator;
+    TWeakObjectPtr<class ABotanicusCharacter> DrawerOperator;
+    void RefreshScanAction();
     void NotifyCheckoutChanged();
     UFUNCTION() void OnRep_Checkout();
     UPROPERTY(ReplicatedUsing=OnRep_Checkout) FBotanicusCheckoutReceipt Receipt;

@@ -16,6 +16,18 @@ public:
     virtual void OnConstruction(const FTransform& Transform) override;
     virtual void ApplyItemDefinition() override;
     float GetHeldVisualRadius() const;
+    virtual bool UsesDedicatedHeldPresentation() const override { return true; }
+    virtual void EquipForRobot(ABotanicusCharacter* Carrier, EBotanicusHeldItemSource Source,
+        const FBotanicusHeldItemSettings& Catalogue = {}) override;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MultiTool|Grip")
+    TObjectPtr<USceneComponent> ShovelRightHandGrip;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MultiTool|Grip")
+    TObjectPtr<USceneComponent> WhipRightHandGrip;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MultiTool|Grip")
+    TObjectPtr<USceneComponent> AnimatedRightHandGrip;
     void PlayWhipSwing();
     virtual void EndPlay(const EEndPlayReason::Type Reason) override;
     UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="MultiTool") TObjectPtr<USceneComponent> WhipVisualRoot;

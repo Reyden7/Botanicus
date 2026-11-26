@@ -152,8 +152,7 @@ void ABotanicusPlayerController::ClientBeginDeliveryParcelInspection_Implementat
 	ParcelCarryMode = EParcelCarryMode::Inspection;
 	LastSentParcelInspectionOrientation.Reset();
 	ParcelInspectionSendElapsed = .1f;
-	const FVector LabelNormal = Parcel->GetLabelNormalInParcelSpace();
-	ParcelInspectionRotation = FRotator(0.f, 180.f - LabelNormal.Rotation().Yaw, 0.f).Quaternion();
+	ParcelInspectionRotation = Parcel->GetDefaultCarryRotation();
 	StopParcelInspectionRotation();
 	LocalParcelPresentation = FTransform(Parcel->GetActorQuat(), Parcel->GetActorLocation());
 	ClientMessage(TEXT("Colis en main : maintenez le clic droit pour l’inspecter, puis A pour le poser."));
@@ -190,12 +189,11 @@ void ABotanicusPlayerController::UpdateDeliveryParcelCarry(float DeltaTime)
 		return;
 	}
 
-	FTransform Target = LocalParcelPresentation;
 	switch (ParcelCarryMode)
 	{
 	case EParcelCarryMode::Inspection:
-		Target = UpdateParcelInspectionPose(*Parcel, DeltaTime);
-		break;
+		// Inspection uses the current camera after its update this frame.
+		return;
 	case EParcelCarryMode::Placement:
 		ParcelPreviewUpdateAccumulator += DeltaTime;
 		if (ParcelPreviewUpdateAccumulator >= 1.f / 30.f)
@@ -206,10 +204,8 @@ void ABotanicusPlayerController::UpdateDeliveryParcelCarry(float DeltaTime)
 			bLocalParcelPlacementValid = ResolveDeliveryParcelPlacement(Parcel, Ground, ParcelPlacementYaw, LocalParcelPlacement);
 			GetWorld()->GetSubsystem<UBotanicusJuiceWorldSubsystem>()->SetPlacementHologram(Parcel, bLocalParcelPlacementValid);
 		}
-		Target = LocalParcelPlacement;
 		break;
 	case EParcelCarryMode::Confirming:
-		Target = LocalParcelPlacement;
 		break;
 	case EParcelCarryMode::Settling:
 		// Keep the accepted visual pose until the collision body receives its
@@ -225,20 +221,13 @@ void ABotanicusPlayerController::UpdateDeliveryParcelCarry(float DeltaTime)
 			ClearLocalDeliveryParcelCarry();
 			return;
 		}
-		Target = LocalParcelPlacement;
 		break;
 	default:
 		return;
 	}
 
-	const float Speed = ParcelCarryMode == EParcelCarryMode::Inspection ? InspectionPositionSmoothness : 24.f;
-	const float Alpha = 1.f - FMath::Exp(-Speed * DeltaTime);
-	LocalParcelPresentation.Blend(LocalParcelPresentation, Target, Alpha);
-	if (ParcelCarryMode == EParcelCarryMode::Inspection)
-	{
-		LocalParcelPresentation.SetRotation(Target.GetRotation());
-		SendParcelInspectionOrientation(Target.GetRotation(), DeltaTime);
-	}
+	const float Alpha = 1.f - FMath::Exp(-24.f * DeltaTime);
+	LocalParcelPresentation.Blend(LocalParcelPresentation, LocalParcelPlacement, Alpha);
 	Parcel->SetLocalParcelPresentation(LocalParcelPresentation);
 }
 
@@ -272,7 +261,7 @@ void ABotanicusPlayerController::UpdateParcelInspectionRotation(float DeltaTime)
 	ParcelInspectionRotation = FQuat::Slerp(ParcelInspectionRotation, ParcelInspectionTargetRotation, Alpha);
 }
 
-void ABotanicusPlayerController::SendParcelInspectionOrientation(const FQuat& WorldOrientation, float DeltaTime)
+void ABotanicusPlayerController::SendParcelInspectionOrientation(float DeltaTime)
 {
 	constexpr float SendInterval = .1f;
 	ParcelInspectionSendElapsed += DeltaTime;
@@ -280,20 +269,20 @@ void ABotanicusPlayerController::SendParcelInspectionOrientation(const FQuat& Wo
 		return;
 
 	if (!LastSentParcelInspectionOrientation.IsSet() ||
-		LastSentParcelInspectionOrientation.GetValue().AngularDistance(WorldOrientation) >= FMath::DegreesToRadians(1.0))
+		LastSentParcelInspectionOrientation.GetValue().AngularDistance(ParcelInspectionRotation) >= FMath::DegreesToRadians(1.0))
 	{
 		ParcelInspectionSendElapsed = 0.f;
-		LastSentParcelInspectionOrientation = WorldOrientation;
-		ServerSetParcelInspectionOrientation(LocalMovedDeliveryParcel, WorldOrientation.Rotator());
+		LastSentParcelInspectionOrientation = ParcelInspectionRotation;
+		ServerSetParcelInspectionOrientation(LocalMovedDeliveryParcel, ParcelInspectionRotation.Rotator());
 	}
 }
 
 void ABotanicusPlayerController::ServerSetParcelInspectionOrientation_Implementation(
-	ABotanicusDeliveryParcelActor* Parcel, FRotator WorldRotation)
+	ABotanicusDeliveryParcelActor* Parcel, FRotator RelativeRotation)
 {
 	if (IsValid(Parcel) && ServerMovedDeliveryParcel == Parcel && GetPawn() && Parcel->GetCarrier() == GetPawn() &&
-		!WorldRotation.ContainsNaN())
-		Parcel->SetCarriedInspectionOrientation(WorldRotation);
+		!RelativeRotation.ContainsNaN())
+		Parcel->SetCarriedInspectionOrientation(RelativeRotation);
 }
 
 void ABotanicusPlayerController::ServerSetParcelPlacementPreview_Implementation(ABotanicusDeliveryParcelActor* Parcel, bool bPreview)
@@ -304,17 +293,27 @@ void ABotanicusPlayerController::ServerSetParcelPlacementPreview_Implementation(
 	}
 }
 
-FTransform ABotanicusPlayerController::UpdateParcelInspectionPose(const ABotanicusDeliveryParcelActor& Parcel, float DeltaTime)
+void ABotanicusPlayerController::UpdateLocalParcelInspection(float DeltaTime)
 {
+	auto* Parcel = LocalMovedDeliveryParcel.Get();
+	if (ParcelCarryMode != EParcelCarryMode::Inspection || !IsValid(Parcel) || !IsValid(GetPawn()))
+		return;
+
 	UpdateParcelInspectionRotation(DeltaTime);
 	FVector Eye;
 	FRotator View;
 	GetPlayerViewPoint(Eye, View);
 	const FQuat ViewRotation = View.Quaternion();
-	const float Distance = FMath::Max(InspectionDistance, static_cast<float>(Parcel.GetParcelHalfExtent().Size() * 2.2));
+	const FTransform Sway = Parcel->UpdateCarrySway(
+		*GetPawn(), FRotator(0.0, View.Yaw, 0.0).Quaternion(), DeltaTime, !bParcelInspectionRotating);
+	const FVector Extent = Parcel->GetParcelHalfExtent() * Parcel->GetActorScale3D().GetAbs();
+	const double Distance = FMath::Max<double>(InspectionDistance, Extent.Size() * 2.2);
 	const FVector ViewOffset(Distance, InspectionHorizontalOffset, InspectionVerticalOffset);
-	const FVector Sway = GetPawn()->GetVelocity().GetClampedToMaxSize(650.f) * (InspectionMovementSway / 650.f);
-	return FTransform(ViewRotation * ParcelInspectionRotation, Eye + ViewRotation.RotateVector(ViewOffset) - Sway);
+	const FTransform CameraPivot(ViewRotation, Eye);
+	LocalParcelPresentation = FTransform(Sway.GetRotation() * ParcelInspectionRotation, ViewOffset + Sway.GetLocation())
+		* CameraPivot;
+	Parcel->SetLocalParcelPresentation(LocalParcelPresentation);
+	SendParcelInspectionOrientation(DeltaTime);
 }
 
 void ABotanicusPlayerController::ConfirmDeliveryParcelPlacement()

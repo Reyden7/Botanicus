@@ -498,11 +498,11 @@ protected:
 	bool TryCollectNearbyDeliveryParcel();
 	bool HandleDeliveryParcelInput(const FInputKeyEventArgs& Params);
 	void UpdateDeliveryParcelCarry(float DeltaTime);
-	FTransform UpdateParcelInspectionPose(const ABotanicusDeliveryParcelActor& Parcel, float DeltaTime);
+	void UpdateLocalParcelInspection(float DeltaTime);
 	bool HandleParcelInspectionMouse(const FInputKeyEventArgs& Params);
 	void StopParcelInspectionRotation(bool bCoast = false);
 	void UpdateParcelInspectionRotation(float DeltaTime);
-	void SendParcelInspectionOrientation(const FQuat& WorldOrientation, float DeltaTime);
+	void SendParcelInspectionOrientation(float DeltaTime);
 	void BeginDeliveryParcelPlacement();
 	void ConfirmDeliveryParcelPlacement();
 	void CancelDeliveryParcelPlacement();
@@ -689,7 +689,7 @@ protected:
 		float RequestedYaw);
 
 	UFUNCTION(Server, Reliable)
-	void ServerSetParcelInspectionOrientation(ABotanicusDeliveryParcelActor* Parcel, FRotator WorldRotation);
+	void ServerSetParcelInspectionOrientation(ABotanicusDeliveryParcelActor* Parcel, FRotator RelativeRotation);
 
 	UFUNCTION(Server, Reliable)
 	void ServerSetParcelPlacementPreview(ABotanicusDeliveryParcelActor* Parcel, bool bPreview);
@@ -1246,8 +1246,6 @@ protected:
 	float InspectionVerticalOffset = -10.f;
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Carton Inspection", meta=(Units="cm"))
 	float InspectionHorizontalOffset = 0.f;
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Carton Inspection", meta=(ClampMin="1"))
-	float InspectionPositionSmoothness = 19.f;
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Carton Inspection", meta=(ClampMin="0.01"))
 	float InspectionRotationSensitivity = .30f;
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Carton Inspection", meta=(ClampMin="1"))
@@ -1260,8 +1258,6 @@ protected:
 	float InspectionMaxAngularSpeed = 720.f;
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Carton Inspection")
 	bool InvertInspectionVerticalAxis = false;
-	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Carton Inspection", meta=(ClampMin="0", Units="cm"))
-	float InspectionMovementSway = 4.f;
 
 	float ParcelPlacementYaw = 0.0f;
 	float ParcelPreviewUpdateAccumulator = 0.0f;

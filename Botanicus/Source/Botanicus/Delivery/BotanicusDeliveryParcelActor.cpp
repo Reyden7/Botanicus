@@ -49,6 +49,12 @@ ABotanicusDeliveryParcelActor::ABotanicusDeliveryParcelActor()
 	PrimaryActorTick.bCanEverTick = true;
 	SetNetUpdateFrequency(30.0f);
 
+	LargeCarryProfile.CarryRelativeLocation = FVector(-6.0, 0.0, -4.0);
+	LargeCarryProfile.CarryRelativeRotation = FRotator(-16.0, 0.0, 0.0);
+	LargeCarryProfile.UnderGripPosition.X = 4.0;
+	LargeCarryProfile.LeftElbowOffset = FVector(-7.0, 2.0, -4.0);
+	LargeCarryProfile.RightElbowOffset = FVector(7.0, 2.0, -4.0);
+
 	DeliveryBody = CreateDefaultSubobject<UBoxComponent>(TEXT("Delivery Physics Body"));
 	SetRootComponent(DeliveryBody);
 	SceneRoot->SetupAttachment(DeliveryBody);
@@ -237,7 +243,7 @@ void ABotanicusDeliveryParcelActor::GetLifetimeReplicatedProps(
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(ABotanicusDeliveryParcelActor, Carrier);
-	DOREPLIFETIME(ABotanicusDeliveryParcelActor, CarriedInspectionOrientation);
+	DOREPLIFETIME(ABotanicusDeliveryParcelActor, CarriedInspectionRelativeRotation);
 	DOREPLIFETIME(ABotanicusDeliveryParcelActor, bHasCarriedInspectionOrientation);
 	DOREPLIFETIME(ABotanicusDeliveryParcelActor, bCarriedPlacementPreview);
 	DOREPLIFETIME(ABotanicusDeliveryParcelActor, ItemKey);
@@ -245,6 +251,7 @@ void ABotanicusDeliveryParcelActor::GetLifetimeReplicatedProps(
 	DOREPLIFETIME(ABotanicusDeliveryParcelActor, Quantity);
 	DOREPLIFETIME(ABotanicusDeliveryParcelActor, CutCoverageMask);
 	DOREPLIFETIME(ABotanicusDeliveryParcelActor, CuttingAudio);
+	DOREPLIFETIME(ABotanicusDeliveryParcelActor, CutContact);
 	DOREPLIFETIME(ABotanicusDeliveryParcelActor, bOpened);
 	DOREPLIFETIME(ABotanicusDeliveryParcelActor, OpeningVisualId);
 	DOREPLIFETIME(ABotanicusDeliveryParcelActor, OpeningStartedAt);
@@ -275,15 +282,7 @@ void ABotanicusDeliveryParcelActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
-	if (bHasCarriedInspectionOrientation && IsValid(Carrier) && !LocalParcelPresentation.IsSet() && VisualHomeTransform.IsSet())
-	{
-		const FQuat Target = CarriedInspectionOrientation.Quaternion() * VisualHomeTransform.GetValue().GetRotation();
-		const FQuat Current = SceneRoot->GetComponentQuat();
-		if (!Current.Equals(Target, 1.e-4))
-			SceneRoot->SetWorldRotation(FQuat::Slerp(Current, Target, 1.f - FMath::Exp(-20.f * DeltaSeconds)));
-	}
-
-	UpdateRobotCarryOffset();
+	UpdateRemoteCarryPose(DeltaSeconds);
 
 	if (HasAuthority() && ActiveCutter.IsValid() && !bOpened)
 	{
@@ -430,11 +429,11 @@ void ABotanicusDeliveryParcelActor::EndCarry(const FTransform& DropTransform)
 	ForceNetUpdate();
 }
 
-void ABotanicusDeliveryParcelActor::SetCarriedInspectionOrientation(const FRotator& WorldRotation)
+void ABotanicusDeliveryParcelActor::SetCarriedInspectionOrientation(const FRotator& RelativeRotation)
 {
 	if (HasAuthority() && Carrier)
 	{
-		CarriedInspectionOrientation = WorldRotation.GetNormalized();
+		CarriedInspectionRelativeRotation = RelativeRotation.GetNormalized();
 		bHasCarriedInspectionOrientation = true;
 		ForceNetUpdate();
 	}
@@ -451,6 +450,9 @@ void ABotanicusDeliveryParcelActor::SetCarriedPlacementPreview(bool bPreview)
 
 void ABotanicusDeliveryParcelActor::OnRep_Carrier(APawn* PreviousCarrier)
 {
+	SmoothedInspectionRelativeRotation.Reset();
+	PreviousCarryVelocity.Reset();
+	CarrySwayResponse = FVector::ZeroVector;
 	if (auto* Previous = Cast<ABotanicusCharacter>(PreviousCarrier))
 	{
 		Previous->UpdateCarriedParcelForAnimation(this, false);
@@ -536,14 +538,7 @@ void ABotanicusDeliveryParcelActor::RefreshParcelVisualAttachment()
 	}
 	else if (CarrierRoot)
 	{
-		const double Distance = 45.0 + ParcelHalfExtent.Size2D();
-		const FVector Scale = GetActorScale3D() * FTransform::GetSafeScaleReciprocal(Parent->GetComponentScale());
-		const FQuat Rotation = bRobotMount
-			? RobotCarrier->GetBaseRotationOffset().Inverse() * HandGripFrame->GetRelativeRotation().Quaternion().Inverse()
-			: FQuat::Identity;
-		SceneRoot->SetRelativeTransform(VisualHomeTransform.GetValue() *
-			FTransform(Rotation, FVector(Distance, 0, 22), Scale));
-		UpdateRobotCarryOffset();
+		UpdateRemoteCarryPose(0.0f);
 	}
 	else
 	{
@@ -552,9 +547,58 @@ void ABotanicusDeliveryParcelActor::RefreshParcelVisualAttachment()
 	}
 }
 
-FTransform ABotanicusDeliveryParcelActor::GetHandGripTransform(bool bLeftHand) const
+FQuat ABotanicusDeliveryParcelActor::GetDefaultCarryRotation() const
 {
-	return (bLeftHand ? LeftHandGrip : RightHandGrip)->GetComponentTransform();
+	return HandGripFrame->GetRelativeRotation().Quaternion().Inverse();
+}
+
+const FBotanicusParcelCarryProfile& ABotanicusDeliveryParcelActor::GetCarryProfile() const
+{
+	const double Size = 2.0 * (ParcelHalfExtent * GetActorScale3D().GetAbs()).GetMax();
+	if (Size <= SmallCarryMaxSize)
+		return SmallCarryProfile;
+	return Size <= MediumCarryMaxSize ? MediumCarryProfile : LargeCarryProfile;
+}
+
+FTransform ABotanicusDeliveryParcelActor::GetHandGripTransform(
+	bool bLeftHand, bool bUnder, const FBotanicusParcelCarryProfile& Profile) const
+{
+	const FTransform& Frame = HandGripFrame->GetComponentTransform();
+	if (bUnder)
+	{
+		// Keep these contacts near the robot and under the box as its width grows.
+		// The frame already includes the box dimensions and actor scale.
+		const FVector Extent = Frame.GetScale3D().GetAbs() * 22.0;
+		const FVector Position(-Extent.X + FMath::Clamp(Profile.UnderGripPosition.X, 0.0, Extent.X),
+			(bLeftHand ? -1.0 : 1.0) * FMath::Clamp(Profile.UnderGripPosition.Y, 0.0, Extent.Y),
+			-Extent.Z - Profile.UnderGripPosition.Z);
+		const FQuat Wrist = (bLeftHand ? Profile.LeftUnderWristRotation : Profile.RightUnderWristRotation).Quaternion();
+		return FTransform(Frame.TransformRotation(Wrist), Frame.TransformPositionNoScale(Position));
+	}
+
+	const USceneComponent* Grip = bLeftHand ? LeftHandGrip.Get() : RightHandGrip.Get();
+	const FVector Offset = bLeftHand ? Profile.LeftGripOffset : Profile.RightGripOffset;
+	const FQuat Wrist = (bLeftHand ? Profile.LeftWristOffset : Profile.RightWristOffset).Quaternion();
+	return FTransform(Frame.TransformRotation(Wrist * Grip->GetRelativeRotation().Quaternion()),
+		Frame.TransformPosition(Grip->GetRelativeLocation() + Offset));
+}
+
+FTransform ABotanicusDeliveryParcelActor::UpdateCarrySway(
+	const APawn& Pawn, const FQuat& PivotRotation, float DeltaSeconds, bool bEnabled)
+{
+	const FVector Velocity = Pawn.GetVelocity();
+	FVector Response = FVector::ZeroVector;
+	if (bEnabled && PreviousCarryVelocity.IsSet() && DeltaSeconds > UE_SMALL_NUMBER)
+	{
+		const FVector Acceleration = PivotRotation.UnrotateVector((Velocity - *PreviousCarryVelocity) / DeltaSeconds);
+		Response = FVector(-Acceleration.X, -Acceleration.Y, 0.0).GetClampedToMaxSize(1800.0) / 1800.0;
+	}
+	PreviousCarryVelocity = Velocity;
+	CarrySwayResponse = FMath::Lerp(CarrySwayResponse, Response,
+		1.0 - FMath::Exp(-CarrySwayDamping * DeltaSeconds));
+	const FVector Axis(-CarrySwayResponse.Y, CarrySwayResponse.X, 0.0);
+	const FQuat Rotation(Axis.GetSafeNormal(), FMath::DegreesToRadians(CarrySwayMaxAngle) * CarrySwayResponse.Size());
+	return FTransform(Rotation, CarrySwayResponse * CarrySwayMaxOffset);
 }
 
 void ABotanicusDeliveryParcelActor::RefreshHandGripFrame()
@@ -568,30 +612,49 @@ void ABotanicusDeliveryParcelActor::RefreshHandGripFrame()
 	HandGripFrame->SetRelativeTransform(FTransform(FrameRotation, FVector::ZeroVector, GripExtent / FVector(22.0)));
 }
 
-void ABotanicusDeliveryParcelActor::UpdateRobotCarryOffset()
+void ABotanicusDeliveryParcelActor::UpdateRemoteCarryPose(float DeltaSeconds)
 {
-	const auto* RobotCarrier = Cast<ABotanicusCharacter>(Carrier);
-	if (!IsValid(RobotCarrier) || LocalParcelPresentation.IsSet() || !VisualHomeTransform.IsSet() ||
-		SceneRoot->GetAttachParent() != RobotCarrier->GetMesh())
-	{
+	if (!IsValid(Carrier) || Carrier->IsLocallyControlled() || LocalParcelPresentation.IsSet() || !VisualHomeTransform.IsSet())
 		return;
-	}
 
 	const FTransform& Home = VisualHomeTransform.GetValue();
-	const FVector InverseParentScale = FTransform::GetSafeScaleReciprocal(RobotCarrier->GetMesh()->GetComponentScale());
-	const FVector CarryScale = GetActorScale3D() * InverseParentScale;
-	SceneRoot->SetRelativeScale3D(Home.GetScale3D() * CarryScale);
+	const USceneComponent* Parent = SceneRoot->GetAttachParent();
+	const auto* RobotCarrier = Cast<ABotanicusCharacter>(Carrier);
+	const bool bRobotMount = RobotCarrier && Parent == RobotCarrier->GetMesh();
 
-	const FQuat BaseRotation = RobotCarrier->GetBaseRotationOffset();
-	const FQuat PawnRotation = RobotCarrier->GetMesh()->GetComponentQuat() * BaseRotation.Inverse();
-	const FVector BoxForward = SceneRoot->GetComponentQuat().UnrotateVector(PawnRotation.GetForwardVector());
-	const FVector BoxExtent = ParcelHalfExtent * SceneRoot->GetComponentScale().GetAbs();
-	const double FrontClearance = FVector::DotProduct(BoxForward.GetAbs(), BoxExtent);
-	const FVector PawnSpaceOffset = RobotCarryOffset + FVector(FrontClearance, 0.0, 0.0);
-	const FVector ParentSpaceOffset = BaseRotation.UnrotateVector(PawnSpaceOffset) * InverseParentScale
-		- BaseRotation.UnrotateVector(RobotCarrier->GetBaseTranslationOffset());
-	const FQuat MountRotation = SceneRoot->GetRelativeRotation().Quaternion() * Home.GetRotation().Inverse();
-	SceneRoot->SetRelativeLocation(ParentSpaceOffset + MountRotation.RotateVector(Home.GetLocation() * CarryScale));
+	const FQuat Inspection = bHasCarriedInspectionOrientation
+		? CarriedInspectionRelativeRotation.Quaternion() : GetDefaultCarryRotation();
+	SmoothedInspectionRelativeRotation = SmoothedInspectionRelativeRotation.IsSet()
+		? FQuat::Slerp(*SmoothedInspectionRelativeRotation, Inspection, 1.f - FMath::Exp(-28.f * DeltaSeconds))
+		: Inspection;
+
+	const FQuat BaseRotation = bRobotMount ? RobotCarrier->GetBaseRotationOffset() : FQuat::Identity;
+	const FQuat PivotRotation = Parent->GetComponentQuat() * BaseRotation.Inverse();
+	const FTransform Sway = UpdateCarrySway(*Carrier, PivotRotation, DeltaSeconds, true);
+	const FBotanicusParcelCarryProfile& Profile = GetCarryProfile();
+	const FQuat RelativeRotation = Profile.CarryRelativeRotation.Quaternion()
+		* SmoothedInspectionRelativeRotation.GetValue();
+	const FVector InverseParentScale = FTransform::GetSafeScaleReciprocal(Parent->GetComponentScale());
+	const FVector CarryScale = GetActorScale3D() * InverseParentScale;
+	const FVector Extent = ParcelHalfExtent * (GetActorScale3D() * Home.GetScale3D()).GetAbs();
+
+	FVector Offset(45.0 + Extent.Size2D(), 0.0, 22.0);
+	if (bRobotMount)
+	{
+		const FVector Forward = (RelativeRotation * Home.GetRotation()).UnrotateVector(FVector::ForwardVector);
+		const double FrontClearance = FVector::DotProduct(Forward.GetAbs(), Extent);
+		Offset = FVector(FrontClearance, 0.0, 0.0) + RobotCarryOffset + Profile.CarryRelativeLocation;
+		if (&Profile == &LargeCarryProfile)
+		{
+			// Lower the broad box without putting the entire underside below arm reach on taller packs.
+			Offset.Z += FMath::Max(0.0, Extent.Z - 21.0);
+		}
+	}
+
+	const FVector MountLocation = BaseRotation.UnrotateVector(Offset + Sway.GetLocation()) * InverseParentScale
+		- (bRobotMount ? BaseRotation.UnrotateVector(RobotCarrier->GetBaseTranslationOffset()) : FVector::ZeroVector);
+	const FQuat MountRotation = BaseRotation.Inverse() * Sway.GetRotation() * RelativeRotation;
+	SceneRoot->SetRelativeTransform(Home * FTransform(MountRotation, MountLocation, CarryScale));
 }
 
 void ABotanicusDeliveryParcelActor::ApplyLocalParcelPresentation()
@@ -663,12 +726,36 @@ void ABotanicusDeliveryParcelActor::EndCutting(AActor* Interactor)
 		return;
 	}
 	ActiveCutter.Reset();
+	SetCutContact(nullptr);
 	bHasLastCutSample = false;
 	if (CuttingAudio.ActiveWindow > 0.f)
 	{
 		CuttingAudio = {};
 		ForceNetUpdate();
 	}
+}
+
+void ABotanicusDeliveryParcelActor::SetCutContact(APawn* Cutter, const FVector& Contact)
+{
+	const bool bChangedCutter = CutContact.Cutter != Cutter;
+	if (bChangedCutter || (Cutter && !CutContact.Location.Equals(Contact, .65)))
+	{
+		CutContact.Cutter = Cutter;
+		CutContact.Location = Contact;
+		OnRep_CutContact();
+		if (bChangedCutter)
+			ForceNetUpdate();
+	}
+}
+
+void ABotanicusDeliveryParcelActor::OnRep_CutContact()
+{
+	auto* Character = Cast<ABotanicusCharacter>(CutContact.Cutter);
+	if (auto* Previous = CutActionCharacter.Get(); Previous && Previous != Character)
+		Previous->SetRobotActionState(EBotanicusRobotAction::CutTape, this, false);
+	CutActionCharacter = Character;
+	if (Character)
+		Character->SetRobotActionState(EBotanicusRobotAction::CutTape, this, true, CutContact.Location, true);
 }
 
 double ABotanicusDeliveryParcelActor::GetCuttingAudioTime() const
@@ -809,6 +896,7 @@ void ABotanicusDeliveryParcelActor::UpdateCutterTrace()
 			QueryParams) ||
 		Hit.GetActor() != this)
 	{
+		SetCutContact(nullptr);
 		bHasLastCutSample = false;
 		return;
 	}
@@ -818,10 +906,12 @@ void ABotanicusDeliveryParcelActor::UpdateCutterTrace()
 	const float TapeHalfLength = ParcelHalfExtent.X * 0.92f;
 	if (!IsCuttingAreaHit(Hit))
 	{
+		SetCutContact(nullptr);
 		bHasLastCutSample = false;
 		return;
 	}
 
+	SetCutContact(Character, Hit.ImpactPoint);
 	const float Normalized =
 		FMath::Clamp(
 			(LocalHit.X + TapeHalfLength) /

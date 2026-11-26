@@ -297,6 +297,7 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 
 	FBotanicusItemDefinition& PlantPot =
 		NativeFallbackItems.AddDefaulted_GetRef();
+	PlantPot.HeldItemSettings = {EBotanicusHeldItemProfile::TwoHandsLarge, FVector(24, 0, -8)};
 	PlantPot.ItemKey = TEXT("PlantPot");
 	PlantPot.DisplayName =
 		NSLOCTEXT("BotanicusCatalog", "PlantPot", "Pot de culture");
@@ -323,6 +324,7 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 		{
 			FBotanicusItemDefinition& ElementalPot =
 				NativeFallbackItems.AddDefaulted_GetRef();
+			ElementalPot.HeldItemSettings = {EBotanicusHeldItemProfile::TwoHandsLarge, FVector(24, 0, -8)};
 			ElementalPot.ItemKey = ItemKey;
 			ElementalPot.DisplayName = DisplayName;
 			ElementalPot.Category =
@@ -369,6 +371,7 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 
 	FBotanicusItemDefinition& SquarePlantPot =
 		NativeFallbackItems.AddDefaulted_GetRef();
+	SquarePlantPot.HeldItemSettings = {EBotanicusHeldItemProfile::TwoHandsLarge, FVector(24, 0, -8)};
 	SquarePlantPot.ItemKey = TEXT("PlantPotSquare");
 	SquarePlantPot.DisplayName = NSLOCTEXT(
 		"BotanicusCatalog",
@@ -453,6 +456,7 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 
 	FBotanicusItemDefinition& PottingSoil =
 		NativeFallbackItems.AddDefaulted_GetRef();
+	PottingSoil.HeldItemSettings = {EBotanicusHeldItemProfile::TwoHandsLarge, FVector(25, 0, -6), FRotator(0, 90, 0)};
 	PottingSoil.ItemKey = TEXT("PottingSoil");
 	PottingSoil.DisplayName =
 		NSLOCTEXT("BotanicusCatalog", "PottingSoil", "Dose de terreau");
@@ -492,6 +496,7 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 		{
 			FBotanicusItemDefinition& Treatment =
 				NativeFallbackItems.AddDefaulted_GetRef();
+			Treatment.HeldItemSettings = {EBotanicusHeldItemProfile::RightHand, FVector(26, 19, 0)};
 			Treatment.ItemKey = ItemKey;
 			Treatment.DisplayName = DisplayName;
 			Treatment.Category = EBotanicusItemCategory::Supply;
@@ -541,6 +546,7 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 		{
 			FBotanicusItemDefinition& Seeds =
 				NativeFallbackItems.AddDefaulted_GetRef();
+			Seeds.HeldItemSettings = {EBotanicusHeldItemProfile::RightHand, FVector(28, 18, 2), FRotator(0, 90, 0)};
 			Seeds.ItemKey = ItemKey;
 			Seeds.DisplayName = DisplayName;
 			Seeds.Category = EBotanicusItemCategory::Supply;
@@ -614,6 +620,7 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 
 	FBotanicusItemDefinition& GardenTrowel =
 		NativeFallbackItems.AddDefaulted_GetRef();
+	GardenTrowel.HeldItemSettings = {EBotanicusHeldItemProfile::RightHand, FVector(27, 19, 0), FRotator(0, 90, 0)};
 	GardenTrowel.ItemKey = TEXT("GardenTrowel");
 	GardenTrowel.DisplayName =
 		NSLOCTEXT("BotanicusCatalog", "GardenTrowel", "Petite pelle");
@@ -632,6 +639,7 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 
 	FBotanicusItemDefinition& BoxCutter =
 		NativeFallbackItems.AddDefaulted_GetRef();
+	BoxCutter.HeldItemSettings = {EBotanicusHeldItemProfile::RightHand, FVector(27, 19, 0)};
 	BoxCutter.ItemKey = TEXT("BoxCutter");
 	BoxCutter.DisplayName =
 		NSLOCTEXT("BotanicusCatalog", "BoxCutter", "Cutter");
@@ -793,6 +801,7 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 
 	FBotanicusItemDefinition& SalePot =
 		NativeFallbackItems.AddDefaulted_GetRef();
+	SalePot.HeldItemSettings = {EBotanicusHeldItemProfile::TwoHandsLarge, FVector(24, 0, -8)};
 	SalePot.ItemKey = TEXT("SalePot");
 	SalePot.DisplayName =
 		NSLOCTEXT("BotanicusCatalog", "SalePot", "Pot de vente");
@@ -1114,6 +1123,7 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 
 	FBotanicusItemDefinition& NoctifloreSeeds =
 		NativeFallbackItems.AddDefaulted_GetRef();
+	NoctifloreSeeds.HeldItemSettings = {EBotanicusHeldItemProfile::RightHand, FVector(28, 18, 2), FRotator(0, 90, 0)};
 	NoctifloreSeeds.ItemKey = TEXT("SeedPacket_Noctiflore");
 	NoctifloreSeeds.DisplayName = NSLOCTEXT(
 		"BotanicusCatalog", "NoctifloreSeeds", "Graines de Noctiflore");
@@ -1145,6 +1155,16 @@ void UBotanicusItemCatalogSubsystem::Initialize(
 	NoctifloreProduct.WeightClass = EBotanicusItemWeightClass::Hotbar;
 	NoctifloreProduct.SalePrice = 150;
 	NoctifloreProduct.bPurchasable = false;
+
+	if (LoadedCatalog)
+	{
+		for (FBotanicusItemDefinition& Native : NativeFallbackItems)
+		{
+			const FBotanicusItemDefinition* Authored = LoadedCatalog->FindItem(Native.ItemKey);
+			if (Authored && Authored->HeldItemSettings.Profile != EBotanicusHeldItemProfile::None)
+				Native.HeldItemSettings = Authored->HeldItemSettings;
+		}
+	}
 }
 
 const FBotanicusItemDefinition*

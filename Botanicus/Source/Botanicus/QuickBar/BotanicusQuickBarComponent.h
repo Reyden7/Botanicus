@@ -183,6 +183,7 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="Botanicus|Quick Bar")
 	int32 GetSelectedSlotIndex() const;
+	FName GetObservedEquippedItem() const { return ObservedEquippedItem; }
 
 	UFUNCTION(BlueprintPure, Category="Botanicus|Quick Bar")
 	FBotanicusQuickBarSlot GetSelectedSlot() const;
@@ -300,6 +301,12 @@ protected:
 	virtual void BeginPlay() override;
 
 private:
+	UPROPERTY(ReplicatedUsing=OnRep_ObservedEquippedItem)
+	FName ObservedEquippedItem = NAME_None;
+
+	UFUNCTION()
+	void OnRep_ObservedEquippedItem();
+
 	UPROPERTY(ReplicatedUsing=OnRep_Slots)
 	TArray<FBotanicusQuickBarSlot> Slots;
 

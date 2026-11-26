@@ -3,6 +3,8 @@
 #include "GameFramework/Actor.h"
 #include "BotanicusAudioRelay.generated.h"
 
+class ABotanicusCharacter;
+
 USTRUCT()
 struct FBotanicusWaterAudioState
 {
@@ -32,6 +34,7 @@ private:
 	void ExpireWater();
 	UPROPERTY(ReplicatedUsing=OnRep_WaterStates) TArray<FBotanicusWaterAudioState> WaterStates;
 	TMap<TWeakObjectPtr<AActor>,double> LastWaterPulse;
+	TSet<TWeakObjectPtr<ABotanicusCharacter>> WaterActionSources;
 	FTimerHandle ExpiryTimer;
 	uint32 NextSequence = 0;
 };

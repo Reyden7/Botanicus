@@ -2,6 +2,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Tools/BotanicusMultiToolActor.h"
+#include "Engine/NetSerialization.h"
 #include "BotanicusMultiToolComponent.generated.h"
 
 USTRUCT()
@@ -28,6 +29,7 @@ public:
     /** Legacy tools continue to work; only an owned, selected multi-tool with the right context substitutes them. */
     static bool HasTool(const AActor* Interactor,FName RequiredTool,const AActor* Target,int32 Slot=0);
     EBotanicusMultiToolMode GetMode() const {return Presentation.Mode;}
+    void SetActionVisualMode(EBotanicusMultiToolMode Mode);
     static bool IsRobotItem(const UObject* Context,FName Key);
     bool TryWhip();
     UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="MultiTool|Whip",meta=(ClampMin="25",Units="cm")) float WhipInteractionDistance=200;
@@ -51,9 +53,10 @@ private:
     UFUNCTION(Server,Reliable) void ServerPrepareContext(AActor* Target,int32 Slot);
     UFUNCTION(Server,Reliable) void ServerCancelContext(bool bManual);
     UFUNCTION(Server,Reliable) void ServerWhip(class ABotanicusGardeningRobot* Robot);
-    UFUNCTION(NetMulticast,Unreliable) void MulticastWhipSwing();
+    UFUNCTION(NetMulticast,Unreliable) void MulticastWhipSwing(FVector_NetQuantize10 Target, double StartedAt);
     UPROPERTY(ReplicatedUsing=OnRep_Presentation) FBotanicusMultiToolPresentation Presentation;
     UPROPERTY(Transient) TObjectPtr<ABotanicusMultiToolActor> RemoteVisual;
+    EBotanicusMultiToolMode ActionVisualMode = EBotanicusMultiToolMode::Neutral;
     TWeakObjectPtr<AActor> Candidate,LastRequested,SuppressedTarget;
     int32 CandidateSlot=INDEX_NONE,LastRequestedSlot=INDEX_NONE,SuppressedSlot=INDEX_NONE;
     bool bSuppressed=false,bAutoSelected=false;

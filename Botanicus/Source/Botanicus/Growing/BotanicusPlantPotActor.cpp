@@ -412,6 +412,9 @@ bool ABotanicusPlantPotActor::IsPlantElementCompatible() const
 void ABotanicusPlantPotActor::BeginPlay()
 {
 	Super::BeginPlay();
+	if (ActorHasTag(TEXT("BotanicusObservedHeldItem")))
+		return;
+
     if(auto* Robots=GetWorld()->GetSubsystem<UBotanicusGardeningSubsystem>())Robots->Register(this);
 	if (PlantGrowthWidget)
 	{
@@ -988,6 +991,7 @@ void ABotanicusPlantPotActor::BeginPrimaryUse(AActor* Interactor)
 			return;
 		}
 		PlantKey = Definition->PlantKey;
+		Character->PlayRobotAction(EBotanicusRobotAction::Plant, GetSoilSurfaceForSlot(0), SelectedItemKey);
 		UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Plant"), GetActorLocation());
 		UBotanicusJuiceWorldSubsystem::PlantSucceeded(this, UBotanicusJuiceWorldSubsystem::SoilSurface(this, GetActorLocation()));
 		DiseaseState = FBotanicusPlantDiseaseState();
@@ -1249,6 +1253,7 @@ bool ABotanicusPlantPotActor::UpdatePrimaryUse(float DeltaSeconds)
 				GetPlantQualityLabel();
 			const int32 HarvestedQuantity =
 				FMath::Max(1, Definition->HarvestQuantity);
+			Character->PlayRobotAction(EBotanicusRobotAction::Harvest, GetSoilSurfaceForSlot(0), SelectedItemKey);
 			UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Harvest"), GetActorLocation());
 			UBotanicusJuiceWorldSubsystem::HarvestSucceeded(this, FoliageMesh);
 			PlantKey = NAME_None;

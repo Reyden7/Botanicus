@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Delivery/BotanicusPlaceableItemActor.h"
+#include "Presentation/BotanicusHeldItemComponent.h"
 #include "Visuals/BotanicusJuiceWorldSubsystem.h"
 
 #include "Catalog/BotanicusItemCatalogSubsystem.h"
@@ -58,6 +59,12 @@ void GatherPreviewMeshComponents(
 
 ABotanicusPlaceableItemActor::ABotanicusPlaceableItemActor()
 {
+	HeldItemGrip = CreateDefaultSubobject<UBotanicusHeldItemComponent>(TEXT("HeldItemGrip"));
+	RightHandGrip = CreateDefaultSubobject<USceneComponent>(TEXT("RightHandGrip"));
+	RightHandGrip->SetupAttachment(Mesh);
+	LeftHandGrip = CreateDefaultSubobject<USceneComponent>(TEXT("LeftHandGrip"));
+	LeftHandGrip->SetupAttachment(Mesh);
+
 	bAlwaysRelevant = true;
 	SetReplicateMovement(true);
 	PrimaryActorTick.bCanEverTick = true;
@@ -200,6 +207,15 @@ void ABotanicusPlaceableItemActor::ConfigureAsLocalPreview(
 			MeshComponent->SetCustomDepthStencilValue(bIsValid ? 1 : 2);
 		}
 	}
+}
+
+void ABotanicusPlaceableItemActor::EquipForRobot(ABotanicusCharacter* Carrier, EBotanicusHeldItemSource Source,
+	const FBotanicusHeldItemSettings& Catalogue)
+{
+	UPrimitiveComponent* Geometry = UsesSkeletalMeshAppearance() && SkeletalMeshVisual->GetSkeletalMeshAsset()
+		? static_cast<UPrimitiveComponent*>(SkeletalMeshVisual) : Mesh.Get();
+	HeldItemGrip->Bind(Carrier, *SceneRoot, *Geometry, LeftHandGrip, RightHandGrip, Source,
+		HeldItemGrip->ResolveSettings(Catalogue));
 }
 
 void ABotanicusPlaceableItemActor::ConfigureAsLocalInspection()

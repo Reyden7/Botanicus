@@ -1,4 +1,5 @@
 #include "Tools/BotanicusMultiToolActor.h"
+#include "Presentation/BotanicusHeldItemComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -36,8 +37,46 @@ ABotanicusMultiToolActor::ABotanicusMultiToolActor()
         Part->SetRelativeLocation(FVector(-4*I,0,7*I));Part->SetRelativeRotation(FRotator(-30,0,0));
         Part->SetRelativeScale3D(FVector(I==0?.045f:.012f,I==0?.045f:.012f,.075f));WhipSegments.Add(Part);
     }
+    HeldItemGrip->GripSettings = {EBotanicusHeldItemProfile::RightHand, FVector(28, 20, 3), FRotator::ZeroRotator, true};
+    const FRotator Wrist(-56.43, 148.97, -58.95);
+    RightHandGrip->SetupAttachment(CutterMesh_Temporary);
+    RightHandGrip->SetRelativeLocationAndRotation(FVector(-8, -3, 0), Wrist);
+    ShovelRightHandGrip = CreateDefaultSubobject<USceneComponent>(TEXT("ShovelRightHandGrip"));
+    ShovelRightHandGrip->SetupAttachment(ShovelMesh_Temporary);
+    ShovelRightHandGrip->SetRelativeLocationAndRotation(FVector(-12, -3, 0), Wrist);
+    WhipRightHandGrip = CreateDefaultSubobject<USceneComponent>(TEXT("WhipRightHandGrip"));
+    WhipRightHandGrip->SetupAttachment(WhipVisualRoot);
+    WhipRightHandGrip->SetRelativeRotation(Wrist);
+    AnimatedRightHandGrip = CreateDefaultSubobject<USceneComponent>(TEXT("AnimatedRightHandGrip"));
+    AnimatedRightHandGrip->SetupAttachment(MultiToolSkeletalMesh);
+    AnimatedRightHandGrip->SetRelativeLocationAndRotation(FVector(-4, -1, 0), Wrist);
     RefreshVisuals();
 }
+
+void ABotanicusMultiToolActor::EquipForRobot(ABotanicusCharacter* Carrier, EBotanicusHeldItemSource Source,
+    const FBotanicusHeldItemSettings& Catalogue)
+{
+    UPrimitiveComponent* Geometry = CutterMesh_Temporary;
+    USceneComponent* Grip = RightHandGrip;
+    if (UsesSkeletalMeshAppearance() && MultiToolSkeletalMesh->GetSkeletalMeshAsset())
+    {
+        Geometry = MultiToolSkeletalMesh;
+        Grip = AnimatedRightHandGrip;
+    }
+    else if (Mode == EBotanicusMultiToolMode::Shovel)
+    {
+        Geometry = ShovelMesh_Temporary;
+        Grip = ShovelRightHandGrip;
+    }
+    else if (Mode == EBotanicusMultiToolMode::ElectricWhip && !WhipSegments.IsEmpty())
+    {
+        Geometry = WhipSegments[0];
+        Grip = WhipRightHandGrip;
+    }
+    HeldItemGrip->Bind(Carrier, *SceneRoot, *Geometry, LeftHandGrip, Grip, Source,
+        HeldItemGrip->ResolveSettings(Catalogue));
+}
+
 void ABotanicusMultiToolActor::OnConstruction(const FTransform& Transform){Super::OnConstruction(Transform);RefreshVisuals();}
 void ABotanicusMultiToolActor::ApplyItemDefinition(){Super::ApplyItemDefinition();RefreshVisuals();}
 void ABotanicusMultiToolActor::SetMultiToolMode(EBotanicusMultiToolMode NewMode)

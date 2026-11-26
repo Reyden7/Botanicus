@@ -1,4 +1,5 @@
 #include "Sales/BotanicusCashRegisterActor.h"
+#include "BotanicusCharacter.h"
 #include "Engine/World.h"
 #include "Sales/Checkout/BotanicusCheckoutScanner.h"
 #include "Sales/Checkout/BotanicusPaymentCoins.h"
@@ -82,9 +83,21 @@ bool ABotanicusCashRegisterActor::TryScanCustomer(ABotanicusPlayerController* PC
     PendingScan.UpSeconds=FMath::Clamp(Settings->ScanDurationUp,.1f,3.f);PendingScan.DownSeconds=FMath::Clamp(Settings->ScanDurationDown,.1f,3.f);PendingScan.FadeSeconds=FMath::Clamp(Settings->ScanFadeSeconds,.05f,.3f);
     ScanOperator=PC;FlushNetDormancy();ForceNetUpdate();OnRep_PendingScan();return true;
 }
+void ABotanicusCashRegisterActor::RefreshScanAction()
+{
+    auto* Character = PendingScan.Id.IsValid() && !PendingScan.bCompleted && IsValid(PendingScan.Customer) && IsValid(DockScanner)
+        ? Cast<ABotanicusCharacter>(DockScanner->GetCarrier()) : nullptr;
+    if (auto* Previous = PresentedScanOperator.Get(); Previous && Previous != Character)
+        Previous->SetRobotActionState(EBotanicusRobotAction::Scan, this, false);
+    PresentedScanOperator = Character;
+    if (Character)
+        Character->SetRobotActionState(EBotanicusRobotAction::Scan, this, true, PendingScan.Customer->GetCheckoutPlantLocation(), true);
+}
+
 void ABotanicusCashRegisterActor::OnRep_PendingScan()
 {
     if(GetNetMode()==NM_DedicatedServer)return;
+    RefreshScanAction();
     if(auto* Juice=GetWorld()->GetSubsystem<UBotanicusJuiceWorldSubsystem>())
     {
         if(!PendingScan.Id.IsValid()){Juice->StopCheckoutScan(LastBeamTransaction);return;}
@@ -139,6 +152,13 @@ bool ABotanicusCashRegisterActor::CompleteCheckoutScan(ABotanicusPlayerControlle
     Candidate.CoinIntervalSeconds=FMath::Min(FMath::Clamp(S->CoinInterval,.03f,.2f),FMath::Max(.001f,(FMath::Clamp(S->MaximumCollectionSeconds,1.f,5.f)-Candidate.CoinFlightSeconds)/FMath::Max(1,Candidate.VisualCount()-1)));
     Candidate.CollectionSeconds=Candidate.CoinFlightSeconds+FMath::Max(0,Candidate.VisualCount()-1)*Candidate.CoinIntervalSeconds;
     Candidate.ScanOrigin=DockScanner->GetMuzzleLocation();Candidate.ScanTarget=Customer->GetCheckoutPlantLocation();Candidate.CustomerHand=Customer->GetCheckoutPlantLocation();
+    if (auto* Character = Cast<ABotanicusCharacter>(PC->GetPawn()))
+    {
+        Character->PlayRobotAction(EBotanicusRobotAction::ScanConfirm, Candidate.ScanTarget);
+        // The operator reaches toward the drawer as the existing coin deposit arrives.
+        if (!Candidate.bDrawerAlreadyOpen)
+            DrawerOperator = Character;
+    }
     PendingScan.bCompleted=true;Receipt=Candidate;if(PendingTotal==0)UpdatePaymentAnchor(Customer);OpeningCustomer=Customer;Customer->RecordManualCheckoutOutcome();++AcceptedScans;NotifyCheckoutChanged();
     UBotanicusAudioWorldSubsystem::Emit(this,TEXT("ScannerBeep"),Receipt.ScanOrigin);if(!Receipt.bDrawerAlreadyOpen)UBotanicusAudioWorldSubsystem::Emit(this,TEXT("RegisterOpen"),GetDrawerDepositLocation());return true;
 }
@@ -156,17 +176,25 @@ bool ABotanicusCashRegisterActor::TryCollectPayment(ABotanicusPlayerController* 
         Sale.bCredited=true;PC->CreditPlantSale(Sale.PlantItemKey,Sale.Amount,false);
     }
     PendingPayments.Reset();
+    if (auto* Character = Cast<ABotanicusCharacter>(PC->GetPawn()))
+        Character->PlayRobotAction(EBotanicusRobotAction::CollectCoins,
+            PaymentCoins ? PaymentCoins->GetActorLocation() : GetDrawerDepositLocation(), Character->GetRobotActionItemKey());
     ++AcceptedCollections;NotifyCheckoutChanged();return true;
 }
 void ABotanicusCashRegisterActor::TickCheckout(float DeltaSeconds)
 {
     if(ActorHasTag(TEXT("BotanicusPlacementPreview"))) return;const double Now=CheckoutServerTime();
     if(HasAuthority())UpdatePendingScan();else if(PendingScan.Id.IsValid() && LastBeamTransaction!=PendingScan.Id)OnRep_PendingScan();
+    if (GetNetMode() != NM_DedicatedServer && (PendingScan.Id.IsValid() || PresentedScanOperator.IsValid()))
+        RefreshScanAction();
     if(HasAuthority())
     {
         if(Receipt.Phase==EBotanicusCheckoutPhase::Opening && Now-Receipt.PhaseStartedAt>=Receipt.OpenSeconds)
         {
             Receipt.Phase=EBotanicusCheckoutPhase::AwaitingCollection;Receipt.PhaseStartedAt=Now;Receipt.OpenedAt=Now;if(Receipt.FloatStartedAt<=0)Receipt.FloatStartedAt=Now;
+            if (auto* Character = DrawerOperator.Get())
+                Character->PlayRobotAction(EBotanicusRobotAction::ReceiveCoins, GetDrawerDepositLocation(), Character->GetRobotActionItemKey());
+            DrawerOperator.Reset();
             if(Receipt.PendingSaleCount<=1)UpdatePaymentAnchor(OpeningCustomer.Get());if(auto* Customer=OpeningCustomer.Get()) Customer->BeginDeparture(true);OpeningCustomer.Reset();NotifyCheckoutChanged();
         }
         else if(Receipt.Phase==EBotanicusCheckoutPhase::Collecting && Now-Receipt.CollectedAt>=Receipt.CollectionSeconds+Receipt.ClosePauseSeconds)

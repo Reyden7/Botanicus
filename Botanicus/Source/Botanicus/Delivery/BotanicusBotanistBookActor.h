@@ -67,6 +67,14 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Book|Held") FVector HeldBookRelativeScale = FVector::OneVector;
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Book|Held") FTransform RemoteBookHandTransform = FTransform::Identity;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Botanicus|Book|Held")
+	TObjectPtr<USceneComponent> ClosedRightHandGrip;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Book|Held")
+	FBotanicusHeldItemSettings OpenGripSettings;
+
+	virtual bool UsesDedicatedHeldPresentation() const override { return true; }
+	bool IsReadingPose() const { return Presentation.Phase != EBotanistBookPhase::Closed; }
 	bool IsHeldPresentation() const { return bHeldPresentation; }
 	bool IsAvailable() const;
 	bool BeginReading(ABotanicusPlayerController& Reader);
@@ -91,6 +99,7 @@ private:
 	UFUNCTION() void OnRep_HeldPresentation();
 	UFUNCTION() void OnRep_InitialPlacement();
 	void SetPhase(EBotanistBookPhase Phase);
+	void RefreshHeldGrip();
 	void FinishTransition();
 	void RefreshCollision();
 	float GetBookPlayRate(bool bOpening) const;

@@ -670,6 +670,7 @@ void ABotanicusMultiPlantPotActor::BeginPrimaryUse(
 		}
 		Slot.PlantKey = Definition->PlantKey;
         Slot.PlantPlacementVariation = bEnableRandomPlantPlacement ? BotanicusPlanterSoil::MakePlantVariation() : FVector::ZeroVector;
+		Character->PlayRobotAction(EBotanicusRobotAction::Plant, GetSoilSurfaceForSlot(SlotIndex), SelectedKey);
 		UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Plant"), GetActorTransform().TransformPosition(GetSlotLocalLocation(SlotIndex)));
 		UBotanicusJuiceWorldSubsystem::PlantSucceeded(this, GetSoilSurfaceForSlot(SlotIndex));
 		Slot.DiseaseState = FBotanicusPlantDiseaseState();
@@ -857,6 +858,7 @@ bool ABotanicusMultiPlantPotActor::UpdateActiveUse(
 			EndPrimaryUse(Character);
 			return true;
 		}
+		Character->PlayRobotAction(EBotanicusRobotAction::Harvest, GetSoilSurfaceForSlot(ActiveSlotIndex), Character->GetRobotActionItemKey());
 		UBotanicusAudioWorldSubsystem::Emit(this, TEXT("Harvest"), GetActorTransform().TransformPosition(GetSlotLocalLocation(ActiveSlotIndex)));
 		UBotanicusJuiceWorldSubsystem::HarvestSucceeded(this, MultiFlowerMeshes.IsValidIndex(ActiveSlotIndex) ? MultiFlowerMeshes[ActiveSlotIndex].Get() : nullptr);
 		Slot = FBotanicusMultiPlantSlotState();

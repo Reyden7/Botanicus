@@ -3,6 +3,8 @@
 #include "Components/ActorComponent.h"
 #include "BotanicusSoilPourComponent.generated.h"
 class APawn;
+class ABotanicusCharacter;
+class UStaticMeshComponent;
 class UNiagaraComponent;
 class UNiagaraSystem;
 USTRUCT()
@@ -24,6 +26,7 @@ public:
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out) const override;
     void Transferred(APawn* Source,int32 Slot);
     void StopTransfer();
+    static FVector BagMouth(const UStaticMeshComponent& Mesh, const FVector& NormalizedOffset);
     UPROPERTY(EditAnywhere,Category="Soil|Juice") TSoftObjectPtr<UNiagaraSystem> PourSystem;
     UPROPERTY(EditAnywhere,Category="Soil|Juice") TSoftObjectPtr<UNiagaraSystem> ContactSystem;
     UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Soil|Juice",meta=(ClampMin="0",ClampMax="220")) float ParticlesPerSecond=180;
@@ -40,5 +43,6 @@ private:
     UPROPERTY(Transient) TObjectPtr<UNiagaraComponent> Stream;
     UPROPERTY(Transient) TObjectPtr<UNiagaraComponent> Contact;
     FTimerHandle UpdateTimer,CleanupTimer;
+    TWeakObjectPtr<ABotanicusCharacter> ActionSource;
     double StartedAt=0;
 };

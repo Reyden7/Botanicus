@@ -2,6 +2,7 @@
 
 #include "Components/SkeletalMeshComponent.h"
 #include "Delivery/BotanicusDeliveryParcelActor.h"
+#include "Presentation/BotanicusHeldItemProfile.h"
 
 namespace
 {
@@ -16,6 +17,9 @@ void UBotanicusRobotAnimInstance::ResetBoxCarry()
 	bIsCarryingBox = false;
 	bIsInspectingBox = false;
 	CarryPoseAlpha = 0.0f;
+	LeftHeldPoseAlpha = 0.0f;
+	RightHeldPoseAlpha = 0.0f;
+	bHasHeldItem = false;
 	HandIKAlpha = 0.0f;
 	LeftHandIKAlpha = 0.0f;
 	RightHandIKAlpha = 0.0f;
@@ -42,38 +46,64 @@ void UBotanicusRobotAnimInstance::UpdateBoxCarryState(const ABotanicusDeliveryPa
 
 	const float Support = FMath::Max(LeftArm.ReachWeight, RightArm.ReachWeight);
 	const float PoseTarget = bIsCarryingBox ? FMath::Lerp(0.45f, 1.0f, Support) : 0.0f;
-	CarryPoseAlpha = FMath::FInterpConstantTo(CarryPoseAlpha, PoseTarget, DeltaSeconds, 1.0f / FMath::Max(0.01f, CarryPoseBlendDuration));
+	CarryPoseAlpha = FMath::FInterpConstantTo(CarryPoseAlpha, PoseTarget, DeltaSeconds, 1.0f / FMath::Max(0.01f, bIsCarryingBox ? CarryPoseBlendInDuration : CarryPoseBlendOutDuration));
 	HandIKAlpha = FMath::FInterpConstantTo(HandIKAlpha, bIsCarryingBox ? 1.0f : 0.0f,
 		DeltaSeconds, 1.0f / FMath::Max(0.01f, HandIKBlendDuration));
 }
 
-void UBotanicusRobotAnimInstance::UpdateBoxHandTargets(const ABotanicusDeliveryParcelActor* Parcel, float DeltaSeconds)
+void UBotanicusRobotAnimInstance::UpdateHandTargets(const ABotanicusDeliveryParcelActor* Parcel,
+	const FBotanicusHeldItemPose& Held, float DeltaSeconds)
 {
-	if (!Parcel)
+	const USkeletalMeshComponent& Mesh = *GetSkelMeshComponent();
+	const auto* Carton = Parcel ? &Parcel->GetCarryProfile() : nullptr;
+	const auto UpdateArm = [&](bool bLeft, FCarryArm& Arm, FVector& Target, FVector& Elbow, FRotator& Wrist, float& Weight)
 	{
-		LeftHandIKAlpha = FMath::Min(LeftHandIKAlpha, HandIKAlpha * LeftArm.ReachWeight);
-		RightHandIKAlpha = FMath::Min(RightHandIKAlpha, HandIKAlpha * RightArm.ReachWeight);
-		if (HandIKAlpha <= 0.0f)
+		TOptional<FTransform> Grip = bLeft ? Held.Left : Held.Right;
+		TOptional<FTransform> Alternate;
+		FVector ElbowDirection = bLeft ? LeftElbowDirection + Held.LeftElbowOffset : RightElbowDirection + Held.RightElbowOffset;
+		if (Carton)
 		{
-			LeftArm.bHasTarget = false;
-			RightArm.bHasTarget = false;
-			LeftArm.ReachWeight = 0.0f;
-			RightArm.ReachWeight = 0.0f;
+			Grip = Parcel->GetHandGripTransform(bLeft, false, *Carton);
+			Alternate = Parcel->GetHandGripTransform(bLeft, true, *Carton);
+			ElbowDirection += bLeft ? Carton->LeftElbowOffset : Carton->RightElbowOffset;
+		}
+		UpdateCarryArm(Mesh, Grip, Alternate, bLeft, ElbowDirection,
+			(bLeft ? LeftCarryWrist : RightCarryWrist).Quaternion(), Arm, Target, Elbow, Wrist, Weight, DeltaSeconds);
+		if (!Carton && Grip.IsSet())
+			Weight *= bLeft ? Held.LeftInfluence : Held.RightInfluence;
+	};
+
+	UpdateArm(true, LeftArm, LeftHandIKTarget, LeftElbowIKTarget, LeftWristIKRotation, LeftHandIKAlpha);
+	UpdateArm(false, RightArm, RightHandIKTarget, RightElbowIKTarget, RightWristIKRotation, RightHandIKAlpha);
+
+	const auto UpdateArmLayer = [&](float Previous, bool bActive, const FCarryArm& Arm, float Influence)
+	{
+		const float Duration = bActive ? CarryPoseBlendInDuration : CarryPoseBlendOutDuration;
+		const float Target = bActive ? FMath::Lerp(0.45f, 1.0f, Arm.ReachWeight) * Influence : 0.0f;
+		return FMath::FInterpConstantTo(Previous, Target, DeltaSeconds, 1.0f / FMath::Max(0.01f, Duration));
+	};
+	LeftHeldPoseAlpha = UpdateArmLayer(LeftHeldPoseAlpha, Held.Left.IsSet(), LeftArm, Held.LeftLayerInfluence);
+	RightHeldPoseAlpha = UpdateArmLayer(RightHeldPoseAlpha, Held.Right.IsSet(), RightArm, Held.RightLayerInfluence);
+}
+
+void UBotanicusRobotAnimInstance::UpdateCarryArm(const USkeletalMeshComponent& Mesh, const TOptional<FTransform>& Primary,
+	const TOptional<FTransform>& Alternate, bool bLeft, const FVector& ElbowDirection,
+	const FQuat& RestWrist, FCarryArm& Arm, FVector& Target, FVector& Elbow,
+	FRotator& Wrist, float& Weight, float DeltaSeconds)
+{
+	Arm.GripActivation = FMath::FInterpConstantTo(Arm.GripActivation, Primary.IsSet() ? 1.f : 0.f,
+		DeltaSeconds, 1.f / FMath::Max(0.01f, HandIKBlendDuration));
+	if (!Primary.IsSet())
+	{
+		Weight = FMath::Min(Weight, Arm.GripActivation * Arm.ReachWeight);
+		if (Arm.GripActivation <= 0.f)
+		{
+			Arm.bHasTarget = false;
+			Arm.ReachWeight = 0.f;
 		}
 		return;
 	}
 
-	const USkeletalMeshComponent& Mesh = *GetSkelMeshComponent();
-	UpdateCarryArm(Mesh, Parcel->GetHandGripTransform(true), LeftElbowDirection, LeftCarryWrist.Quaternion(), LeftArm,
-		LeftHandIKTarget, LeftElbowIKTarget, LeftWristIKRotation, LeftHandIKAlpha, DeltaSeconds);
-	UpdateCarryArm(Mesh, Parcel->GetHandGripTransform(false), RightElbowDirection, RightCarryWrist.Quaternion(), RightArm,
-		RightHandIKTarget, RightElbowIKTarget, RightWristIKRotation, RightHandIKAlpha, DeltaSeconds);
-}
-
-void UBotanicusRobotAnimInstance::UpdateCarryArm(const USkeletalMeshComponent& Mesh, const FTransform& Grip,
-	const FVector& ElbowDirection, const FQuat& RestWrist, FCarryArm& Arm, FVector& Target, FVector& Elbow,
-	FRotator& Wrist, float& Weight, float DeltaSeconds)
-{
 	const TArray<FTransform>& Pose = Mesh.GetComponentSpaceTransforms();
 	if (!Pose.IsValidIndex(Arm.Upper) || !Pose.IsValidIndex(Arm.Forearm) || !Pose.IsValidIndex(Arm.Hand))
 	{
@@ -82,7 +112,6 @@ void UBotanicusRobotAnimInstance::UpdateCarryArm(const USkeletalMeshComponent& M
 	}
 
 	const FTransform& ComponentToWorld = Mesh.GetComponentTransform();
-	const FVector Desired = ComponentToWorld.InverseTransformPosition(Grip.GetLocation());
 	const FQuat Body = BodyRotation.Quaternion();
 	const FVector Shoulder = Pose[Arm.Upper].GetLocation();
 	const FVector Forearm = Pose[Arm.Forearm].GetLocation();
@@ -94,14 +123,38 @@ void UBotanicusRobotAnimInstance::UpdateCarryArm(const USkeletalMeshComponent& M
 	const float Reach = (UpperLength + ForearmLength) * FMath::Clamp(MaxArmStretch, 0.8f, 1.0f);
 	const float MinReach = FMath::Sqrt(FMath::Square(UpperLength) + FMath::Square(ForearmLength)
 		+ 2.0f * UpperLength * ForearmLength * FMath::Cos(FMath::DegreesToRadians(MaxElbowFlexion)));
-	const float Distance = FVector::Distance(Shoulder, Desired);
-	const FVector RelativeToShoulder = Body.UnrotateVector(Desired - Shoulder);
-	const FVector RelativeToBody = Body.UnrotateVector(Desired);
-	const float Side = RelativeToBody.X * (&Arm == &LeftArm ? 1.0f : -1.0f);
-	const float ReachWeight = FMath::SmoothStep(MinReach - ReachFadeDistance, MinReach, Distance)
-		* (1.0f - FMath::SmoothStep(Reach - ReachFadeDistance, Reach + ReachFadeDistance, Distance));
-	const float SideWeight = FMath::SmoothStep(-7.0f, 4.0f, Side);
-	const float FrontWeight = FMath::SmoothStep(-2.0f, 8.0f, static_cast<float>(RelativeToShoulder.Y));
+	const auto ContactWeight = [&](const FVector& Position)
+	{
+		const float Distance = FVector::Distance(Shoulder, Position);
+		const float ReachWeight = FMath::SmoothStep(MinReach - ReachFadeDistance, MinReach, Distance)
+			* (1.0f - FMath::SmoothStep(Reach - ReachFadeDistance, Reach + 2.0f, Distance));
+		const float Side = Body.UnrotateVector(Position).X * (bLeft ? 1.0f : -1.0f);
+		const float Forward = Body.UnrotateVector(Position - Shoulder).Y;
+		return ReachWeight * FMath::SmoothStep(-7.0f, 4.0f, Side) * FMath::SmoothStep(-2.0f, 8.0f, Forward);
+	};
+
+	const FVector SidePosition = ComponentToWorld.InverseTransformPosition(Primary->GetLocation());
+	const float SideWeight = ContactWeight(SidePosition);
+	FVector UnderPosition = FVector::ZeroVector;
+	float UnderWeight = 0.f;
+	if (Alternate.IsSet())
+	{
+		UnderPosition = ComponentToWorld.InverseTransformPosition(Alternate->GetLocation());
+		UnderWeight = ContactWeight(UnderPosition);
+	}
+
+	// Fade through a grip change instead of moving the wrist through the object.
+	const bool bPreferUnder = Alternate.IsSet() && (Arm.bUnder
+		? SideWeight < 0.88f && UnderWeight + 0.12f >= SideWeight
+		: SideWeight < 0.72f && UnderWeight > SideWeight + 0.15f);
+	const float Smoothing = 1.0f - FMath::Exp(-HandIKInterpolationSpeed * DeltaSeconds);
+	if (!Alternate.IsSet() || !Arm.bHasTarget || (Arm.ReachWeight < 0.10f && bPreferUnder != Arm.bUnder))
+		Arm.bUnder = bPreferUnder;
+
+	const FTransform& Grip = Arm.bUnder ? *Alternate : *Primary;
+	const float GripWeight = Arm.bUnder ? UnderWeight : SideWeight;
+	Target = Arm.bUnder ? UnderPosition : SidePosition;
+	const float ReachTarget = bPreferUnder == Arm.bUnder ? GripWeight : 0.0f;
 
 	const FQuat GripRotation = ComponentToWorld.InverseTransformRotation(Grip.GetRotation());
 	const FQuat DesiredWrist = Pose[Arm.Forearm].GetRotation().Inverse() * GripRotation;
@@ -112,15 +165,13 @@ void UBotanicusRobotAnimInstance::UpdateCarryArm(const USkeletalMeshComponent& M
 
 	if (!Arm.bHasTarget)
 	{
-		Target = Desired;
 		Arm.ParentSpaceWrist = RestWrist;
 		Arm.bHasTarget = true;
 	}
-	const float Smoothing = 1.0f - FMath::Exp(-HandIKInterpolationSpeed * DeltaSeconds);
-	Target = FMath::Lerp(Target, Desired, Smoothing);
 	Elbow = Shoulder + Body.RotateVector(ElbowDirection);
 	Arm.ParentSpaceWrist = FQuat::Slerp(Arm.ParentSpaceWrist, LimitedWrist, Smoothing);
 	Wrist = Arm.ParentSpaceWrist.Rotator();
-	Arm.ReachWeight = FMath::Lerp(Arm.ReachWeight, ReachWeight * SideWeight * FrontWeight, Smoothing);
-	Weight = HandIKAlpha * Arm.ReachWeight;
+	// A disappearing contact must also stop pulling on the elbow immediately.
+	Arm.ReachWeight = FMath::Min(GripWeight, FMath::Lerp(Arm.ReachWeight, ReachTarget, Smoothing));
+	Weight = Arm.GripActivation * Arm.ReachWeight;
 }

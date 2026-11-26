@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "BotanicusPlayerController.h"
+#include "Visuals/BotanicusSoilPourComponent.h"
 #include "Building/BotanicusPlacementSurfaceComponent.h"
 #include "Delivery/BotanicusBotanistBookActor.h"
 #include "Tools/BotanicusMultiToolComponent.h"
@@ -846,7 +847,8 @@ void ABotanicusPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReaso
 
 void ABotanicusPlayerController::UpdateCameraManager(float DeltaSeconds)
 {
-    Super::UpdateCameraManager(DeltaSeconds);
+	Super::UpdateCameraManager(DeltaSeconds);
+	UpdateLocalParcelInspection(DeltaSeconds);
     if(IsLocalPlayerController())if(auto* Context=GetWorld()->GetSubsystem<UBotanicusPlantContextSubsystem>())Context->UpdateCameraLayout(*this);
 }
 
@@ -11288,9 +11290,6 @@ FVector ABotanicusPlayerController::GetSoilBagMouth(const FVector& NormalizedOff
 {
     if (IsValid(LocalEquippedQuickBarItem) && LocalEquippedQuickBarItem->GetItemKey()==TEXT("PottingSoil"))
         if (const auto* M=LocalEquippedQuickBarItem->FindComponentByClass<UStaticMeshComponent>())
-        {
-            FVector Min,Max;M->GetLocalBounds(Min,Max);
-            return M->GetComponentTransform().TransformPosition((Min+Max)*.5f+(Max-Min)*.5f*NormalizedOffset);
-        }
+            return UBotanicusSoilPourComponent::BagMouth(*M, NormalizedOffset);
     return GetPlacementCosmeticHandPosition(TEXT("PottingSoil"));
 }

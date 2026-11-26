@@ -1,4 +1,5 @@
 #include "Tools/BotanicusMultiToolComponent.h"
+#include "Presentation/BotanicusHeldItemComponent.h"
 #include "BotanicusCharacter.h"
 #include "BotanicusGameState.h"
 #include "Gardening/BotanicusGardeningRobot.h"
@@ -189,6 +190,14 @@ void UBotanicusMultiToolComponent::ReleaseContext(bool bRestore)
     Presentation.bEquipped=Bar && Bar->GetSelectedSlot().ItemKey==ItemKey() && !IsBlocked();Publish();
 }
 void UBotanicusMultiToolComponent::Publish(){GetOwner()->ForceNetUpdate();OnRep_Presentation();}
+void UBotanicusMultiToolComponent::SetActionVisualMode(EBotanicusMultiToolMode Mode)
+{
+    if (ActionVisualMode != Mode)
+    {
+        ActionVisualMode = Mode;
+        OnRep_Presentation();
+    }
+}
 void UBotanicusMultiToolComponent::OnRep_Presentation()
 {
     auto* C=Cast<ABotanicusCharacter>(GetOwner());if(!C || GetNetMode()==NM_DedicatedServer || C->IsLocallyControlled() || !HasBegunPlay())return;
@@ -200,11 +209,21 @@ void UBotanicusMultiToolComponent::OnRep_Presentation()
         if(!RemoteVisual)return;
         RemoteVisual->SetActorHiddenInGame(true);RemoteVisual->Tags.Add(TEXT("BotanicusEquippedPreview"));
         RemoteVisual->InitializePlacedItem(ItemKey());RemoteVisual->ConfigureAsLocalPreview(true);RemoteVisual->ConfigureAsLocalInspection();RemoteVisual->SetActorTickEnabled(false);
-        if(C->GetMesh()->DoesSocketExist(ThirdPersonSocket))RemoteVisual->AttachToComponent(C->GetMesh(),FAttachmentTransformRules::SnapToTargetNotIncludingScale,ThirdPersonSocket);
+        if (RemoteVisual->GetHeldItemGrip()->GripSettings.Profile != EBotanicusHeldItemProfile::None)
+            RemoteVisual->AttachToComponent(C->GetMesh(), FAttachmentTransformRules::KeepWorldTransform);
+        else if(C->GetMesh()->DoesSocketExist(ThirdPersonSocket))RemoteVisual->AttachToComponent(C->GetMesh(),FAttachmentTransformRules::SnapToTargetNotIncludingScale,ThirdPersonSocket);
         else RemoteVisual->AttachToComponent(C->GetRootComponent(),FAttachmentTransformRules::SnapToTargetNotIncludingScale);
         RemoteVisual->SetActorRelativeTransform(ThirdPersonOffset);
     }
-    if(RemoteVisual){RemoteVisual->SetMultiToolMode(Presentation.Mode);RemoteVisual->SetActorHiddenInGame(!Presentation.bEquipped);}
+    if (RemoteVisual)
+    {
+        // A committed gesture can finish after its context target was harvested or displaced.
+        const EBotanicusMultiToolMode VisualMode = ActionVisualMode != EBotanicusMultiToolMode::Neutral
+            ? ActionVisualMode : Presentation.Mode;
+        RemoteVisual->SetMultiToolMode(VisualMode);
+        RemoteVisual->SetActorHiddenInGame(!Presentation.bEquipped);
+        RemoteVisual->EquipForRobot(Presentation.bEquipped ? C : nullptr, EBotanicusHeldItemSource::MultiTool);
+    }
 }
 
 bool UBotanicusMultiToolComponent::IsRobotItem(const UObject* Context,FName Key)
@@ -226,13 +245,19 @@ void UBotanicusMultiToolComponent::ServerWhip_Implementation(ABotanicusGardening
     const auto* State=GetWorld()->GetGameState<ABotanicusGameState>();
     if(!State || !State->IsElectricWhipUnlocked() || !Robot ||
         GetPreparedTarget(EBotanicusMultiToolMode::ElectricWhip)!=Robot)return;
-    if(Robot->ApplyElectricWhip(GetOwner()))MulticastWhipSwing();
+    if (auto* Character = Cast<ABotanicusCharacter>(GetOwner()); Character && Robot->ApplyElectricWhip(Character))
+        MulticastWhipSwing(Robot->GetActorLocation(), Character->GetRobotActionTime());
 }
-void UBotanicusMultiToolComponent::MulticastWhipSwing_Implementation()
+void UBotanicusMultiToolComponent::MulticastWhipSwing_Implementation(FVector_NetQuantize10 Target, double StartedAt)
 {
     if(GetNetMode()==NM_DedicatedServer)return;
     auto* C=Cast<ABotanicusCharacter>(GetOwner());if(!C)return;
     if(C->IsLocallyControlled())
     {if(auto* PC=Cast<ABotanicusPlayerController>(C->GetController()))PC->PlayMultiToolWhipVisual();}
-    else if(RemoteVisual)RemoteVisual->PlayWhipSwing();
+    else if (RemoteVisual)
+    {
+        SetActionVisualMode(EBotanicusMultiToolMode::ElectricWhip);
+        RemoteVisual->PlayWhipSwing();
+    }
+    C->ReceiveRobotAction(EBotanicusRobotAction::Whip, Target, StartedAt, ItemKey());
 }

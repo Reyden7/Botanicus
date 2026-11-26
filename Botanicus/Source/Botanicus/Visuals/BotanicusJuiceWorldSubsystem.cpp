@@ -146,7 +146,12 @@ void UBotanicusJuiceWorldSubsystem::UpdateWater(float DeltaTime)
 		auto& Visual=It.Value();APawn* Pawn=Cast<APawn>(It.Key().Get());
 		bool bImmediate=!IsValid(Pawn);
 		ABotanicusWateringCanActor* Can=nullptr;
-		if(auto* Character=Cast<ABotanicusCharacter>(Pawn)) Can=Character->GetHeldWateringCan();
+		if (auto* Character = Cast<ABotanicusCharacter>(Pawn))
+		{
+			Can = Character->GetHeldWateringCan();
+			if (!Can)
+				Can = Cast<ABotanicusWateringCanActor>(Character->GetObservedQuickBarItem());
+		}
 		const bool bLocal=Pawn && Pawn->IsLocallyControlled();
 		if(bLocal)
 		{
@@ -167,6 +172,11 @@ void UBotanicusJuiceWorldSubsystem::UpdateWater(float DeltaTime)
 				const float Forward=FMath::Clamp(70.f+Can->GetPlacementBoxExtent().GetAbs().GetMax()*.35f,75.f,130.f);
 				Can->SetActorLocationAndRotation(Pawn->GetPawnViewLocation()+View.Vector()*Forward+Basis.GetUnitAxis(EAxis::Y)*24.f-Basis.GetUnitAxis(EAxis::Z)*24.f,FRotator(0,View.Yaw+180,0));
 			}
+		}
+		if (IsValid(Visual.RemoteCan) && Can != Visual.RemoteCan)
+		{
+			Visual.RemoteCan->Destroy();
+			Visual.RemoteCan = nullptr;
 		}
 		if(!S->bEnabled || !S->bWaterDrops) Visual.bDesired=false;
 		if(Visual.bDesired && Can && !bImmediate)

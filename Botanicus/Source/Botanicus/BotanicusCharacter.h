@@ -5,6 +5,9 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "Logging/LogMacros.h"
+#include "Presentation/BotanicusHeldItemProfile.h"
+#include "Presentation/BotanicusRobotInteraction.h"
+#include "Engine/NetSerialization.h"
 #include "BotanicusCharacter.generated.h"
 
 class UInputComponent;
@@ -18,6 +21,8 @@ class UBotanicusQuickBarComponent;
 class UBotanicusMultiToolComponent;
 class ABotanicusWateringCanActor;
 class ABotanicusDeliveryParcelActor;
+class ABotanicusPlaceableItemActor;
+class UBotanicusHeldItemComponent;
 struct FInputActionValue;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogTemplateCharacter, Log, All);
@@ -129,6 +134,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 	virtual void NotifyControllerChanged() override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void PawnClientRestart() override;
@@ -178,6 +184,19 @@ public:
 	USkeletalMeshComponent* GetFirstPersonMesh() const { return FirstPersonMesh; }
 
 	USkeletalMeshComponent* GetRobotMesh() const { return RobotMesh; }
+	void RegisterHeldItem(UBotanicusHeldItemComponent* Item, bool bRegister);
+	void SetObservedQuickBarItem(FName ItemKey);
+	ABotanicusPlaceableItemActor* GetObservedQuickBarItem() const;
+	UBotanicusHeldItemComponent* GetRobotHeldGrip() const;
+	FBotanicusHeldItemPose UpdateHeldItemPose(float DeltaSeconds, const FBotanicusRobotToolMotion& Motion = {});
+	double GetRobotActionTime() const;
+	FName GetRobotActionItemKey() const;
+	void PlayRobotAction(EBotanicusRobotAction Action, const FVector& Target, FName ItemKey = NAME_None);
+	void ReceiveRobotAction(EBotanicusRobotAction Action, const FVector& Target, double StartedAt, FName ItemKey);
+	void SetRobotActionState(EBotanicusRobotAction Action, const UObject* Source,
+		bool bEnabled, const FVector& Target = FVector::ZeroVector, bool bHasTarget = false);
+	FBotanicusRobotActionCue GetRobotActionState(EBotanicusRobotAction Action) const;
+	const FBotanicusRobotActionCue& GetPendingRobotAction() const { return PendingRobotAction; }
 	ABotanicusDeliveryParcelActor* GetCarriedParcelForAnimation() const;
 	void UpdateCarriedParcelForAnimation(ABotanicusDeliveryParcelActor* Parcel, bool bIsCarrier);
 
@@ -271,6 +290,13 @@ private:
 	float DefaultMaxWalkSpeed = 0.0f;
 
 	// Derived from the parcel's replicated Carrier for animation lookup.
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastRobotAction(EBotanicusRobotAction Action, FVector_NetQuantize10 Target, double StartedAt, FName ItemKey);
+
+	TMap<EBotanicusRobotAction, FBotanicusRobotActionCue> ActiveRobotActions;
+	FBotanicusRobotActionCue PendingRobotAction;
+	TArray<TWeakObjectPtr<UBotanicusHeldItemComponent>> HeldItemSources;
+	TWeakObjectPtr<ABotanicusPlaceableItemActor> ObservedQuickBarItem;
 	TWeakObjectPtr<ABotanicusDeliveryParcelActor> CarriedParcelForAnimation;
 };
 
