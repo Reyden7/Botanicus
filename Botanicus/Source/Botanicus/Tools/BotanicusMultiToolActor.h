@@ -16,6 +16,16 @@ public:
     virtual void OnConstruction(const FTransform& Transform) override;
     virtual void ApplyItemDefinition() override;
     float GetHeldVisualRadius() const;
+    void EnableHeldVisualTransforms();
+
+    UPROPERTY(EditDefaultsOnly, Category="MultiTool|Grip")
+    FTransform CutterHeldTransform;
+
+    UPROPERTY(EditDefaultsOnly, Category="MultiTool|Grip")
+    FTransform ShovelHeldTransform;
+
+    UPROPERTY(EditDefaultsOnly, Category="MultiTool|Grip")
+    FTransform WhipHeldTransform;
     virtual bool UsesDedicatedHeldPresentation() const override { return true; }
     virtual void EquipForRobot(ABotanicusCharacter* Carrier, EBotanicusHeldItemSource Source,
         const FBotanicusHeldItemSettings& Catalogue = {}) override;

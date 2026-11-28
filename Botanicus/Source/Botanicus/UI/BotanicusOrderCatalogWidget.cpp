@@ -364,6 +364,7 @@ void UBotanicusMainShopUpgradeRowWidget::HandleUpgradeClicked()
 {
 	if (BotanicusController)
 	{
+		BotanicusController->NotifyOrderCatalogButtonPressed();
 		BotanicusController->UpgradeMainShop();
 	}
 }
@@ -488,6 +489,7 @@ void UBotanicusWorkbenchUpgradeRowWidget::HandleUpgradeClicked()
 {
 	if (BotanicusController)
 	{
+		BotanicusController->NotifyOrderCatalogButtonPressed();
 		BotanicusController->UpgradePreparationWorkbench();
 	}
 }
@@ -774,6 +776,7 @@ void UBotanicusOrderItemRowWidget::HandleOrderClicked()
 {
 	if (BotanicusController && !ItemKey.IsNone())
 	{
+		BotanicusController->NotifyOrderCatalogButtonPressed();
 		BotanicusController->PlaceCatalogOrder(ItemKey);
 	}
 }
@@ -891,6 +894,8 @@ bool UBotanicusOrderCatalogWidget::BindDesignerLayout()
 	{
 		CatalogScrollSlider->OnValueChanged.AddUniqueDynamic(
 			this, &UBotanicusOrderCatalogWidget::HandleCatalogSliderChanged);
+		CatalogScrollSlider->OnMouseCaptureBegin.AddUniqueDynamic(
+			this, &UBotanicusOrderCatalogWidget::HandleCatalogSliderPressed);
 	}
 	if (ShopOpenButton)
 	{
@@ -2038,6 +2043,12 @@ void UBotanicusOrderCatalogWidget::HandleCatalogScrollChanged(float CurrentOffse
 	SyncCatalogScrollbar();
 }
 
+void UBotanicusOrderCatalogWidget::HandleCatalogSliderPressed()
+{
+	if (BotanicusController)
+		BotanicusController->NotifyOrderCatalogButtonPressed();
+}
+
 void UBotanicusOrderCatalogWidget::HandleCatalogSliderChanged(float Value)
 {
 	if (!ItemsScroll || bSyncingCatalogScrollbar)
@@ -2053,6 +2064,8 @@ void UBotanicusOrderCatalogWidget::HandleCatalogSliderChanged(float Value)
 
 void UBotanicusOrderCatalogWidget::HandleCatalogScrollUpClicked()
 {
+	if (BotanicusController)
+		BotanicusController->NotifyOrderCatalogButtonPressed();
 	if (ItemsScroll)
 	{
 		ItemsScroll->SetScrollOffset(
@@ -2062,6 +2075,8 @@ void UBotanicusOrderCatalogWidget::HandleCatalogScrollUpClicked()
 
 void UBotanicusOrderCatalogWidget::HandleCatalogScrollDownClicked()
 {
+	if (BotanicusController)
+		BotanicusController->NotifyOrderCatalogButtonPressed();
 	if (ItemsScroll)
 	{
 		ItemsScroll->SetScrollOffset(FMath::Min(
@@ -2072,33 +2087,45 @@ void UBotanicusOrderCatalogWidget::HandleCatalogScrollDownClicked()
 
 void UBotanicusOrderCatalogWidget::HandleSeedsTabClicked()
 {
+	if (BotanicusController)
+		BotanicusController->NotifyOrderCatalogButtonPressed();
 	SelectTab(EBotanicusCommandPanelTab::Seeds);
 }
 
 void UBotanicusOrderCatalogWidget::HandleToolsTabClicked()
 {
+	if (BotanicusController)
+		BotanicusController->NotifyOrderCatalogButtonPressed();
 	SelectTab(EBotanicusCommandPanelTab::GardeningTools);
 }
 
 void UBotanicusOrderCatalogWidget::HandleCareAndMaintenanceTabClicked()
 {
+	if (BotanicusController)
+		BotanicusController->NotifyOrderCatalogButtonPressed();
 	SelectTab(EBotanicusCommandPanelTab::CareAndMaintenance);
 }
 
 void UBotanicusOrderCatalogWidget::
 	HandlePreparationTabClicked()
 {
+	if (BotanicusController)
+		BotanicusController->NotifyOrderCatalogButtonPressed();
 	SelectTab(EBotanicusCommandPanelTab::Preparation);
 }
 
 void UBotanicusOrderCatalogWidget::HandleSalesTabClicked()
 {
+	if (BotanicusController)
+		BotanicusController->NotifyOrderCatalogButtonPressed();
 	SelectTab(EBotanicusCommandPanelTab::Sales);
 }
 
 void UBotanicusOrderCatalogWidget::
 	HandleBuildingsTabClicked()
 {
+	if (BotanicusController)
+		BotanicusController->NotifyOrderCatalogButtonPressed();
 	SelectTab(EBotanicusCommandPanelTab::Buildings);
 }
 
@@ -2106,6 +2133,7 @@ void UBotanicusOrderCatalogWidget::HandleShopOpenClicked()
 {
 	if (BotanicusController)
 	{
+		BotanicusController->NotifyOrderCatalogButtonPressed();
 		BotanicusController->ToggleMainShopOpen();
 	}
 }
@@ -2114,6 +2142,7 @@ void UBotanicusOrderCatalogWidget::HandleCloseClicked()
 {
 	if (BotanicusController)
 	{
+		BotanicusController->NotifyOrderCatalogButtonPressed();
 		BotanicusController->ToggleOrderCatalog();
 	}
 }

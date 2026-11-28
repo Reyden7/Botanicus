@@ -59,6 +59,13 @@ public:
 	UPROPERTY(VisibleAnywhere, Category="Botanicus|Held Item")
 	TObjectPtr<USceneComponent> HeldVisualRoot;
 
+	/** Idle third-person grip in the carrier's frame. HeldItemGrip still defines the watering mount. */
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Held Item|Transport")
+	FVector TransportGripLocation = FVector(24, 26, -5);
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Held Item|Transport")
+	FVector TransportElbowOffset = FVector(12, -5, -7);
+
 	ABotanicusCharacter* GetCarrier() const { return Carrier; }
 	float GetWaterLevel() const { return WaterLevel; }
 	bool HasWater() const { return WaterLevel > KINDA_SMALL_NUMBER; }

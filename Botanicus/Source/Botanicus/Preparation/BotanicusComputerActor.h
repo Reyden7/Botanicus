@@ -6,6 +6,7 @@
 #include "Interaction/BotanicusInteractableActor.h"
 #include "BotanicusComputerActor.generated.h"
 
+class ABotanicusCharacter;
 class UCameraComponent;
 class UBotanicusTerminalEyesComponent;
 
@@ -27,6 +28,8 @@ public:
 	{
 		return InteractionCamera;
 	}
+
+	FVector GetScreenInteractionLocation() const;
 
 	virtual FBotanicusInteractionPrompt
 		GetInteractionPrompt_Implementation(
@@ -51,4 +54,7 @@ protected:
 		BlueprintReadOnly,
 		Category="Botanicus|Computer View")
 	TObjectPtr<UCameraComponent> InteractionCamera;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Botanicus|Computer View")
+	TObjectPtr<USceneComponent> ScreenInteractionTarget;
 };

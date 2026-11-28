@@ -39,6 +39,16 @@ ABotanicusComputerActor::ABotanicusComputerActor()
 	InteractionCamera->SetRelativeRotation(FRotator(-7.0f, 180.0f, 0.0f));
 	InteractionCamera->SetFieldOfView(48.0f);
 	InteractionCamera->bUsePawnControlRotation = false;
+
+	ScreenInteractionTarget = CreateDefaultSubobject<USceneComponent>(TEXT("ScreenInteractionTarget"));
+	ScreenInteractionTarget->SetupAttachment(InteractionCamera);
+	ScreenInteractionTarget->SetRelativeLocation(FVector(60.0, 0.0, 0.0));
+	ScreenInteractionTarget->bEditableWhenInherited = true;
+}
+
+FVector ABotanicusComputerActor::GetScreenInteractionLocation() const
+{
+	return ScreenInteractionTarget->GetComponentLocation();
 }
 
 FName ABotanicusComputerActor::LegacyItemKey()
@@ -103,6 +113,6 @@ void ABotanicusComputerActor::Interact_Implementation(
 			Character->GetController())
 		: nullptr)
 	{
-		Controller->ClientOpenOrderCatalogFromComputer(this);
+		Controller->OpenOrderCatalogFromComputer(*this);
 	}
 }

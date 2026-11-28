@@ -214,6 +214,7 @@ void UBotanicusMultiToolComponent::OnRep_Presentation()
         else if(C->GetMesh()->DoesSocketExist(ThirdPersonSocket))RemoteVisual->AttachToComponent(C->GetMesh(),FAttachmentTransformRules::SnapToTargetNotIncludingScale,ThirdPersonSocket);
         else RemoteVisual->AttachToComponent(C->GetRootComponent(),FAttachmentTransformRules::SnapToTargetNotIncludingScale);
         RemoteVisual->SetActorRelativeTransform(ThirdPersonOffset);
+        RemoteVisual->EnableHeldVisualTransforms();
     }
     if (RemoteVisual)
     {

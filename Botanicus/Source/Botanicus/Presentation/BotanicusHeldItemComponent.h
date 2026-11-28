@@ -55,9 +55,6 @@ private:
 	FBotanicusHeldItemSettings ActiveSettings;
 	FBotanicusRobotToolMotion ToolMotion;
 	FTransform OriginalRelativeTransform;
-	TOptional<FTransform> LastLocalMount;
-	TOptional<FTransform> PreviousBookMount;
-	float BookPoseBlendTime = 0.f;
 	TOptional<FVector> PreviousVelocity;
 	FVector SwayResponse = FVector::ZeroVector;
 };

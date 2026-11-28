@@ -67,14 +67,38 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Book|Held") FVector HeldBookRelativeScale = FVector::OneVector;
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Book|Held") FTransform RemoteBookHandTransform = FTransform::Identity;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Botanicus|Book|Held")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Botanicus|Book|Held", meta=(DisplayName="Closed Book Right Hand Grip"))
 	TObjectPtr<USceneComponent> ClosedRightHandGrip;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Book|Held")
+	FVector ClosedFirstPersonLocation = FVector(54, 25, -25);
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Book|Held")
+	FRotator ClosedFirstPersonRotation = FRotator(80, 90, 0);
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Book|Reading")
+	float ReadingTilt = 30.f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Book|Reading", meta=(ClampMin="0.01", Units="s"))
+	float ReadingBlendIn = .10f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Book|Reading", meta=(ClampMin="0.01", Units="s"))
+	float ReadingBlendOut = .12f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Book|Reading", meta=(ClampMin="0.01", Units="s"))
+	float SecondHandBlendTime = .08f;
+
+	/** The comfortable downward look applied as the robot settles into reading. */
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Book|Reading", meta=(ClampMin="0", ClampMax="45", Units="deg"))
+	float ReadingHeadPitch = 24.f;
 
 	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Book|Held")
 	FBotanicusHeldItemSettings OpenGripSettings;
 
 	virtual bool UsesDedicatedHeldPresentation() const override { return true; }
 	bool IsReadingPose() const { return Presentation.Phase != EBotanistBookPhase::Closed; }
+	float GetReadingPoseWeight(float EnterSeconds, float ExitSeconds) const;
+	FVector GetReadingLookTarget() const;
 	bool IsHeldPresentation() const { return bHeldPresentation; }
 	bool IsAvailable() const;
 	bool BeginReading(ABotanicusPlayerController& Reader);

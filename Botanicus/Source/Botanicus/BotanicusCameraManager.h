@@ -19,4 +19,6 @@ public:
 
 	/** Constructor */
 	ABotanicusCameraManager();
+
+	virtual void UpdateCamera(float DeltaTime) override;
 };

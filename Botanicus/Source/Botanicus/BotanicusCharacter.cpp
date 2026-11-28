@@ -1,6 +1,10 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "BotanicusCharacter.h"
+#include "GameFramework/SpringArmComponent.h"
+#include "Components/AudioComponent.h"
+#include "Presentation/BotanicusEmoteMotion.h"
+#include "UObject/ConstructorHelpers.h"
 #include "Animation/AnimInstance.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -19,8 +23,12 @@
 #include "QuickBar/BotanicusQuickBarComponent.h"
 #include "Tools/BotanicusMultiToolComponent.h"
 
-ABotanicusCharacter::ABotanicusCharacter()
+ABotanicusCharacter::ABotanicusCharacter(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer.SetDefaultSubobjectClass<UBotanicusEmoteMovementComponent>(CharacterMovementComponentName))
 {
+	static ConstructorHelpers::FObjectFinder<UBotanicusEmoteCatalog> RobotEmotes(
+		TEXT("/Game/Botanicus/UI/Emotes/DA_RobotEmotes.DA_RobotEmotes"));
+	EmoteCatalog = RobotEmotes.Object;
 	// Set size for collision capsule
 	GetCapsuleComponent()->InitCapsuleSize(55.f, 96.0f);
 
@@ -47,6 +55,14 @@ ABotanicusCharacter::ABotanicusCharacter()
 	RobotMesh->SetCanEverAffectNavigation(false);
 	RobotMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::OnlyTickPoseWhenRendered;
 
+	RobotEmoteAudio = CreateDefaultSubobject<UAudioComponent>(TEXT("RobotEmoteAudio"));
+	RobotEmoteAudio->SetupAttachment(GetCapsuleComponent());
+	RobotEmoteAudio->SetRelativeLocation(FVector(0., 0., 55.));
+	RobotEmoteAudio->bAutoActivate = false;
+	RobotEmoteAudio->bAutoDestroy = false;
+	RobotEmoteAudio->bAllowSpatialization = true;
+	RobotEmoteAudio->bCanPlayMultipleInstances = false;
+
 	// Create the Camera Component	
 	FirstPersonCameraComponent = CreateDefaultSubobject<UCameraComponent>(TEXT("First Person Camera"));
 	FirstPersonCameraComponent->SetupAttachment(GetMesh(), FName("head"));
@@ -56,6 +72,20 @@ ABotanicusCharacter::ABotanicusCharacter()
 	FirstPersonCameraComponent->bEnableFirstPersonScale = true;
 	FirstPersonCameraComponent->FirstPersonFieldOfView = 70.0f;
 	FirstPersonCameraComponent->FirstPersonScale = 0.6f;
+
+	EmoteCameraPivot = CreateDefaultSubobject<USceneComponent>(TEXT("EmoteCameraPivot"));
+	EmoteCameraPivot->SetupAttachment(GetCapsuleComponent());
+	EmoteSpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("EmoteSpringArm"));
+	EmoteSpringArm->SetupAttachment(EmoteCameraPivot);
+	EmoteSpringArm->SetRelativeRotation(FRotator(-6., 180., 0.));
+	EmoteSpringArm->TargetArmLength = EmoteCameraDistance;
+	// The local camera sweeps the full blend and checks alternate sides of obstacles.
+	EmoteSpringArm->bDoCollisionTest = false;
+
+	EmoteCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("EmoteCamera"));
+	EmoteCamera->SetupAttachment(EmoteSpringArm, USpringArmComponent::SocketName);
+	EmoteCamera->bAutoActivate = false;
+	EmoteCamera->FieldOfView = EmoteCameraFOV;
 
 	HeadFlashlightAim = CreateDefaultSubobject<USceneComponent>(TEXT("Head Flashlight Aim"));
 	HeadFlashlightAim->SetupAttachment(FirstPersonCameraComponent);
@@ -122,6 +152,8 @@ void ABotanicusCharacter::NotifyControllerChanged()
 {
 	ManualFlashlightOverride.Reset();
 	Super::NotifyControllerChanged();
+	if (!IsLocallyControlled())
+		ResetEmoteCamera();
 	if (QuickBarComponent)
 		SetObservedQuickBarItem(QuickBarComponent->GetObservedEquippedItem());
 	if (HasActorBegunPlay())
@@ -133,7 +165,7 @@ void ABotanicusCharacter::NotifyControllerChanged()
 void ABotanicusCharacter::ToggleCrouching()
 {
 	UCharacterMovementComponent* Movement = GetCharacterMovement();
-	if (!Movement)
+	if (!Movement || IsRobotEmotePlaying())
 	{
 		return;
 	}
@@ -153,6 +185,8 @@ void ABotanicusCharacter::GetLifetimeReplicatedProps(
 	TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(ABotanicusCharacter, OrderComputer);
+	DOREPLIFETIME(ABotanicusCharacter, EmoteState);
 	DOREPLIFETIME_CONDITION(ABotanicusCharacter, bHeadFlashlightOn, COND_SkipOwner);
 	DOREPLIFETIME_CONDITION(ABotanicusCharacter, FlashlightYawOverride, COND_SkipOwner);
 	DOREPLIFETIME(
@@ -171,7 +205,7 @@ void ABotanicusCharacter::GetLifetimeReplicatedProps(
 
 void ABotanicusCharacter::SetSprinting(bool bNewSprinting)
 {
-	bIsSprinting = bNewSprinting && !bIsCrouched;
+	bIsSprinting = bNewSprinting && !bIsCrouched && !IsRobotEmotePlaying();
 	ApplyCarryMovementMultiplier();
 	if (!HasAuthority() && IsLocallyControlled())
 	{
@@ -308,7 +342,7 @@ void ABotanicusCharacter::ApplyCarryMovementMultiplier()
 
 bool ABotanicusCharacter::CanJumpInternal_Implementation() const
 {
-	return EquipmentCarryRole ==
+	return !IsRobotEmotePlaying() && EquipmentCarryRole ==
 			EBotanicusEquipmentCarryRole::None &&
 		Super::CanJumpInternal_Implementation();
 }
@@ -324,6 +358,7 @@ void ABotanicusCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	UpdateHeadFlashlight(DeltaSeconds);
+	UpdateRobotEmote();
 
 	if (!IsLocallyControlled())
 	{
@@ -343,12 +378,12 @@ void ABotanicusCharacter::Tick(float DeltaSeconds)
 	{
 		const float ControlYaw =
 			CharacterController->GetControlRotation().Yaw;
-		SetActorRotation(FRotator(0.0f, ControlYaw, 0.0f));
+		FaceRotation(FRotator(0.0f, ControlYaw, 0.0f), DeltaSeconds);
 	}
 
-	if (GetMesh()->bOwnerNoSee ||
+	if (!SavedEmoteCameraVisibility.IsSet() && (GetMesh()->bOwnerNoSee ||
 		FirstPersonMesh->IsVisible() ||
-		!FirstPersonCameraComponent->bUsePawnControlRotation)
+		!FirstPersonCameraComponent->bUsePawnControlRotation))
 	{
 		ConfigureTrueFirstPersonLocalView();
 	}
@@ -508,7 +543,6 @@ void ABotanicusCharacter::DoAim(float Yaw, float Pitch)
 {
 	if (GetController())
 	{
-		// pass the rotation inputs
 		AddControllerYawInput(Yaw);
 		AddControllerPitchInput(Pitch);
 	}
@@ -518,7 +552,13 @@ void ABotanicusCharacter::DoMove(float Right, float Forward)
 {
 	if (GetController())
 	{
-		// pass the move inputs
+		if (IsRobotEmotePlaying())
+		{
+			if (FMath::IsNearlyZero(Forward))
+				return;
+			InterruptLocalRobotEmote();
+			Right = 0.f;
+		}
 		AddMovementInput(GetActorRightVector(), Right);
 		AddMovementInput(GetActorForwardVector(), Forward);
 	}
@@ -526,8 +566,15 @@ void ABotanicusCharacter::DoMove(float Right, float Forward)
 
 void ABotanicusCharacter::DoJumpStart()
 {
-	// pass Jump to the character
 	Jump();
+}
+
+void ABotanicusCharacter::Jump()
+{
+	if (IsRobotEmotePlaying())
+		InterruptLocalRobotEmote();
+	if (!IsRobotEmotePlaying())
+		Super::Jump();
 }
 
 void ABotanicusCharacter::DoJumpEnd()

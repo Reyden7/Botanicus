@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Interaction/BotanicusInteractionComponent.h"
+#include "BotanicusCharacter.h"
 
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
@@ -205,6 +206,9 @@ bool UBotanicusInteractionComponent::IsServerInteractionValid(AActor* TargetActo
 	{
 		return false;
 	}
+
+	if (const auto* Character = Cast<ABotanicusCharacter>(OwnerActor); Character && Character->IsRobotEmotePlaying())
+		return false;
 
 	FVector ViewLocation;
 	FRotator ViewRotation;

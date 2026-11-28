@@ -39,18 +39,36 @@ ABotanicusMultiToolActor::ABotanicusMultiToolActor()
     }
     HeldItemGrip->GripSettings = {EBotanicusHeldItemProfile::RightHand, FVector(28, 20, 3), FRotator::ZeroRotator, true};
     const FRotator Wrist(-56.43, 148.97, -58.95);
+    // Both imported tools point along -X. The whip chain rises along -X/+Z from its handle.
+    CutterHeldTransform = FTransform(FRotator(0, 180, 0));
+    ShovelHeldTransform = FTransform(FRotator(-12, 180, 0));
+    WhipHeldTransform = FTransform(FRotator(45, 180, 0));
     RightHandGrip->SetupAttachment(CutterMesh_Temporary);
-    RightHandGrip->SetRelativeLocationAndRotation(FVector(-8, -3, 0), Wrist);
+    RightHandGrip->SetRelativeLocationAndRotation(FVector(10, 0, 2),
+        (CutterHeldTransform.GetRotation().Inverse() * Wrist.Quaternion()).Rotator());
     ShovelRightHandGrip = CreateDefaultSubobject<USceneComponent>(TEXT("ShovelRightHandGrip"));
     ShovelRightHandGrip->SetupAttachment(ShovelMesh_Temporary);
-    ShovelRightHandGrip->SetRelativeLocationAndRotation(FVector(-12, -3, 0), Wrist);
+    ShovelRightHandGrip->SetRelativeLocationAndRotation(FVector(10, 0, 1),
+        (ShovelHeldTransform.GetRotation().Inverse() * Wrist.Quaternion()).Rotator());
     WhipRightHandGrip = CreateDefaultSubobject<USceneComponent>(TEXT("WhipRightHandGrip"));
     WhipRightHandGrip->SetupAttachment(WhipVisualRoot);
-    WhipRightHandGrip->SetRelativeRotation(Wrist);
+    WhipRightHandGrip->SetRelativeLocationAndRotation(FVector(0, 0, 1),
+        (WhipHeldTransform.GetRotation().Inverse() * Wrist.Quaternion()).Rotator());
+    RightHandGrip->bEditableWhenInherited = true;
+    ShovelRightHandGrip->bEditableWhenInherited = true;
+    WhipRightHandGrip->bEditableWhenInherited = true;
     AnimatedRightHandGrip = CreateDefaultSubobject<USceneComponent>(TEXT("AnimatedRightHandGrip"));
     AnimatedRightHandGrip->SetupAttachment(MultiToolSkeletalMesh);
     AnimatedRightHandGrip->SetRelativeLocationAndRotation(FVector(-4, -1, 0), Wrist);
     RefreshVisuals();
+}
+
+void ABotanicusMultiToolActor::EnableHeldVisualTransforms()
+{
+    const auto* Defaults = GetClass()->GetDefaultObject<ABotanicusMultiToolActor>();
+    CutterMesh_Temporary->SetRelativeTransform(CutterHeldTransform * Defaults->CutterMesh_Temporary->GetRelativeTransform());
+    ShovelMesh_Temporary->SetRelativeTransform(ShovelHeldTransform * Defaults->ShovelMesh_Temporary->GetRelativeTransform());
+    WhipVisualRoot->SetRelativeTransform(WhipHeldTransform * Defaults->WhipVisualRoot->GetRelativeTransform());
 }
 
 void ABotanicusMultiToolActor::EquipForRobot(ABotanicusCharacter* Carrier, EBotanicusHeldItemSource Source,
@@ -73,8 +91,14 @@ void ABotanicusMultiToolActor::EquipForRobot(ABotanicusCharacter* Carrier, EBota
         Geometry = WhipSegments[0];
         Grip = WhipRightHandGrip;
     }
-    HeldItemGrip->Bind(Carrier, *SceneRoot, *Geometry, LeftHandGrip, Grip, Source,
-        HeldItemGrip->ResolveSettings(Catalogue));
+    FBotanicusHeldItemSettings Settings = HeldItemGrip->ResolveSettings(Catalogue);
+    if (Grip == RightHandGrip)
+        Settings.CarryRelativeLocation += CutterHeldTransform.GetLocation();
+    else if (Grip == ShovelRightHandGrip)
+        Settings.CarryRelativeLocation += ShovelHeldTransform.GetLocation();
+    else if (Grip == WhipRightHandGrip)
+        Settings.CarryRelativeLocation += WhipHeldTransform.GetLocation();
+    HeldItemGrip->Bind(Carrier, *SceneRoot, *Geometry, LeftHandGrip, Grip, Source, Settings);
 }
 
 void ABotanicusMultiToolActor::OnConstruction(const FTransform& Transform){Super::OnConstruction(Transform);RefreshVisuals();}

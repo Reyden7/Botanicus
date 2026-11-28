@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Presentation/BotanicusEmoteCatalog.h"
 #include "Animation/AnimInstance.h"
 #include "Curves/CurveFloat.h"
 #include "Presentation/BotanicusRobotInteraction.h"
@@ -9,6 +10,7 @@
 class ABotanicusCharacter;
 class ABotanicusDeliveryParcelActor;
 class UBotanicusHeldItemComponent;
+class UAnimSequence;
 struct FBotanicusHeldItemPose;
 class USkeletalMeshComponent;
 class UBotanicusMultiToolComponent;
@@ -43,6 +45,8 @@ public:
 
 	virtual void NativeInitializeAnimation() override;
 	virtual void NativeUpdateAnimation(float DeltaSeconds) override;
+	virtual FAnimInstanceProxy* CreateAnimInstanceProxy() override;
+	virtual void DestroyAnimInstanceProxy(FAnimInstanceProxy* Proxy) override;
 
 	UFUNCTION(BlueprintPure, Category = "Locomotion", meta = (BlueprintThreadSafe))
 	bool WantsAirPose(ERobotAirPose Pose) const { return AirPose == Pose; }
@@ -188,6 +192,19 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="Locomotion|Interaction")
 	TMap<EBotanicusRobotAction, FBotanicusRobotActionProfile> ActionProfiles;
 
+	UPROPERTY(EditDefaultsOnly, Category="Locomotion|Interaction|Computer")
+	TObjectPtr<UAnimSequence> ButtonPressAnimation;
+
+	UPROPERTY(EditDefaultsOnly, Category="Locomotion|Interaction|Computer", meta=(ClampMin="0.01"))
+	float ButtonPressPlayRate = 2.5f;
+
+	/** Source clip times in seconds. An End Time of zero uses the full clip. */
+	UPROPERTY(EditDefaultsOnly, Category="Locomotion|Interaction|Computer", meta=(ClampMin="0", Units="s"))
+	float ButtonPressStartTime = .52f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Locomotion|Interaction|Computer", meta=(ClampMin="0", Units="s"))
+	float ButtonPressEndTime = 2.65f;
+
 	UPROPERTY(BlueprintReadOnly, Transient, Category="Locomotion|Interaction")
 	EBotanicusRobotAction RobotAction = EBotanicusRobotAction::None;
 
@@ -278,6 +295,9 @@ private:
 	FBotanicusRobotActionCue ActiveRobotCue;
 	TWeakObjectPtr<UBotanicusHeldItemComponent> RobotActionMount;
 	TWeakObjectPtr<UAnimMontage> InteractionMontage;
+	void UpdateRobotEmoteMontage(const ABotanicusCharacter& Owner);
+	TWeakObjectPtr<UAnimMontage> EmoteMontage;
+	TOptional<uint16> EmoteRevision;
 	FVector RobotActionDirection = FVector::ForwardVector;
 	bool bApplyRobotActionHands = false;
 	void UpdateBoxCarryState(const ABotanicusDeliveryParcelActor* Parcel, float DeltaSeconds);

@@ -1,4 +1,5 @@
 #include "BotanicusRobotAnimInstance.h"
+#include "Animation/AnimSequence.h"
 
 #include "Animation/AnimMontage.h"
 #include "BotanicusCharacter.h"
@@ -57,6 +58,12 @@ namespace
 
 void UBotanicusRobotAnimInstance::InitializeRobotActionProfiles()
 {
+	auto& Computer = ActionProfiles.Add(EAction::PressComputer);
+	Computer.BlendIn = .05f;
+	Computer.BlendOut = .08f;
+	Computer.IKInfluence = .75f;
+	Computer.LookInfluence = .55f;
+
 	auto& Plant = ActionProfiles.Add(EAction::Plant);
 	Plant.ReachTowardTarget = 13.f;
 	Plant.LocalWristRotation = FRotator(-16, 0, 8);
@@ -82,7 +89,9 @@ void UBotanicusRobotAnimInstance::InitializeRobotActionProfiles()
 
 	auto& Cut = ActionProfiles.Add(EAction::CutTape);
 	Cut.BlendIn = .045f;
-	Cut.ReachTowardTarget = 15.f;
+	Cut.ReachTowardTarget = 6.f;
+	Cut.LocalHandOffset.Z = 4.f;
+	Cut.TraceTravel = 8.f;
 	Cut.ObjectTilt = FRotator(-9, 0, 0);
 	Cut.ToolAimInfluence = .5f;
 
@@ -104,7 +113,7 @@ void UBotanicusRobotAnimInstance::InitializeRobotActionProfiles()
 	Confirm.ObjectTilt = FRotator(4, 0, -3);
 
 	auto& Book = ActionProfiles.Add(EAction::ReadBook);
-	Book.LookInfluence = .37f;
+	Book.LookInfluence = 1.f;
 	Book.ElbowOffset = FVector(0, 0, -2);
 
 	auto& Collect = ActionProfiles.Add(EAction::CollectCoins);
@@ -123,6 +132,12 @@ FBotanicusRobotToolMotion UBotanicusRobotAnimInstance::UpdateRobotAction(
 	bApplyRobotActionHands = false;
 	const double Now = Owner.GetRobotActionTime();
 	FBotanicusRobotActionCue Wanted;
+	const float ComputerRate = FMath::Max(.01f, ButtonPressPlayRate);
+	const float ComputerLength = ButtonPressAnimation ? ButtonPressAnimation->GetPlayLength() : 0.f;
+	const float ComputerEnd = ButtonPressEndTime > 0.f ? FMath::Min(ComputerLength, ButtonPressEndTime) : ComputerLength;
+	const float ComputerStart = FMath::Clamp(ButtonPressStartTime, 0.f, FMath::Max(0.f, ComputerEnd - .05f));
+	const float ComputerSequenceRate = ButtonPressAnimation ? ComputerRate * FMath::Max(.01f, ButtonPressAnimation->RateScale) : ComputerRate;
+	const float ComputerDuration = (ComputerEnd - ComputerStart) / ComputerSequenceRate;
 	if (!bBox && !Owner.IsCarryingEquipment() && !Owner.IsLocallyControlled())
 	{
 		const FBotanicusRobotActionCue& Pulse = Owner.GetPendingRobotAction();
@@ -130,10 +145,12 @@ FBotanicusRobotToolMotion UBotanicusRobotAnimInstance::UpdateRobotAction(
 		const FName Selected = Owner.GetRobotActionItemKey();
 		const bool bSelected = Pulse.ItemKey.IsNone() || Pulse.ItemKey == Selected ||
 			(Pulse.Action == EAction::Plant && Selected.IsNone());
-		if (PulseProfile && Now - Pulse.StartedAt < PulseProfile->Duration && bSelected && MatchesAction(Pulse.Action, Item))
+		const bool bPress = Pulse.Action == EAction::PressComputer;
+		if (PulseProfile && Now - Pulse.StartedAt < (bPress ? ComputerDuration : PulseProfile->Duration) &&
+			bSelected && MatchesAction(Pulse.Action, Item) && (bPress || !Owner.IsUsingOrderComputer()))
 			Wanted = Pulse;
 
-		if (Wanted.Action == EAction::None)
+		if (Wanted.Action == EAction::None && !Owner.IsUsingOrderComputer())
 		{
 			for (const EAction Type : {EAction::Scan, EAction::CutTape, EAction::PourSoil, EAction::Water})
 			{
@@ -145,10 +162,10 @@ FBotanicusRobotToolMotion UBotanicusRobotAnimInstance::UpdateRobotAction(
 				}
 			}
 		}
-		if (Wanted.Action == EAction::None)
+		if (Wanted.Action == EAction::None && !Owner.IsUsingOrderComputer())
 		{
 			if (const auto* Book = Cast<ABotanicusBotanistBookActor>(Item); Book && Book->IsReadingPose())
-				Wanted = {EAction::ReadBook, Book, Book->SkeletalMeshVisual->GetComponentLocation(), 0.0, {}, true, true};
+				Wanted = {EAction::ReadBook, Book, Book->GetReadingLookTarget(), 0.0, {}, true, true};
 		}
 	}
 
@@ -157,10 +174,25 @@ FBotanicusRobotToolMotion UBotanicusRobotAnimInstance::UpdateRobotAction(
 		Wanted.StartedAt != ActiveRobotCue.StartedAt || Wanted.Source != ActiveRobotCue.Source);
 	if (bChanged)
 	{
-		if (InteractionMontage.IsValid())
-			Montage_Stop(.08f, InteractionMontage.Get());
-		InteractionMontage.Reset();
-		if (auto* NewMontage = ActionProfiles.FindChecked(Wanted.Action).Montage.Get())
+		const bool bRestartPress = Wanted.Action == EAction::PressComputer && ActiveRobotCue.Action == EAction::PressComputer &&
+			InteractionMontage.IsValid() && Montage_IsPlaying(InteractionMontage.Get());
+		if (!bRestartPress)
+		{
+			if (InteractionMontage.IsValid())
+				Montage_Stop(.08f, InteractionMontage.Get());
+			InteractionMontage.Reset();
+		}
+		if (Wanted.Action == EAction::PressComputer && ButtonPressAnimation)
+		{
+			const auto& Press = ActionProfiles.FindChecked(Wanted.Action);
+			const float Start = ComputerStart + FMath::Max(0.f, static_cast<float>(Now - Wanted.StartedAt)) * ComputerSequenceRate;
+			if (bRestartPress)
+				Montage_SetPosition(InteractionMontage.Get(), Start);
+			else
+				InteractionMontage = PlaySlotAnimationAsDynamicMontage(ButtonPressAnimation, TEXT("DefaultSlot"),
+					Press.BlendIn, Press.BlendOut, ComputerRate, 1, -1.f, Start);
+		}
+		else if (auto* NewMontage = ActionProfiles.FindChecked(Wanted.Action).Montage.Get())
 		{
 			const float StartOffset = Wanted.bContinuous ? 0.f : FMath::Max(0.f, static_cast<float>(Now - Wanted.StartedAt));
 			if (Montage_Play(NewMontage, 1.f, EMontagePlayReturnType::MontageLength, StartOffset, false) > 0.0f)
@@ -187,9 +219,10 @@ FBotanicusRobotToolMotion UBotanicusRobotAnimInstance::UpdateRobotAction(
 	{
 		const float Age = FMath::Max(0.f, static_cast<float>(Now - ActiveRobotCue.StartedAt));
 		const float In = FMath::Clamp(Age / FMath::Max(.01f, Profile->BlendIn), 0.f, 1.f);
-		const float Out = FMath::Clamp((Profile->Duration - Age) / FMath::Max(.01f, Profile->BlendOut), 0.f, 1.f);
+		const float Duration = ActiveRobotCue.Action == EAction::PressComputer ? ComputerDuration : Profile->Duration;
+		const float Out = FMath::Clamp((Duration - Age) / FMath::Max(.01f, Profile->BlendOut), 0.f, 1.f);
 		RobotActionAlpha = Profile->MotionCurve
-			? FMath::Clamp(Profile->MotionCurve->GetFloatValue(Age / FMath::Max(.01f, Profile->Duration)), 0.f, 1.f)
+			? FMath::Clamp(Profile->MotionCurve->GetFloatValue(Age / FMath::Max(.01f, Duration)), 0.f, 1.f)
 			: FMath::SmoothStep(0.f, 1.f, FMath::Min(In, Out));
 	}
 	else
@@ -219,9 +252,11 @@ FBotanicusRobotToolMotion UBotanicusRobotAnimInstance::UpdateRobotAction(
 	FRotator Tilt = Profile->ObjectTilt + FRotator(FMath::Clamp(Aim.Pitch - BasePitch, -40.0, 40.0),
 		FMath::Clamp(Aim.Yaw, -32.0, 32.0), 0.0) * Profile->ToolAimInfluence;
 	FVector Offset = Profile->LocalHandOffset + LocalAim * Profile->ReachTowardTarget;
+	Offset += Basis.UnrotateVector(ActiveRobotCue.TracePosition) * Profile->TraceTravel;
 	const float Motion = FMath::Sin(static_cast<float>(Now - ActiveRobotCue.StartedAt) * 16.f) * Profile->SecondaryMotion;
 	Offset.Z += Motion;
-	return {Offset * RobotActionAlpha, Tilt * RobotActionAlpha};
+	return {Offset * RobotActionAlpha, Tilt * RobotActionAlpha,
+		RobotAction == EAction::Water ? RobotActionAlpha : 0.f};
 }
 
 void UBotanicusRobotAnimInstance::ApplyRobotActionHands(const ABotanicusCharacter& Owner, FBotanicusHeldItemPose& Pose) const
@@ -229,6 +264,26 @@ void UBotanicusRobotAnimInstance::ApplyRobotActionHands(const ABotanicusCharacte
 	const auto* Profile = ActionProfiles.Find(RobotAction);
 	if (!Profile || !bApplyRobotActionHands || RobotActionAlpha <= 0.f)
 		return;
+
+	if (RobotAction == EAction::PressComputer)
+	{
+		const auto* Mesh = GetSkelMeshComponent();
+		const FVector Shoulder = Mesh->GetSocketLocation(TEXT("r-arm"));
+		const FVector Elbow = Mesh->GetSocketLocation(TEXT("r-forearm"));
+		const FTransform Hand = Mesh->GetSocketTransform(TEXT("r-hand"));
+		const FVector Travel = ActiveRobotCue.Target - Shoulder;
+		const double Reach = (FVector::Distance(Shoulder, Elbow) + FVector::Distance(Elbow, Hand.GetLocation())) * .91;
+		const double TowardScreen = FMath::Clamp(FVector::DotProduct(Travel.GetSafeNormal(), Owner.GetActorForwardVector()), 0.0, 1.0);
+		const float ClipTime = InteractionMontage.IsValid() ? Montage_GetPosition(InteractionMontage.Get()) : 0.f;
+		// The hand extends from .65s, reaches the button at 1.15s and retracts after 1.8s in the source clip.
+		const float Contact = FMath::SmoothStep(0.f, 1.f, FMath::Clamp((ClipTime - .65f) / .50f, 0.f, 1.f)) *
+			FMath::SmoothStep(0.f, 1.f, FMath::Clamp((2.34f - ClipTime) / .54f, 0.f, 1.f));
+		Pose.Right = FTransform(Hand.GetRotation(), Shoulder + Travel.GetClampedToMaxSize(Reach));
+		Pose.RightInfluence = RobotActionAlpha * Contact * Profile->IKInfluence * TowardScreen;
+		Pose.RightLayerInfluence = RobotActionAlpha;
+		Pose.RightElbowOffset = Profile->ElbowOffset;
+		return;
+	}
 
 	const bool bCoin = IsCoinAction(RobotAction);
 	if ((RobotAction == EAction::Plant && !Pose.IsSet()) || bCoin)
@@ -257,14 +312,14 @@ void UBotanicusRobotAnimInstance::ApplyRobotActionHands(const ABotanicusCharacte
 	if (Pose.Left.IsSet())
 	{
 		Pose.Left->SetRotation(Pose.Left->GetRotation() * Wrist);
-		Pose.LeftInfluence = Influence;
-		Pose.LeftElbowOffset = Profile->ElbowOffset * RobotActionAlpha;
+		Pose.LeftInfluence *= Influence;
+		Pose.LeftElbowOffset += Profile->ElbowOffset * RobotActionAlpha;
 	}
 	if (Pose.Right.IsSet())
 	{
 		Pose.Right->SetRotation(Pose.Right->GetRotation() * Wrist);
-		Pose.RightInfluence = Influence;
-		Pose.RightElbowOffset = Profile->ElbowOffset * RobotActionAlpha;
+		Pose.RightInfluence *= Influence;
+		Pose.RightElbowOffset += Profile->ElbowOffset * RobotActionAlpha;
 	}
 }
 

@@ -20,7 +20,8 @@ enum class EBotanicusRobotAction : uint8
 	ScanConfirm,
 	ReadBook,
 	CollectCoins,
-	ReceiveCoins
+	ReceiveCoins,
+	PressComputer
 };
 
 USTRUCT(BlueprintType)
@@ -75,6 +76,10 @@ struct FBotanicusRobotActionProfile
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Tool", meta=(ClampMin="0", Units="cm"))
 	float SecondaryMotion = 0.f;
+
+	/** Hand travel from the tape midpoint to an end, driven by accepted cutter contacts. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Contact", meta=(ClampMin="0", Units="cm"))
+	float TraceTravel = 0.f;
 };
 
 struct FBotanicusRobotActionCue
@@ -86,11 +91,13 @@ struct FBotanicusRobotActionCue
 	FName ItemKey;
 	bool bHasTarget = false;
 	bool bContinuous = false;
+	FVector TracePosition = FVector::ZeroVector;
 };
 
 struct FBotanicusRobotToolMotion
 {
 	FVector Offset = FVector::ZeroVector;
 	FRotator Rotation = FRotator::ZeroRotator;
+	float WateringWeight = 0.f;
 };
 

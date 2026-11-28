@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Presentation/BotanicusEmoteCatalog.h"
 #include "GameFramework/Character.h"
 #include "Logging/LogMacros.h"
 #include "Presentation/BotanicusHeldItemProfile.h"
@@ -11,8 +12,11 @@
 #include "BotanicusCharacter.generated.h"
 
 class UInputComponent;
+class UAudioComponent;
 class USkeletalMeshComponent;
 class UCameraComponent;
+class USpringArmComponent;
+enum class EVisibilityBasedAnimTickOption : uint8;
 class USpotLightComponent;
 class ABotanicusAmbienceDirector;
 class UInputAction;
@@ -21,6 +25,7 @@ class UBotanicusQuickBarComponent;
 class UBotanicusMultiToolComponent;
 class ABotanicusWateringCanActor;
 class ABotanicusDeliveryParcelActor;
+class ABotanicusComputerActor;
 class ABotanicusPlaceableItemActor;
 class UBotanicusHeldItemComponent;
 struct FInputActionValue;
@@ -55,6 +60,63 @@ class ABotanicusCharacter : public ACharacter
 	/** First person camera */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta = (AllowPrivateAccess = "true"))
 	UCameraComponent* FirstPersonCameraComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Botanicus|Emotes|Camera", meta=(AllowPrivateAccess="true"))
+	TObjectPtr<USceneComponent> EmoteCameraPivot;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Botanicus|Emotes|Camera", meta=(AllowPrivateAccess="true"))
+	TObjectPtr<USpringArmComponent> EmoteSpringArm;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Botanicus|Emotes|Camera", meta=(AllowPrivateAccess="true"))
+	TObjectPtr<UCameraComponent> EmoteCamera;
+
+	UPROPERTY(EditAnywhere, Category="Botanicus|Emotes|Camera", meta=(ClampMin="80", Units="cm"))
+	float EmoteCameraDistance = 300.f;
+
+	/** Height of the target measured from the centre of the standing capsule. */
+	UPROPERTY(EditAnywhere, Category="Botanicus|Emotes|Camera", meta=(Units="cm"))
+	float EmoteCameraHeightOffset = -16.f;
+
+	UPROPERTY(EditAnywhere, Category="Botanicus|Emotes|Camera", meta=(Units="cm"))
+	float EmoteCameraHorizontalOffset = 0.f;
+
+	UPROPERTY(EditAnywhere, Category="Botanicus|Emotes|Camera")
+	FRotator EmoteCameraRotationOffset = FRotator::ZeroRotator;
+
+	UPROPERTY(EditAnywhere, Category="Botanicus|Emotes|Camera", meta=(ClampMin="40", ClampMax="110", Units="deg"))
+	float EmoteCameraFOV = 70.f;
+
+	UPROPERTY(EditAnywhere, Category="Botanicus|Emotes|Camera", meta=(ClampMin="0", Units="s"))
+	float EmoteCameraBlendInDuration = .35f;
+
+	UPROPERTY(EditAnywhere, Category="Botanicus|Emotes|Camera", meta=(ClampMin="0", Units="s"))
+	float EmoteCameraBlendOutDuration = .20f;
+
+	UPROPERTY(EditAnywhere, Category="Botanicus|Emotes|Camera", meta=(DisplayName="Emote Camera Collision Enabled"))
+	bool bEmoteCameraCollisionEnabled = true;
+
+	struct FEmoteCameraVisibility
+	{
+		bool bLegacyOwnerNoSee;
+		bool bRobotOwnerNoSee;
+		bool bRobotVisible;
+		bool bRobotHiddenInGame;
+		bool bArmsVisible;
+		EVisibilityBasedAnimTickOption AnimTickOption;
+	};
+	TOptional<FEmoteCameraVisibility> SavedEmoteCameraVisibility;
+	bool bEmoteCameraShowsRobot = false;
+	float EmoteCameraBlend = 0.f;
+	double EmoteCameraHeading = 0.;
+	double EmoteCameraYawDelta = 0.;
+	double EmoteCameraObstacleAngle = 0.;
+	FVector EmoteCameraOffset = FVector::ZeroVector;
+	FRotator EmoteCameraOrbit = FRotator::ZeroRotator;
+
+	FVector ResolveEmoteCameraObstacles(const FVector& Focus, const FVector& DesiredOffset);
+	FVector SweepEmoteCamera(const FVector& Focus, const FVector& Destination) const;
+	void SetEmoteCameraBodyVisible(bool bShowRobot);
+	void ResetEmoteCamera();
 
 	UPROPERTY()
 	TObjectPtr<USceneComponent> HeadFlashlightAim;
@@ -127,7 +189,14 @@ protected:
 	class UInputAction* MouseLookAction;
 	
 public:
-	ABotanicusCharacter();
+	explicit ABotanicusCharacter(const FObjectInitializer& ObjectInitializer);
+	virtual void CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult) override;
+	virtual void EndViewTarget(APlayerController* PC) override;
+	virtual void Jump() override;
+	bool AddEmoteCameraOrbit(float Yaw, float Pitch);
+	bool IsEmoteCameraInUse() const { return IsRobotEmotePlaying() || SavedEmoteCameraVisibility.IsSet(); }
+	virtual void FaceRotation(FRotator NewControlRotation, float DeltaTime = 0.f) override;
+	virtual void AddMovementInput(FVector WorldDirection, float ScaleValue = 1.f, bool bForce = false) override;
 	void ToggleHeadFlashlight();
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -136,6 +205,7 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 	virtual void NotifyControllerChanged() override;
+
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void PawnClientRestart() override;
 	virtual bool CanJumpInternal_Implementation() const override;
@@ -188,13 +258,27 @@ public:
 	void SetObservedQuickBarItem(FName ItemKey);
 	ABotanicusPlaceableItemActor* GetObservedQuickBarItem() const;
 	UBotanicusHeldItemComponent* GetRobotHeldGrip() const;
-	FBotanicusHeldItemPose UpdateHeldItemPose(float DeltaSeconds, const FBotanicusRobotToolMotion& Motion = {});
+
+	UBotanicusEmoteCatalog* GetRobotEmoteCatalog() const { return EmoteCatalog; }
+	const USkeleton* GetRobotEmoteSkeleton() const;
+	const FBotanicusEmoteState& GetRobotEmoteState() const { return EmoteState; }
+	bool IsRobotEmotePlaying() const;
+	double GetRobotEmoteElapsedTime() const;
+	bool ShouldHideEmoteHeldItems() const { return IsRobotEmotePlaying() || bEmoteCameraShowsRobot; }
+	void StopRobotEmote();
+	void InterruptLocalRobotEmote();
+	void RequestRobotEmote(FName EmoteId);
+	FBotanicusHeldItemPose UpdateHeldItemPose(float DeltaSeconds, const FBotanicusRobotToolMotion& Motion = {}, bool bSuppressHeldItem = false);
+	ABotanicusComputerActor* GetOrderComputer() const { return OrderComputer; }
+	void SetOrderComputer(ABotanicusComputerActor* Computer);
+	bool IsUsingOrderComputer() const;
 	double GetRobotActionTime() const;
 	FName GetRobotActionItemKey() const;
 	void PlayRobotAction(EBotanicusRobotAction Action, const FVector& Target, FName ItemKey = NAME_None);
 	void ReceiveRobotAction(EBotanicusRobotAction Action, const FVector& Target, double StartedAt, FName ItemKey);
 	void SetRobotActionState(EBotanicusRobotAction Action, const UObject* Source,
-		bool bEnabled, const FVector& Target = FVector::ZeroVector, bool bHasTarget = false);
+		bool bEnabled, const FVector& Target = FVector::ZeroVector, bool bHasTarget = false,
+		const FVector& TracePosition = FVector::ZeroVector);
 	FBotanicusRobotActionCue GetRobotActionState(EBotanicusRobotAction Action) const;
 	const FBotanicusRobotActionCue& GetPendingRobotAction() const { return PendingRobotAction; }
 	ABotanicusDeliveryParcelActor* GetCarriedParcelForAnimation() const;
@@ -293,6 +377,50 @@ private:
 	UFUNCTION(NetMulticast, Unreliable)
 	void MulticastRobotAction(EBotanicusRobotAction Action, FVector_NetQuantize10 Target, double StartedAt, FName ItemKey);
 
+	UPROPERTY(Replicated)
+	TObjectPtr<ABotanicusComputerActor> OrderComputer;
+	void UpdateHeldItemVisibility(AActor* ItemToHide);
+	TWeakObjectPtr<AActor> HiddenHeldItem;
+	struct FHiddenHeldPrimitive
+	{
+		TWeakObjectPtr<UPrimitiveComponent> Component;
+		bool bMainPass;
+		bool bDepthPass;
+		bool bCustomDepth;
+		bool bCastShadow;
+	};
+	TArray<FHiddenHeldPrimitive> HiddenHeldPrimitives;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Emotes")
+	TObjectPtr<UBotanicusEmoteCatalog> EmoteCatalog;
+
+	UPROPERTY(ReplicatedUsing=OnRep_EmoteState)
+	FBotanicusEmoteState EmoteState;
+
+	TOptional<uint16> PredictedEmoteStop;
+	double LastEmoteRequest = -1.0;
+	void UpdateRobotEmote();
+	TOptional<double> EmoteEndControlYaw;
+	void BeginRobotEmote();
+	void ReleaseRobotEmoteControls();
+
+	UPROPERTY(VisibleAnywhere, Category="Botanicus|Emotes")
+	TObjectPtr<UAudioComponent> RobotEmoteAudio;
+
+	FTimerHandle RobotEmoteAudioTimer;
+	float RobotEmoteAudioFadeOut = .20f;
+	void ResetRobotEmoteAudio();
+	void PlayRobotEmoteAudio();
+	void StopRobotEmoteAudio();
+
+	UFUNCTION(Server, Reliable)
+	void ServerPlayRobotEmote(FName EmoteId, uint16 RequestedYaw);
+
+	UFUNCTION(Server, Reliable)
+	void ServerCancelRobotEmote(uint16 Revision);
+
+	UFUNCTION()
+	void OnRep_EmoteState(const FBotanicusEmoteState& PreviousState);
 	TMap<EBotanicusRobotAction, FBotanicusRobotActionCue> ActiveRobotActions;
 	FBotanicusRobotActionCue PendingRobotAction;
 	TArray<TWeakObjectPtr<UBotanicusHeldItemComponent>> HeldItemSources;

@@ -190,6 +190,9 @@ private:
 	void HandleCatalogScrollChanged(float CurrentOffset);
 
 	UFUNCTION()
+	void HandleCatalogSliderPressed();
+
+	UFUNCTION()
 	void HandleCatalogSliderChanged(float Value);
 
 	UFUNCTION()

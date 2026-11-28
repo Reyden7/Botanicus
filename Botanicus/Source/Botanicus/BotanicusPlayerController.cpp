@@ -1,6 +1,8 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "BotanicusPlayerController.h"
+#include "UObject/ConstructorHelpers.h"
+#include "UI/BotanicusRadialEmoteMenu.h"
 #include "Visuals/BotanicusSoilPourComponent.h"
 #include "Building/BotanicusPlacementSurfaceComponent.h"
 #include "Delivery/BotanicusBotanistBookActor.h"
@@ -457,6 +459,13 @@ namespace
 
 ABotanicusPlayerController::ABotanicusPlayerController()
 {
+	static ConstructorHelpers::FObjectFinder<UInputAction> EmoteAction(TEXT("/Game/Input/Actions/IA_EmoteMenu.IA_EmoteMenu"));
+	EmoteMenuInputAction = EmoteAction.Object;
+	static ConstructorHelpers::FObjectFinder<UInputMappingContext> EmoteMappings(TEXT("/Game/Input/IMC_Emotes.IMC_Emotes"));
+	EmoteMenuMappingContext = EmoteMappings.Object;
+	static ConstructorHelpers::FClassFinder<UBotanicusRadialEmoteMenu> EmoteWidget(
+		TEXT("/Game/Botanicus/UI/Emotes/WBP_RadialEmoteMenu"));
+	EmoteMenuWidgetClass = EmoteWidget.Class;
 	// set the player camera manager class
 	PlayerCameraManagerClass = ABotanicusCameraManager::StaticClass();
 	PrimaryActorTick.bCanEverTick = true;
@@ -715,6 +724,8 @@ void ABotanicusPlayerController::SetPawn(APawn* InPawn)
 	const bool bPawnChanged = InPawn != GetPawn();
 	if (bPawnChanged)
 	{
+		CloseRadialEmoteMenu();
+		bServerEmotePlacementActive = false;
 		ClearBotanistBookEquipment();
 		ClearLocalDeliveryParcelCarry();
 		ReleaseServerDeliveryParcelCarry();
@@ -726,6 +737,11 @@ void ABotanicusPlayerController::SetPawn(APawn* InPawn)
 
 void ABotanicusPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (RadialEmoteMenu)
+	{
+		RadialEmoteMenu->RemoveFromParent();
+		RadialEmoteMenu = nullptr;
+	}
 	ClearBotanistBookEquipment();
 	if (bFurnitureMoveModeActive || LocalHighlightedFurniture.Num() > 0)
 	{
@@ -901,6 +917,7 @@ void ABotanicusPlayerController::PlayerTick(float DeltaTime)
 	if (IsLocalPlayerController())
 	{
 		HideEbsDemoHud();
+		UpdateRadialEmoteContext();
 		LegacyWorldGuidanceRefreshAccumulator += DeltaTime;
 		if (LegacyWorldGuidanceRefreshAccumulator >= 0.2f)
 		{
@@ -995,6 +1012,7 @@ void ABotanicusPlayerController::SetupInputComponent()
 	{
 		if (auto* EnhancedInput = Cast<UEnhancedInputComponent>(InputComponent))
 		{
+			BindRobotEmoteInput(*EnhancedInput);
 			if (!ToggleFlashlightInputAction)
 				ToggleFlashlightInputAction = NewObject<UInputAction>(this, TEXT("IA_ToggleFlashlight"), RF_Transient);
 			EnhancedInput->BindAction(ToggleFlashlightInputAction, ETriggerEvent::Triggered, this,
@@ -1036,6 +1054,12 @@ void ABotanicusPlayerController::FlushPressedKeys()
 
 bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 {
+	if (HandleRobotEmoteInput(Params))
+		return true;
+	// Enhanced Input consumes G, including the old EBS construction binding.
+	if (Params.Key == EKeys::G)
+		return Super::InputKey(Params);
+
 	if (HandleParcelInspectionMouse(Params))
 		return true;
 
@@ -1257,8 +1281,7 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 	// Botanicus uses complete purchased buildings. EBS' modular survival
 	// construction, snapping, grid, debug and demo save/load shortcuts are
 	// deliberately unavailable to players.
-	if (Params.Key == EKeys::G ||
-		Params.Key == EKeys::PageUp ||
+	if (Params.Key == EKeys::PageUp ||
 		Params.Key == EKeys::PageDown ||
 		Params.Key == EKeys::NumPadOne ||
 		Params.Key == EKeys::NumPadThree)
@@ -1604,9 +1627,9 @@ bool ABotanicusPlayerController::InputKey(const FInputKeyEventArgs& Params)
 	return Super::InputKey(Params);
 }
 
-bool ABotanicusPlayerController::IsQuickBarInputBlocked() const
+bool ABotanicusPlayerController::IsQuickBarInputBlocked(bool bIncludeEmote) const
 {
-	return bQuickBarReorganizationMode ||
+	return (bIncludeEmote && AreRobotEmoteControlsLocked()) || bQuickBarReorganizationMode ||
 		IsValid(LocalQuickBarItemPreview) ||
 		IsValid(LocalMovedDeliveryParcel) ||
 		IsValid(ServerMovedDeliveryParcel) ||
@@ -3184,6 +3207,59 @@ void ABotanicusPlayerController::ToggleDevelopmentPanel()
 	}
 }
 
+void ABotanicusPlayerController::OpenOrderCatalogFromComputer(ABotanicusComputerActor& Computer)
+{
+	if (auto* PlayerCharacter = Cast<ABotanicusCharacter>(GetPawn()); HasAuthority() && PlayerCharacter)
+	{
+		PlayerCharacter->SetOrderComputer(&Computer);
+		LastOrderCatalogPressAt = PlayerCharacter->GetRobotActionTime();
+		PlayerCharacter->PlayRobotAction(EBotanicusRobotAction::PressComputer, Computer.GetScreenInteractionLocation());
+		ClientOpenOrderCatalogFromComputer(&Computer);
+	}
+}
+
+void ABotanicusPlayerController::OnUnPossess()
+{
+	if (auto* PlayerCharacter = Cast<ABotanicusCharacter>(GetPawn()))
+	{
+		PlayerCharacter->StopRobotEmote();
+		PlayerCharacter->SetOrderComputer(nullptr);
+	}
+	Super::OnUnPossess();
+}
+
+void ABotanicusPlayerController::NotifyOrderCatalogButtonPressed()
+{
+	if (bOrderCatalogOpenedFromComputer && ActiveComputerView.IsValid() && OrderCatalogWidget &&
+		OrderCatalogWidget->GetVisibility() == ESlateVisibility::Visible)
+	{
+		ServerOrderCatalogInput(ActiveComputerView.Get(), false);
+	}
+}
+
+void ABotanicusPlayerController::ServerOrderCatalogInput_Implementation(ABotanicusComputerActor* Computer, bool bClose)
+{
+	auto* PlayerCharacter = Cast<ABotanicusCharacter>(GetPawn());
+	if (!PlayerCharacter || PlayerCharacter->GetOrderComputer() != Computer)
+		return;
+	if (bClose)
+	{
+		PlayerCharacter->SetOrderComputer(nullptr);
+		return;
+	}
+	if (!IsValid(Computer) || !Computer->CanInteract_Implementation(PlayerCharacter) ||
+		FVector::DistSquared(PlayerCharacter->GetActorLocation(), Computer->GetActorLocation()) >
+			FMath::Square(MaximumWorldInteractionDistance))
+		return;
+
+	const double Now = PlayerCharacter->GetRobotActionTime();
+	if (Now - LastOrderCatalogPressAt >= .035)
+	{
+		LastOrderCatalogPressAt = Now;
+		PlayerCharacter->PlayRobotAction(EBotanicusRobotAction::PressComputer, Computer->GetScreenInteractionLocation());
+	}
+}
+
 void ABotanicusPlayerController::
 ClientOpenOrderCatalogFromComputer_Implementation(
 	ABotanicusComputerActor* Computer)
@@ -3195,11 +3271,14 @@ ClientOpenOrderCatalogFromComputer_Implementation(
 	InitializeOrderCatalogWidget();
 	if (!OrderCatalogWidget)
 	{
+		ServerOrderCatalogInput(Computer, true);
 		return;
 	}
 
 	bOrderCatalogOpenedFromComputer = true;
 	ActiveComputerView = Computer;
+	if (IsValid(LocalEquippedQuickBarItem))
+		LocalEquippedQuickBarItem->SetActorHiddenInGame(true);
 	OrderCatalogWidget->SetVisibility(ESlateVisibility::Collapsed);
 	bAzertyForwardPressed = false;
 	bAzertyBackwardPressed = false;
@@ -3255,10 +3334,10 @@ void ABotanicusPlayerController::SetBotanistNotebookVisible(bool bOpening)
 		{
 			DevelopmentPanelWidget->SetVisibility(ESlateVisibility::Collapsed);
 		}
-		if (OrderCatalogWidget)
-		{
+		if (bOrderCatalogOpenedFromComputer)
+			CloseOrderCatalogFromComputer(false);
+		else if (OrderCatalogWidget)
 			OrderCatalogWidget->SetVisibility(ESlateVisibility::Collapsed);
-		}
 		BotanistNotebookWidget->RefreshNotebook();
 		bShowMouseCursor = true;
 		FInputModeUIOnly InputMode;
@@ -3295,8 +3374,9 @@ void ABotanicusPlayerController::FinishOpenOrderCatalogFromComputer()
 	OrderCatalogWidget->SetKeyboardFocus();
 }
 
-void ABotanicusPlayerController::CloseOrderCatalogFromComputer()
+void ABotanicusPlayerController::CloseOrderCatalogFromComputer(bool bBlendCamera)
 {
+	ServerOrderCatalogInput(ActiveComputerView.Get(), true);
 	GetWorldTimerManager().ClearTimer(ComputerViewTransitionTimer);
 	if (OrderCatalogWidget)
 	{
@@ -3307,7 +3387,7 @@ void ABotanicusPlayerController::CloseOrderCatalogFromComputer()
 	SetInputMode(FInputModeGameOnly());
 
 	APawn* ControlledPawn = GetPawn();
-	if (ControlledPawn && ComputerCameraExitBlendTime > KINDA_SMALL_NUMBER)
+	if (bBlendCamera && ControlledPawn && ComputerCameraExitBlendTime > KINDA_SMALL_NUMBER)
 	{
 		SetViewTargetWithBlend(
 			ControlledPawn,
@@ -3322,6 +3402,8 @@ void ABotanicusPlayerController::CloseOrderCatalogFromComputer()
 	}
 	else
 	{
+		if (ControlledPawn)
+			SetViewTarget(ControlledPawn);
 		FinishCloseOrderCatalogFromComputer();
 	}
 }
@@ -3329,6 +3411,8 @@ void ABotanicusPlayerController::CloseOrderCatalogFromComputer()
 void ABotanicusPlayerController::FinishCloseOrderCatalogFromComputer()
 {
 	ActiveComputerView.Reset();
+	if (IsValid(LocalEquippedQuickBarItem))
+		LocalEquippedQuickBarItem->SetActorHiddenInGame(false);
 	SetIgnoreMoveInput(false);
 	SetIgnoreLookInput(false);
 	bShowMouseCursor = false;
@@ -3350,10 +3434,13 @@ void ABotanicusPlayerController::
 		return;
 	}
 
-	if (OrderCatalogWidget)
+	if (bOrderCatalogOpenedFromComputer)
 	{
-		OrderCatalogWidget->SetVisibility(
-			ESlateVisibility::Collapsed);
+		CloseOrderCatalogFromComputer(false);
+	}
+	else if (OrderCatalogWidget)
+	{
+		OrderCatalogWidget->SetVisibility(ESlateVisibility::Collapsed);
 	}
 	if (DevelopmentPanelWidget)
 	{
@@ -5001,8 +5088,12 @@ void ABotanicusPlayerController::DestroyEquippedQuickBarItem()
 
 void ABotanicusPlayerController::UpdateEquippedQuickBarItem()
 {
-	if (!IsLocalPlayerController())
+	if (!IsLocalPlayerController() || ActiveComputerView.IsValid())
+		return;
+	if (const auto* PlayerCharacter = Cast<ABotanicusCharacter>(GetPawn());
+		PlayerCharacter && PlayerCharacter->ShouldHideEmoteHeldItems())
 	{
+		DestroyEquippedQuickBarItem();
 		return;
 	}
 
@@ -5341,6 +5432,8 @@ void ABotanicusPlayerController::UpdateEquippedQuickBarItem()
 #if WITH_EDITOR
 		UBotanicusEquipmentValidation::Record(GetWorld(),TEXT("LocalCreated"),LocalEquippedQuickBarItem);
 #endif
+		if (auto* Tool = Cast<ABotanicusMultiToolActor>(LocalEquippedQuickBarItem))
+			Tool->EnableHeldVisualTransforms();
 		LocalEquippedRenderedMesh = LocalEquippedQuickBarItem->Mesh->GetStaticMesh();
 	}
 
@@ -5381,7 +5474,7 @@ void ABotanicusPlayerController::UpdateEquippedQuickBarItem()
 			ViewUp * HeldUpOffset,
 		FRotator(
 			0.0f,
-			ViewRotation.Yaw + 180.0f,
+			ViewRotation.Yaw + (MultiTool ? 0.f : 180.f),
 			HeldRoll),
 		false,
 		nullptr,
@@ -8441,7 +8534,7 @@ bool ABotanicusPlayerController::IsLookingAtWorldItem(
 	const AActor* Item,
 	float MaximumDistance) const
 {
-	if (!IsValid(Item) || !GetWorld())
+	if (AreRobotEmoteControlsLocked() || !IsValid(Item) || !GetWorld())
 	{
 		return false;
 	}
@@ -9676,6 +9769,9 @@ void ABotanicusPlayerController::
 		int32 ShelfSlotIndex,
 		int32 Quantity)
 {
+	if (AreRobotEmoteControlsLocked())
+		return;
+
 	if (ItemKey == ABotanicusComputerActor::LegacyItemKey())
 	{
 		return;
@@ -9831,6 +9927,9 @@ void ABotanicusPlayerController::
 		int32 Quantity,
 		bool bFloorOnlyPlacement)
 {
+	if (AreRobotEmoteControlsLocked())
+		return;
+
 	if (ItemKey == ABotanicusComputerActor::LegacyItemKey())
 	{
 		return;
@@ -10054,6 +10153,9 @@ void ABotanicusPlayerController::
 		FVector_NetQuantizeNormal ThrowDirection,
 		float HoldDuration)
 {
+	if (AreRobotEmoteControlsLocked())
+		return;
+
 	if (ItemKey == ABotanicusComputerActor::LegacyItemKey() ||
 		ItemKey == ABotanicusBotanistBookActor::BookKey())
 	{
@@ -10682,6 +10784,9 @@ void ABotanicusPlayerController::
 {
     bool bPickupAccepted=false;
     ON_SCOPE_EXIT {if(!bPickupAccepted)ClientCancelPickupPresentation(TEXT("WateringCan"));};
+	if (AreRobotEmoteControlsLocked())
+		return;
+
 	ABotanicusCharacter* BotanicusCharacter =
 		Cast<ABotanicusCharacter>(GetPawn());
 	if (!BotanicusCharacter || !IsValid(WateringCan))
@@ -10721,6 +10826,9 @@ void ABotanicusPlayerController::ServerEndWateringCanRefill_Implementation(ABota
 void ABotanicusPlayerController::
 	ServerPulseWateringCanSpray_Implementation()
 {
+	if (AreRobotEmoteControlsLocked())
+		return;
+
 	ABotanicusCharacter* BotanicusCharacter =
 		Cast<ABotanicusCharacter>(GetPawn());
 	UBotanicusQuickBarComponent* QuickBar = BotanicusCharacter

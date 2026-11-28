@@ -109,7 +109,7 @@ void ABotanicusPlayerController::ServerUseBotanistBook_Implementation(
 	ABotanicusBotanistBookActor* WorldBook, bool bUseHeldBook)
 {
 	APawn* ControlledPawn = GetPawn();
-	if (ServerBookSession.IsValid() || !ControlledPawn ||
+	if (AreRobotEmoteControlsLocked() || ServerBookSession.IsValid() || !ControlledPawn ||
 		IsValid(ServerMovedDeliveryParcel) || IsValid(ServerMovedPlaceableItem) || HasCarriedTransplant())
 	{
 		return;

@@ -1,4 +1,7 @@
 #include "BotanicusRobotAnimInstance.h"
+#include "Delivery/BotanicusBotanistBookActor.h"
+#include "UObject/ConstructorHelpers.h"
+#include "Animation/AnimSequence.h"
 
 #include "BotanicusCharacter.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -38,6 +41,9 @@ UBotanicusRobotAnimInstance::UBotanicusRobotAnimInstance()
 {
 	RootMotionMode = ERootMotionMode::IgnoreRootMotion;
 	InitializeRobotActionProfiles();
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> ButtonPress(
+		TEXT("/Game/Characters/Robot/Animation/Mixamo/interaction/button_press.button_press"));
+	ButtonPressAnimation = ButtonPress.Object;
 }
 
 void UBotanicusRobotAnimInstance::NativeInitializeAnimation()
@@ -77,6 +83,8 @@ void UBotanicusRobotAnimInstance::NativeInitializeAnimation()
 	ActiveRobotCue = {};
 	RobotActionMount.Reset();
 	InteractionMontage.Reset();
+	EmoteMontage.Reset();
+	EmoteRevision.Reset();
 	AirborneDuration = 0.0f;
 	TurnCooldownRemaining = 0.0f;
 	JumpTime = JumpLiftTime;
@@ -122,7 +130,9 @@ void UBotanicusRobotAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	const ABotanicusDeliveryParcelActor* Parcel = Owner->GetCarriedParcelForAnimation();
 	const float EffectiveDilation = Owner->GetActorTimeDilation();
 	const float CarryDeltaSeconds = DeltaSeconds / FMath::Max(EffectiveDilation, UE_SMALL_NUMBER);
-	const FBotanicusRobotToolMotion ToolMotion = UpdateRobotAction(*Owner, Owner->GetRobotHeldGrip(), Parcel != nullptr, CarryDeltaSeconds);
+	const bool bEmote = Owner->IsRobotEmotePlaying();
+	const FBotanicusRobotToolMotion ToolMotion = UpdateRobotAction(*Owner, Owner->GetRobotHeldGrip(), Parcel != nullptr || bEmote, CarryDeltaSeconds);
+	UpdateRobotEmoteMontage(*Owner);
 	if (auto* Tool = MultiTool.Get(); Tool && !Owner->IsLocallyControlled())
 	{
 		EBotanicusMultiToolMode VisualMode = EBotanicusMultiToolMode::Neutral;
@@ -132,7 +142,8 @@ void UBotanicusRobotAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 			VisualMode = EBotanicusMultiToolMode::ElectricWhip;
 		Tool->SetActionVisualMode(VisualMode);
 	}
-	FBotanicusHeldItemPose Held = Owner->UpdateHeldItemPose(DeltaSeconds, ToolMotion);
+	FBotanicusHeldItemPose Held = Owner->UpdateHeldItemPose(DeltaSeconds, ToolMotion,
+		bEmote || (bApplyRobotActionHands && RobotAction == EBotanicusRobotAction::PressComputer));
 	ApplyRobotActionHands(*Owner, Held);
 	bHasHeldItem = Held.IsSet();
 	UpdateBoxCarryState(Parcel, CarryDeltaSeconds);
@@ -327,9 +338,17 @@ void UBotanicusRobotAnimInstance::UpdateLookPose(const ABotanicusCharacter& Owne
 	FRotator Aim = Owner.GetBaseAimRotation().GetNormalized();
 	if (const FBotanicusRobotActionProfile* Profile = ActionProfiles.Find(RobotAction); Profile && ActiveRobotCue.bHasTarget)
 	{
-		const FVector TowardTarget = ActiveRobotCue.Target - Owner.GetPawnViewLocation();
+		const auto* Book = Cast<ABotanicusBotanistBookActor>(ActiveRobotCue.Source.Get());
+		const FVector Target = Book ? Book->GetReadingLookTarget() : ActiveRobotCue.Target;
+		const FVector TowardTarget = Target - Owner.GetPawnViewLocation();
 		if (!TowardTarget.IsNearlyZero())
-			Aim = FQuat::Slerp(Aim.Quaternion(), TowardTarget.ToOrientationQuat(), Profile->LookInfluence * RobotActionAlpha).Rotator();
+		{
+			FRotator GestureAim = TowardTarget.Rotation();
+			if (Book)
+				GestureAim.Pitch = -FMath::Min(Book->ReadingHeadPitch, FMath::Abs(GestureAim.Pitch));
+			const float Weight = Book ? Book->GetReadingPoseWeight(Book->ReadingBlendIn, Book->ReadingBlendOut) : RobotActionAlpha;
+			Aim = FQuat::Slerp(Aim.Quaternion(), GestureAim.Quaternion(), Profile->LookInfluence * Weight).Rotator();
+		}
 	}
 	const float Yaw = FMath::Clamp(FMath::FindDeltaAngleDegrees(BodyYaw, Aim.Yaw), -HeadYawLimit, HeadYawLimit);
 	const float Pitch = FMath::Clamp(Aim.Pitch, -HeadPitchDownLimit, HeadPitchUpLimit);

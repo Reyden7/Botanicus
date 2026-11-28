@@ -755,7 +755,13 @@ void ABotanicusDeliveryParcelActor::OnRep_CutContact()
 		Previous->SetRobotActionState(EBotanicusRobotAction::CutTape, this, false);
 	CutActionCharacter = Character;
 	if (Character)
-		Character->SetRobotActionState(EBotanicusRobotAction::CutTape, this, true, CutContact.Location, true);
+	{
+		// The accepted hit moves along the carton even when the body turns with the view.
+		const double TapeHalfLength = FMath::Max(1.0, ParcelHalfExtent.X * 0.92);
+		const double ContactX = GetActorTransform().InverseTransformPosition(CutContact.Location).X;
+		const FVector TracePosition = GetActorForwardVector() * FMath::Clamp(ContactX / TapeHalfLength, -1.0, 1.0);
+		Character->SetRobotActionState(EBotanicusRobotAction::CutTape, this, true, CutContact.Location, true, TracePosition);
+	}
 }
 
 double ABotanicusDeliveryParcelActor::GetCuttingAudioTime() const

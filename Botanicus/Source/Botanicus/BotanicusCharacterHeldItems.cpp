@@ -1,4 +1,5 @@
 #include "BotanicusCharacter.h"
+#include "Components/PrimitiveComponent.h"
 
 #include "Catalog/BotanicusItemCatalogSubsystem.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -8,6 +9,8 @@
 
 void ABotanicusCharacter::EndPlay(const EEndPlayReason::Type Reason)
 {
+	ResetRobotEmoteAudio();
+	UpdateHeldItemVisibility(nullptr);
 	if (ABotanicusPlaceableItemActor* Item = ObservedQuickBarItem.Get())
 		Item->Destroy();
 	ObservedQuickBarItem.Reset();
@@ -41,15 +44,54 @@ UBotanicusHeldItemComponent* ABotanicusCharacter::GetRobotHeldGrip() const
 	return Active;
 }
 
-FBotanicusHeldItemPose ABotanicusCharacter::UpdateHeldItemPose(float DeltaSeconds, const FBotanicusRobotToolMotion& Motion)
+FBotanicusHeldItemPose ABotanicusCharacter::UpdateHeldItemPose(float DeltaSeconds, const FBotanicusRobotToolMotion& Motion,
+	bool bSuppressHeldItem)
 {
 	UBotanicusHeldItemComponent* Active = GetRobotHeldGrip();
+	const bool bHideItem = IsUsingOrderComputer() || bSuppressHeldItem;
 	if (ABotanicusPlaceableItemActor* Item = ObservedQuickBarItem.Get())
-		Item->SetActorHiddenInGame(Item->GetHeldItemGrip() != Active);
-	if (!Active)
+		Item->SetActorHiddenInGame(bHideItem || Item->GetHeldItemGrip() != Active);
+	AActor* ItemToHide = bHideItem && Active && Active->GetSource() != EBotanicusHeldItemSource::QuickBar
+		? Active->GetOwner() : nullptr;
+	if (!IsLocallyControlled())
+		UpdateHeldItemVisibility(ItemToHide);
+	if (!Active || bHideItem)
 		return {};
 	Active->SetToolMotion(Motion);
 	return Active->UpdateMount(DeltaSeconds);
+}
+
+void ABotanicusCharacter::UpdateHeldItemVisibility(AActor* ItemToHide)
+{
+	if (HiddenHeldItem.Get() != ItemToHide || (!ItemToHide && !HiddenHeldPrimitives.IsEmpty()))
+	{
+		for (const FHiddenHeldPrimitive& Hidden : HiddenHeldPrimitives)
+		{
+			if (auto* Primitive = Hidden.Component.Get())
+			{
+				Primitive->SetRenderInMainPass(Hidden.bMainPass);
+				Primitive->SetRenderInDepthPass(Hidden.bDepthPass);
+				Primitive->SetRenderCustomDepth(Hidden.bCustomDepth);
+				Primitive->SetCastShadow(Hidden.bCastShadow);
+			}
+		}
+		HiddenHeldPrimitives.Reset();
+		HiddenHeldItem = ItemToHide;
+		if (ItemToHide)
+		{
+			TInlineComponentArray<UPrimitiveComponent*> Meshes(ItemToHide);
+			for (auto* Primitive : Meshes)
+			{
+				HiddenHeldPrimitives.Add({Primitive, !!Primitive->bRenderInMainPass, !!Primitive->bRenderInDepthPass,
+					!!Primitive->bRenderCustomDepth, !!Primitive->CastShadow});
+				// Disabling the colour pass alone still leaves a depth silhouette.
+				Primitive->SetRenderInMainPass(false);
+				Primitive->SetRenderInDepthPass(false);
+				Primitive->SetRenderCustomDepth(false);
+				Primitive->SetCastShadow(false);
+			}
+		}
+	}
 }
 
 ABotanicusPlaceableItemActor* ABotanicusCharacter::GetObservedQuickBarItem() const

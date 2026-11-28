@@ -1,7 +1,22 @@
 #include "BotanicusCharacter.h"
+#include "Preparation/BotanicusComputerActor.h"
 
 #include "GameFramework/GameStateBase.h"
 #include "QuickBar/BotanicusQuickBarComponent.h"
+
+void ABotanicusCharacter::SetOrderComputer(ABotanicusComputerActor* Computer)
+{
+	if (HasAuthority() && OrderComputer != Computer)
+	{
+		OrderComputer = Computer;
+		ForceNetUpdate();
+	}
+}
+
+bool ABotanicusCharacter::IsUsingOrderComputer() const
+{
+	return IsValid(OrderComputer);
+}
 
 double ABotanicusCharacter::GetRobotActionTime() const
 {
@@ -17,7 +32,7 @@ FName ABotanicusCharacter::GetRobotActionItemKey() const
 
 void ABotanicusCharacter::PlayRobotAction(EBotanicusRobotAction Action, const FVector& Target, FName ItemKey)
 {
-	if (HasAuthority())
+	if (HasAuthority() && !IsRobotEmotePlaying())
 		MulticastRobotAction(Action, Target, GetRobotActionTime(), ItemKey);
 }
 
@@ -33,15 +48,18 @@ void ABotanicusCharacter::ReceiveRobotAction(EBotanicusRobotAction Action, const
 }
 
 void ABotanicusCharacter::SetRobotActionState(EBotanicusRobotAction Action, const UObject* Source,
-	bool bEnabled, const FVector& Target, bool bHasTarget)
+	bool bEnabled, const FVector& Target, bool bHasTarget, const FVector& TracePosition)
 {
 	if (bEnabled)
 	{
+		if (IsRobotEmotePlaying())
+			return;
 		FBotanicusRobotActionCue& Cue = ActiveRobotActions.FindOrAdd(Action);
 		if (Cue.Source.Get() != Source)
 			Cue = {Action, Source, Target, GetRobotActionTime(), NAME_None, bHasTarget, true};
 		Cue.Target = Target;
 		Cue.bHasTarget = bHasTarget;
+		Cue.TracePosition = TracePosition;
 	}
 	else if (const FBotanicusRobotActionCue* Current = ActiveRobotActions.Find(Action);
 		Current && Current->Source.Get() == Source)

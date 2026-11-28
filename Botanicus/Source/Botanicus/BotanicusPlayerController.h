@@ -9,6 +9,8 @@
 #include "BotanicusPlayerController.generated.h"
 
 class UInputMappingContext;
+class UEnhancedInputComponent;
+class UBotanicusRadialEmoteMenu;
 class UUserWidget;
 class UBotanicusMultiplayerSubsystem;
 class UBotanicusQuickBarComponent;
@@ -221,6 +223,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Delivery")
 	void ToggleOrderCatalog();
 
+	void OpenOrderCatalogFromComputer(ABotanicusComputerActor& Computer);
+	void NotifyOrderCatalogButtonPressed();
+	virtual void AddYawInput(float Val) override;
+	virtual void AddPitchInput(float Val) override;
+	bool CanUseRobotEmotes(bool bReport);
+	void SelectRadialRobotEmote(FName EmoteId);
+	void CloseRadialEmoteMenu();
+
 	UFUNCTION(BlueprintCallable, Category="Botanicus|Development")
 	void ToggleDevelopmentPanel();
 
@@ -386,7 +396,7 @@ public:
 
 	/** Prevents hotbar shortcuts from colliding with active item UI. */
 	UFUNCTION(BlueprintPure, Category="Botanicus|Inventory")
-	bool IsQuickBarInputBlocked() const;
+	bool IsQuickBarInputBlocked(bool bIncludeEmote = true) const;
 
 	UFUNCTION(BlueprintPure, Category="Botanicus|Inventory")
 	bool IsMovingWorldItemOutsideInventory() const;
@@ -435,6 +445,7 @@ protected:
 
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void Destroyed() override;
+	virtual void OnUnPossess() override;
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
@@ -443,6 +454,30 @@ protected:
 
 	/** Input mapping context setup */
 	virtual void SetupInputComponent() override;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Emotes")
+	TObjectPtr<UInputAction> EmoteMenuInputAction;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Emotes")
+	TObjectPtr<UInputMappingContext> EmoteMenuMappingContext;
+
+	UPROPERTY(EditDefaultsOnly, Category="Botanicus|Emotes")
+	TSubclassOf<UBotanicusRadialEmoteMenu> EmoteMenuWidgetClass;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBotanicusRadialEmoteMenu> RadialEmoteMenu;
+
+	void BindRobotEmoteInput(UEnhancedInputComponent& Input);
+	bool HandleRobotEmoteInput(const FInputKeyEventArgs& Params);
+	bool AreRobotEmoteControlsLocked() const;
+	void ToggleRadialEmoteMenu();
+	void UpdateRadialEmoteContext();
+
+	UFUNCTION(Server, Reliable)
+	void ServerSetEmotePlacementActive(bool bActive);
+
+	bool bLastReportedEmotePlacement = false;
+	bool bServerEmotePlacementActive = false;
 
 	/** Consumes EBS' original V binding so the three-state camera cycle cannot run. */
 	virtual bool InputKey(const FInputKeyEventArgs& Params) override;
@@ -472,7 +507,7 @@ protected:
 	void SetHudCursorMode(bool bEnabled);
 	void InitializeOrderCatalogWidget();
 	void FinishOpenOrderCatalogFromComputer();
-	void CloseOrderCatalogFromComputer();
+	void CloseOrderCatalogFromComputer(bool bBlendCamera = true);
 	void FinishCloseOrderCatalogFromComputer();
 	void InitializeWorkbenchUpgradeWidget();
 	void InitializeDevelopmentPanelWidget();
@@ -806,6 +841,9 @@ protected:
 	UFUNCTION(Server, Reliable)
 	void ServerUseComputer(ABotanicusComputerActor* Computer);
 
+	UFUNCTION(Server, Reliable)
+	void ServerOrderCatalogInput(ABotanicusComputerActor* Computer, bool bClose);
+
 	/** Legacy implementations kept binary-local while old test entry points are retired. */
 	void ServerOrderTestDelivery_Implementation();
 	void ServerOrderTestLargeEquipment_Implementation();
@@ -933,6 +971,7 @@ protected:
 	TObjectPtr<UBotanicusOrderCatalogWidget> OrderCatalogWidget;
 
 	TWeakObjectPtr<ABotanicusComputerActor> ActiveComputerView;
+	double LastOrderCatalogPressAt = -1.0;
 	FTimerHandle ComputerViewTransitionTimer;
 
 	UPROPERTY(

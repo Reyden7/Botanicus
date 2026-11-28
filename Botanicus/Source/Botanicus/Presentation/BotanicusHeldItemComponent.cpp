@@ -1,4 +1,6 @@
 #include "Presentation/BotanicusHeldItemComponent.h"
+#include "Growing/BotanicusWateringCanActor.h"
+#include "Delivery/BotanicusBotanistBookActor.h"
 
 #include "BotanicusCharacter.h"
 #include "Components/PrimitiveComponent.h"
@@ -59,20 +61,12 @@ void UBotanicusHeldItemComponent::Unbind()
 	Carrier.Reset();
 	Mount.Reset();
 	ToolMotion = {};
-	LastLocalMount.Reset();
-	PreviousBookMount.Reset();
-	BookPoseBlendTime = 0.f;
 	PreviousVelocity.Reset();
 	SwayResponse = FVector::ZeroVector;
 }
 
 void UBotanicusHeldItemComponent::SetSettings(const FBotanicusHeldItemSettings& Settings)
 {
-	if (Source == EBotanicusHeldItemSource::Book && ActiveSettings.Profile != Settings.Profile)
-	{
-		PreviousBookMount = LastLocalMount;
-		BookPoseBlendTime = 0.f;
-	}
 	ActiveSettings = Settings;
 	if (HasMount())
 		UpdateMount(0.f);
@@ -90,11 +84,14 @@ FBotanicusHeldItemPose UBotanicusHeldItemComponent::UpdateMount(float DeltaSecon
 	const ABotanicusCharacter* Character = Carrier.Get();
 	USceneComponent* Presentation = Mount.Get();
 	const UPrimitiveComponent* VisualGeometry = Geometry.Get();
-	const EBotanicusHeldItemProfile Profile = ActiveSettings.Profile;
-	if (!Character || !Presentation || !VisualGeometry || Profile == EBotanicusHeldItemProfile::None)
+	if (!Character || !Presentation || !VisualGeometry || ActiveSettings.Profile == EBotanicusHeldItemProfile::None)
 		return Pose;
 
-	const bool bLeft = Profile != EBotanicusHeldItemProfile::RightHand;
+	const auto* Book = Cast<ABotanicusBotanistBookActor>(GetOwner());
+	const float Reading = Book ? Book->GetReadingPoseWeight(Book->ReadingBlendIn, Book->ReadingBlendOut) : 0.f;
+	const float SecondHand = Book ? Book->GetReadingPoseWeight(Book->SecondHandBlendTime, Book->SecondHandBlendTime) : 0.f;
+	const EBotanicusHeldItemProfile Profile = ActiveSettings.Profile;
+	const bool bLeft = SecondHand > 0.f || Profile != EBotanicusHeldItemProfile::RightHand;
 	const bool bRight = Profile != EBotanicusHeldItemProfile::LeftHand;
 	const bool bTwoHands = bLeft && bRight;
 	const FTransform& Body = Character->GetMesh()->GetComponentTransform();
@@ -110,15 +107,27 @@ FBotanicusHeldItemPose UBotanicusHeldItemComponent::UpdateMount(float DeltaSecon
 		SwayResponse = FMath::Lerp(SwayResponse, Desired, Alpha);
 		PreviousVelocity = Velocity;
 	}
-	const FQuat SwayRotation(FVector(-SwayResponse.Y, SwayResponse.X, 0.0).GetSafeNormal(),
-		FMath::DegreesToRadians(ActiveSettings.CarrySwayMaxAngle) * SwayResponse.Size());
+	const float SwayScale = 1.f - Reading;
+	const double BookStep = Book ? FMath::Sin(Character->GetRobotActionTime() * 11.0) *
+		FMath::Clamp(Velocity.Size2D() / 450.0, 0.0, 1.0) * SwayScale : 0.0;
+	const FQuat SwayRotation = FRotator(BookStep * 7.0, 0, 0).Quaternion() *
+		FQuat(FVector(-SwayResponse.Y, SwayResponse.X, 0.0).GetSafeNormal(),
+			FMath::DegreesToRadians(ActiveSettings.CarrySwayMaxAngle * SwayScale) * SwayResponse.Size());
 
 	const FTransform Current = Presentation->GetComponentTransform();
 	const FVector Scale = Current.GetScale3D();
 	const float AimPitch = FMath::Clamp(FRotator::NormalizeAxis(Character->GetBaseAimRotation().Pitch),
 		-ActiveSettings.AimPitchLimit, ActiveSettings.AimPitchLimit);
 	const FTransform GeometryRelative = VisualGeometry->GetComponentTransform().GetRelativeTransform(Current);
-	FQuat ItemRotation = ToolMotion.Rotation.Quaternion() * FRotator(AimPitch, 0.0, 0.0).Quaternion() * ActiveSettings.CarryRelativeRotation.Quaternion();
+	FQuat CarryRotation = ActiveSettings.CarryRelativeRotation.Quaternion();
+	FVector CarryLocation = ActiveSettings.CarryRelativeLocation;
+	if (Book)
+	{
+		const FRotator ReadRotation = Book->OpenGripSettings.CarryRelativeRotation + FRotator(0, 0, Book->ReadingTilt);
+		CarryRotation = FQuat::Slerp(CarryRotation, ReadRotation.Quaternion(), Reading);
+		CarryLocation = FMath::Lerp(CarryLocation, Book->OpenGripSettings.CarryRelativeLocation, Reading);
+	}
+	FQuat ItemRotation = ToolMotion.Rotation.Quaternion() * FRotator(AimPitch, 0.0, 0.0).Quaternion() * CarryRotation;
 	if (ActiveSettings.bAlignToMesh)
 		ItemRotation *= GeometryRelative.GetRotation().Inverse();
 	const FTransform ItemFrame(ItemRotation, FVector::ZeroVector, Scale);
@@ -146,10 +155,16 @@ FBotanicusHeldItemPose UBotanicusHeldItemComponent::UpdateMount(float DeltaSecon
 	};
 
 	const FTransform Left = GetContact(true, LeftGrip.Get());
-	const FTransform Right = GetContact(false, RightGrip.Get());
-	const FVector Middle = bTwoHands ? (Left.GetLocation() + Right.GetLocation()) * 0.5
-		: (bLeft ? Left.GetLocation() : Right.GetLocation());
-	FVector Offset = ActiveSettings.CarryRelativeLocation + ToolMotion.Offset - Middle;
+	FTransform Right = GetContact(false, RightGrip.Get());
+	if (Book)
+	{
+		const FTransform OpenRight = Right;
+		Right.Blend(GetContact(false, Book->ClosedRightHandGrip), OpenRight, Reading);
+	}
+
+	const FVector Middle = Book ? FMath::Lerp(Right.GetLocation(), (Right.GetLocation() + Left.GetLocation()) * .5, Reading)
+		: (bTwoHands ? (Left.GetLocation() + Right.GetLocation()) * .5 : (bLeft ? Left.GetLocation() : Right.GetLocation()));
+	FVector Offset = CarryLocation + ToolMotion.Offset - Middle;
 	// A tool held alongside the hip can overlap the torso's depth without intersecting it.
 	const bool bBesideTorso = !bTwoHands && (bRight
 		? Offset.Y + Bounds.Min.Y >= 16.0 : Offset.Y + Bounds.Max.Y <= -16.0);
@@ -161,24 +176,30 @@ FBotanicusHeldItemPose UBotanicusHeldItemComponent::UpdateMount(float DeltaSecon
 	}
 	else if (!bBesideTorso)
 		Offset.X = FMath::Max(Offset.X, 11.0 - Bounds.Min.X);
-	const FTransform Pivot(PivotRotation, PivotLocation);
-	FTransform LocalMount(SwayRotation * ItemRotation, Offset + SwayResponse * ActiveSettings.CarrySwayMaxOffset);
-	if (PreviousBookMount.IsSet())
+	if (const auto* Can = Cast<ABotanicusWateringCanActor>(GetOwner()))
 	{
-		// Blend only the change of book layout, in the same carrier frame as the current contacts.
-		BookPoseBlendTime += DeltaSeconds;
-		const float Alpha = FMath::Clamp(BookPoseBlendTime / 0.08f, 0.f, 1.f);
-		LocalMount.Blend(*PreviousBookMount, LocalMount, FMath::SmoothStep(0.f, 1.f, Alpha));
-		if (Alpha >= 1.f)
-			PreviousBookMount.Reset();
+		// Keep the original offset and lateral clearance at full watering weight.
+		FVector Transport = Can->TransportGripLocation - Middle;
+		Transport.X = FMath::Max(Transport.X, 11.0 - Bounds.Min.X);
+		Offset = FMath::Lerp(Transport, Offset, ToolMotion.WateringWeight);
+		Pose.RightElbowOffset = Can->TransportElbowOffset * (1.f - ToolMotion.WateringWeight);
 	}
-	LastLocalMount = LocalMount;
+	const FTransform Pivot(PivotRotation, PivotLocation);
+	const FTransform LocalMount(SwayRotation * ItemRotation,
+		Offset + SwayResponse * ActiveSettings.CarrySwayMaxOffset * SwayScale + FVector(BookStep * 3.0, 0, 0));
 	const FTransform WorldMount = LocalMount * Pivot;
 	Presentation->SetWorldLocationAndRotation(WorldMount.GetLocation(), WorldMount.GetRotation());
 	const FTransform Frame(WorldMount.GetRotation() * ItemRotation.Inverse(), WorldMount.GetLocation());
 
 	if (bLeft)
+	{
 		Pose.Left = Left * Frame;
+		if (Book)
+		{
+			Pose.LeftInfluence = SecondHand;
+			Pose.LeftLayerInfluence = SecondHand;
+		}
+	}
 	if (bRight)
 		Pose.Right = Right * Frame;
 	return Pose;

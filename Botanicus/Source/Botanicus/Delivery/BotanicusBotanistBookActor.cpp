@@ -26,21 +26,37 @@ ABotanicusBotanistBookActor::ABotanicusBotanistBookActor()
 	BookWorldVisualPivot = CreateDefaultSubobject<USceneComponent>(TEXT("BookWorldVisualPivot"));
 	BookWorldVisualPivot->SetupAttachment(SceneRoot);
 	SkeletalMeshVisual->SetupAttachment(BookWorldVisualPivot);
-	HeldItemGrip->GripSettings = {EBotanicusHeldItemProfile::RightHand, FVector(25, 19, -5), FRotator(0, 90, 45), true};
-	OpenGripSettings = {EBotanicusHeldItemProfile::TwoHands, FVector(29, 0, 10), FRotator(0, 90, 30), true};
+	HeldItemGrip->GripSettings = {EBotanicusHeldItemProfile::RightHand, FVector(24, 21, -4), FRotator(84, 90, 0), true};
+	HeldItemGrip->GripSettings.bAlignToMesh = true;
+	HeldItemGrip->GripSettings.CarrySwayMaxOffset = 3.5f;
+	HeldItemGrip->GripSettings.CarrySwayMaxAngle = 6.f;
+	OpenGripSettings = {EBotanicusHeldItemProfile::TwoHands, FVector(31, 0, 12), FRotator(0, 90, 0), true};
+
 	ClosedRightHandGrip = CreateDefaultSubobject<USceneComponent>(TEXT("ClosedRightHandGrip"));
-	ClosedRightHandGrip->SetupAttachment(SkeletalMeshVisual);
-	ClosedRightHandGrip->SetRelativeLocationAndRotation(FVector(2.0, 0.5, 0.0), FRotator(5, 50, -65));
+	ClosedRightHandGrip->SetupAttachment(SkeletalMeshVisual, TEXT("droite"));
 	LeftHandGrip->SetupAttachment(SkeletalMeshVisual, TEXT("gauche"));
 	RightHandGrip->SetupAttachment(SkeletalMeshVisual, TEXT("droite"));
-	// Contacts on the lower outside edge of each cover, expressed in its bone frame at the end of Open.
-	const FQuat OpenRotation = OpenGripSettings.CarryRelativeRotation.Quaternion();
-	const FQuat LeftBasis = OpenRotation * FRotator(-89.891825, 179.555543, 90.325295).Quaternion();
-	const FQuat RightBasis = OpenRotation * FRotator(-90, 90.119163, 0).Quaternion();
-	LeftHandGrip->SetRelativeLocationAndRotation(FVector(0.29, -1.54, -0.77),
-		(LeftBasis.Inverse() * FRotator(60.05, 46.32, -79.23).Quaternion()).Rotator());
-	RightHandGrip->SetRelativeLocationAndRotation(FVector(0.08, -1.54, 0.77),
-		(RightBasis.Inverse() * FRotator(-56.43, 148.97, -58.95).Quaternion()).Rotator());
+
+	// Last pose of Open and Close in Carnet_Test. The right cover keeps the same pose in both.
+	const FTransform RightCover(FQuat(.50052, -.49948, -.50052, -.49948),
+		FVector(.11450, 1.41132, .37752), FVector(4.65096));
+	const FTransform LeftCover(FQuat(-.50005, -.49996, .50099, -.49900),
+		FVector(-.10254, 1.41135, 1.33685), FVector(4.65096));
+	const FQuat ClosedRotation = HeldItemGrip->GripSettings.CarryRelativeRotation.Quaternion();
+	const FQuat OpenRotation = (OpenGripSettings.CarryRelativeRotation + FRotator(0, 0, ReadingTilt)).Quaternion();
+	const FQuat RightWrist = FRotator(-56.43, 148.97, -58.95).Quaternion();
+	const FQuat LeftWrist = FRotator(60.05, 46.32, -79.23).Quaternion();
+	auto SetCoverContact = [](USceneComponent& Grip, const FTransform& Cover, const FVector& Contact,
+		const FQuat& CarryRotation, const FQuat& Wrist)
+	{
+		Grip.SetRelativeLocationAndRotation(Cover.InverseTransformPosition(Contact),
+			((CarryRotation * Cover.GetRotation()).Inverse() * Wrist).Rotator());
+		Grip.bEditableWhenInherited = true;
+	};
+	// The left cover unfolds toward -X, the right cover stays on +X. Contacts sit under the edges.
+	SetCoverContact(*ClosedRightHandGrip, RightCover, FVector(8.6, 2.2, .58), ClosedRotation, RightWrist);
+	SetCoverContact(*RightHandGrip, RightCover, FVector(8.65, 3.8, .45), OpenRotation, RightWrist);
+	SetCoverContact(*LeftHandGrip, LeftCover, FVector(-8.65, 3.8, .75), OpenRotation, LeftWrist);
 	bUseBlueprintAppearance = true;
 	bUseSkeletalMeshAppearance = true;
 	Mesh->SetVisibility(false);
@@ -343,6 +359,10 @@ void ABotanicusBotanistBookActor::OnRep_HeldPresentation()
 		SetActorEnableCollision(false);
 		BookCollision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		BookWorldVisualPivot->SetRelativeTransform(FTransform::Identity);
+		// Older instances of BP_Item_BotanistBook inherit the visual on SceneRoot.
+		// The book and the animated cover grips must move together with the held pivot.
+		if (SkeletalMeshVisual->GetAttachParent() != BookWorldVisualPivot)
+			SkeletalMeshVisual->AttachToComponent(BookWorldVisualPivot, FAttachmentTransformRules::KeepRelativeTransform);
 	}
 	RefreshHeldGrip();
 	const auto* Pawn = Cast<APawn>(GetOwner());
@@ -353,10 +373,35 @@ void ABotanicusBotanistBookActor::OnRep_HeldPresentation()
 void ABotanicusBotanistBookActor::RefreshHeldGrip()
 {
 	auto* Character = bHeldPresentation && !bBlendingPickup ? Cast<ABotanicusCharacter>(GetOwner()) : nullptr;
-	const bool bOpenGrip = Presentation.Phase != EBotanistBookPhase::Closed;
-	HeldItemGrip->Bind(Character, *BookWorldVisualPivot, *SkeletalMeshVisual,
-		bOpenGrip ? LeftHandGrip.Get() : nullptr, bOpenGrip ? RightHandGrip.Get() : ClosedRightHandGrip.Get(),
-		EBotanicusHeldItemSource::Book, bOpenGrip ? OpenGripSettings : HeldItemGrip->GripSettings);
+	HeldItemGrip->Bind(Character, *BookWorldVisualPivot, *SkeletalMeshVisual, LeftHandGrip, RightHandGrip,
+		EBotanicusHeldItemSource::Book, HeldItemGrip->GripSettings);
+}
+
+float ABotanicusBotanistBookActor::GetReadingPoseWeight(float EnterSeconds, float ExitSeconds) const
+{
+	const float Age = FMath::Max(0.f, static_cast<float>(ServerTime() - Presentation.StartedAt));
+	switch (Presentation.Phase)
+	{
+	case EBotanistBookPhase::Opening:
+		return FMath::SmoothStep(0.f, 1.f, FMath::Clamp(Age / FMath::Max(.01f, EnterSeconds), 0.f, 1.f));
+	case EBotanistBookPhase::Opened:
+		return 1.f;
+	case EBotanistBookPhase::Closing:
+		if (BookCloseAnimation)
+		{
+			const float Duration = BookCloseAnimation->GetPlayLength() /
+				(FMath::Max(.01f, BookCloseAnimation->RateScale) * GetBookPlayRate(false));
+			return FMath::SmoothStep(0.f, 1.f, FMath::Clamp((Duration - Age) / FMath::Max(.01f, ExitSeconds), 0.f, 1.f));
+		}
+		[[fallthrough]];
+	default:
+		return 0.f;
+	}
+}
+
+FVector ABotanicusBotanistBookActor::GetReadingLookTarget() const
+{
+	return (LeftHandGrip->GetComponentLocation() + RightHandGrip->GetComponentLocation()) * .5;
 }
 
 void ABotanicusBotanistBookActor::Tick(float DeltaTime)
@@ -387,11 +432,16 @@ void ABotanicusBotanistBookActor::Tick(float DeltaTime)
 	FTransform Target = VisualOffset * GetActorTransform();
 	if (bLocal)
 	{
-		SkeletalMeshVisual->SetVisibility(!PC->IsPlacingBotanistBook());
+		const auto* Character = Cast<ABotanicusCharacter>(Pawn);
+		SkeletalMeshVisual->SetVisibility(!PC->IsPlacingBotanistBook() && (!Character ||
+			(!Character->IsUsingOrderComputer() && !Character->IsRobotEmotePlaying())));
 		FVector Eye;
 		FRotator View;
 		PC->GetPlayerViewPoint(Eye, View);
-		const FTransform Held(HeldBookRelativeRotation, HeldBookRelativeLocation, HeldBookRelativeScale);
+		const FTransform Transport(ClosedFirstPersonRotation, ClosedFirstPersonLocation, HeldBookRelativeScale);
+		const FTransform Reading(HeldBookRelativeRotation, HeldBookRelativeLocation, HeldBookRelativeScale);
+		FTransform Held;
+		Held.Blend(Transport, Reading, GetReadingPoseWeight(ReadingBlendIn, ReadingBlendOut));
 		Target = VisualOffset * Held * FTransform(View, Eye);
 	}
 	if (bBlendingPickup)
